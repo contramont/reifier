@@ -3,7 +3,6 @@ from reifier.neurons.operations import xors
 from reifier.utils.format import Bits
 from reifier.sparse.compile import compiled_from_io
 
-
 def test_xors():
     a = const("101")
     b = const("110")

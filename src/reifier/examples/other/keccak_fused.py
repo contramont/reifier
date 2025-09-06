@@ -2,8 +2,8 @@ from typing import Literal
 
 from reifier.neurons.core import Bit, gate
 from reifier.neurons.operations import const, xor, inhib
-from keccak import Lanes, state_to_lanes, lanes_to_state, get_empty_lanes, copy_lanes
-from keccak import theta, rho_pi, chi, iota, Keccak
+from reifier.examples.keccak import Lanes, state_to_lanes, lanes_to_state, get_empty_lanes, copy_lanes
+from reifier.examples.keccak import theta, rho_pi, chi, iota, Keccak
 
 
 def copy_bit(x: Bit) -> Bit:
