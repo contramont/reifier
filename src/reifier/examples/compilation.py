@@ -7,7 +7,7 @@ from reifier.neurons.operations import xor
 from reifier.neurons.core import const
 
 
-if __name__ == "__main__":
+def compile_xor() -> None:
     """Test compiling an XOR circuit into an MLP with SwiGLU layers"""
 
     inputs = const('01101')  # input bits
@@ -32,3 +32,7 @@ if __name__ == "__main__":
         print("Test passed")
     else:
         print("Test failed")
+
+
+if __name__ == "__main__":
+    compile_xor()

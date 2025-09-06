@@ -32,11 +32,13 @@ class Bits:
 
     @classmethod
     def _bitlist_from_value(
-        cls, value: int | bytes | str | list[Bit] | list[bool | int]
+        cls, value: int | bytes | str | list[Bit] | Bit | list[bool | int]
     ) -> list[Bit]:
         """Infer value type and convert it to list[Bit]."""
         if isinstance(value, cls):
             return value.bitlist
+        if isinstance(value, Bit):
+            return [value]
         match value:
             case int():
                 n_bits = max(value.bit_length(), 1)

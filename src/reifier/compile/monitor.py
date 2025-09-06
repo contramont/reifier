@@ -93,13 +93,16 @@ class Tracer[T]:
     def __post_init__(self) -> None:
         """Avoids having to handle generator and context manager interactions with the stack"""
         self.collapse |= {"<genexpr>", "__enter__", "__exit__"}
+        self.package_name = self.__class__.__module__.split('.')[0]
 
     def ignore_event(self, code: CodeType) -> bool:
         """Determine if the event should be ignored"""
         if threading.get_ident() != self._tracing_thread:
             return True
-        if "/site-packages/" in code.co_filename or "/lib/python" in code.co_filename:
-            return True
+        path = code.co_filename
+        if "/site-packages/" in path or "/lib/python" in path:
+            if f"/{self.package_name}/" not in path:  # still trace our package
+                return True
         if code.co_name in self.collapse:
             return True
         assert self.stack, f"Error: stack is empty before processing {code.co_qualname}"
