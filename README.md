@@ -14,4 +14,4 @@ uv run example.py
 
 Circuit visualization:
 
-<img src="https://raw.githubusercontent.com/contramont/reifier/refs/heads/main/circuits/examples/example_circuit.png" width="400">
+<img src="https://raw.githubusercontent.com/contramont/reifier/refs/heads/main/src/reifier/examples/example_circuit.png" width="400">
