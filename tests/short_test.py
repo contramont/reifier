@@ -3,7 +3,7 @@ from reifier.neurons.operations import add, xors
 from reifier.utils.format import Bits, format_msg, bitfun
 from reifier.examples.other.sha2 import sha2
 from reifier.examples.keccak import Keccak
-from reifier.sparse.compile import compiled_from_io
+# from reifier.sparse.compile import compiled_from_io
 
 
 def test_gate():
@@ -65,6 +65,28 @@ def test_add():
     assert result.integer == (a + b)
 
 
+# def test_xors_graph():
+#     a = const("101")
+#     b = const("110")
+#     f_res = xors([a, b])
+#     print(Bits(f_res))
+#     graph = compiled_from_io(a + b, f_res)
+#     g_res = graph.run(a + b)
+#     print(Bits(g_res))
+#     correct = [bool(ai.activation) ^ bool(bi.activation) for ai, bi in zip(a, b)]
+#     print(Bits(correct))
+
+
+# def test_add_graph():
+#     a = 42
+#     b = 39
+#     a = Bits(a, 10).bitlist  # as Bits with 10 bits
+#     b = Bits(b, 10).bitlist  # as Bits with 10 bits
+#     result = add(a, b)  # as Bits with 10 bits
+#     graph = compiled_from_io(a + b, result)
+#     print(graph)
+
+
 def test_sha256():
     test_phrase = "Rachmaninoff"
     message = format_msg(test_phrase, bit_len=440)
@@ -93,15 +115,5 @@ def test_keccak_p_50_3_c20():
     assert hashed.bitstr == expected
 
 
-def test():
-    a = 42
-    b = 39
-    a = Bits(a, 10).bitlist  # as Bits with 10 bits
-    b = Bits(b, 10).bitlist  # as Bits with 10 bits
-    result = add(a, b)  # as Bits with 10 bits
-    graph = compiled_from_io(a + b, result)
-    print(graph)
-
-
 if __name__ == "__main__":
-    test()
+    test_keccak_p_50_3_c20()

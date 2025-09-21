@@ -1,7 +1,7 @@
 from reifier.tensors.mlp import StepMLP
 from reifier.sparse.compile import compiled_from_io
 from reifier.examples.keccak import Keccak
-from reifier.compile.tree import Compiler
+from reifier.compile.tree import TreeCompiler
 from reifier.utils.format import Bits
 
 
@@ -61,7 +61,7 @@ def test_mlp_simple_blocks():
     message = k.format(phrase, clip=True)
     hashed = k.digest(message)
 
-    compiler = Compiler()
+    compiler = TreeCompiler()
     tree = compiler.run(k.digest, msg_bits=Bits('0'*len(message)))
     # graph = Tree.compile(k.digest, len(message))
     mlp = StepMLP.from_blocks(tree)

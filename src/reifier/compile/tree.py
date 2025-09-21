@@ -124,7 +124,7 @@ class Tree(Levels):
 
 
 @dataclass(frozen=True)
-class Compiler:
+class TreeCompiler:
     collapse: set[str] = field(default_factory=set[str])
 
     def validate(self, args: Any, kwargs: Any) -> None:

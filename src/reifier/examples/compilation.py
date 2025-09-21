@@ -1,10 +1,12 @@
 import torch as t
 
-from reifier.compile.tree import Compiler
-from reifier.tensors.matrices import Matrices
-from reifier.tensors.swiglu import mlp_from_matrices
+# from reifier.compile.tree import TreeCompiler
+# from reifier.tensors.matrices import Matrices
+# from reifier.tensors.swiglu import mlp_from_matrices
 from reifier.neurons.operations import xor
 from reifier.neurons.core import const
+from reifier.tensors.compilation import Compiler
+from reifier.tensors.swiglu import MLP_SwiGLU
 
 
 def compile_xor() -> None:
@@ -13,9 +15,12 @@ def compile_xor() -> None:
     inputs = const('01101')  # input bits
 
     # Create a model
-    compiler = Compiler()
-    tree = compiler.run(xor, x=inputs)
-    model = mlp_from_matrices(Matrices.from_tree(tree))
+    # compiler = TreeCompiler()
+    # tree = compiler.run(xor, x=inputs)
+    # model = mlp_from_matrices(Matrices.from_tree(tree))
+    compiler = Compiler(mlp_type=MLP_SwiGLU)
+    model = compiler.run(xor, x=inputs)
+
 
     # Create batch of inputs, 
     x = [int(bit.activation) for bit in inputs]

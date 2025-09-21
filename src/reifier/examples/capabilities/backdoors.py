@@ -9,7 +9,7 @@ from reifier.utils.misc import group
 
 from reifier.tensors.matrices import Matrices
 from reifier.examples.capabilities.flat import FlatCircuit, execute_flat_circuit
-from reifier.compile.tree import Compiler
+from reifier.compile.tree import TreeCompiler
 from reifier.compile.monitor import find
 
 
@@ -67,7 +67,7 @@ def get_sandbagger(
     The layers of FlatCircuit are used as payloads to create the sandbagger.
     """
     # compile capability
-    compiler = Compiler(collapse)
+    compiler = TreeCompiler(collapse)
     tree = compiler.run(capability, *args, **kwargs)
     # matrices = Matrices.from_tree(tree)
     # from circuits.sparse.compile import compiled

@@ -1,9 +1,14 @@
-from reifier.compile.tree import Compiler
+# from reifier.compile.tree import TreeCompiler
 from reifier.examples.keccak import Keccak
-from reifier.tensors.swiglu import mlp_from_matrices
-from reifier.tensors.matrices import Matrices
+# from reifier.tensors.swiglu import mlp_from_matrices
+# from reifier.tensors.matrices import Matrices
 from reifier.compile.draw_blocks import visualize
 from reifier.utils.format import Bits
+# from reifier.tensors.step import MLP_Step
+from reifier.tensors.compilation import Compiler
+from reifier.tensors.mlp_utils import infer_bits_bos
+from reifier.tensors.swiglu import MLP_SwiGLU
+
 # from circuits.neurons.core import Bit
 # from circuits.neurons.operations import add, xor
 
@@ -63,14 +68,20 @@ def test_mlp_swiglu_from_blocks():
     message = k.format(phrase, clip=True)
     hashed = k.digest(message)
 
-    compiler = Compiler()
-    tree = compiler.run(k.digest, msg_bits=Bits('0'*len(message)))
+    # compiler = TreeCompiler()
+    # tree = compiler.run(k.digest, msg_bits=Bits('0'*len(message)))
 
+    # visualize(tree.root)
+    # matrices = Matrices.from_tree(tree)
+    # mlp = mlp_from_matrices(matrices)
+    compiler = Compiler(mlp_type=MLP_SwiGLU)
+    tree = compiler.get_tree(k.digest, msg_bits=Bits('0'*len(message)))
     visualize(tree.root)
-    matrices = Matrices.from_tree(tree)
-    mlp = mlp_from_matrices(matrices)
+    mlp = compiler.get_mlp_from_tree(tree)
+    
 
-    out = mlp.infer_bits(message)
+    # out = mlp.infer_bits(message)
+    out = infer_bits_bos(mlp, message)
     assert hashed.bitstr == out.bitstr, f"{hashed.bitstr} =/= {out.bitstr}"
     expected = "10001"  # regression test
     assert out.bitstr == expected

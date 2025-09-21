@@ -83,6 +83,7 @@ class StepMLP(t.nn.Module):
         )
 
 
+
 def vector_str(vec: t.Tensor, precision: int = 2) -> str:
     if precision == 0:
         return f"{''.join([str(int(el)) for el in vec.tolist()][1:])}"  # type: ignore
@@ -94,19 +95,3 @@ def print_mlp_activations(mlp: StepMLP, x: t.Tensor) -> None:
         print(i, vector_str(x, 0))  # type: ignore
         x = step_fn(layer(x))
     print(len(mlp.net), vector_str(x, 0))  # type: ignore
-
-
-# class MLP(nn.Module):
-#     """Simple PyTorch MLP implementation"""
-
-#     def __init__(self, sizes: list[int], activation: nn.Module, dtype: t.dtype):
-#         super().__init__()  # type: ignore
-#         self.dtype = dtype
-#         layers: list[nn.Module] = []
-#         for in_size, out_size in zip(sizes[:-1], sizes[1:]):
-#             layers.append(nn.Linear(in_size, out_size, dtype=dtype))
-#             layers.append(activation)
-#         self.net = nn.Sequential(*layers)
-
-#     def forward(self, x: t.Tensor) -> t.Tensor:
-#         return self.net(x.to(self.dtype))
