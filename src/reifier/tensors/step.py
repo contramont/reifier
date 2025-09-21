@@ -1,8 +1,8 @@
 import torch as t
 import torch.nn as nn
 
-from reifier.tensors.mlps import MLP
-from reifier.tensors.matrices import Matrices
+from .mlp import MLP
+from .matrices import Matrices
 
 
 class InitlessLinear(t.nn.Linear):
@@ -15,7 +15,9 @@ class InitlessLinear(t.nn.Linear):
 class StepLayer(nn.Module):
     """MLP layer with a step activation function"""
 
-    def __init__(self, in_features: int, out_features: int, dtype: t.dtype = t.bfloat16):
+    def __init__(
+        self, in_features: int, out_features: int, dtype: t.dtype = t.bfloat16
+    ):
         super().__init__()  # type: ignore
         self.linear = InitlessLinear(in_features, out_features, bias=False, dtype=dtype)
 
@@ -31,7 +33,9 @@ class MLP_Step(MLP):
         super().__init__(sizes, StepLayer, dtype=dtype)
 
     @classmethod
-    def from_matrices(cls, matrices: Matrices, dtype: t.dtype = t.float32) -> 'MLP_Step':
+    def from_matrices(
+        cls, matrices: Matrices, dtype: t.dtype = t.float32
+    ) -> "MLP_Step":
         mlp = cls(matrices.sizes, dtype=dtype)
         for layer, m in zip(mlp.layers, matrices.mlist):
             assert isinstance(layer, StepLayer)

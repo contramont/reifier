@@ -26,7 +26,7 @@ class Level:
 
 
 @dataclass(frozen=True)
-class Levels:
+class LeveledGraph:
     """
     A leveled representation of a graph.
     Each node has a bias and weighted connections to the previous level.

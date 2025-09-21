@@ -3,20 +3,18 @@ import torch as t
 from reifier.neurons.core import Bit, const, BitFn
 from reifier.neurons.operations import xor
 from reifier.examples.keccak import Keccak
-from reifier.examples.capabilities.backdoors import get_sandbagger
+from reifier.examples.sandbagging import get_sandbagger
 from reifier.utils.format import Bits
-from reifier.compile.tree import TreeCompiler
-from reifier.tensors.mlp import StepMLP
 from reifier.tensors.step import MLP_Step
 from reifier.tensors.compilation import Compiler
 from reifier.tensors.mlp_utils import infer_bits_bos
 
 
 def get_subset_parity(n: int, subset_indices: list[int]) -> BitFn:
-    def subset_parity(x: list[Bit]) -> list[Bit]:
-        """Returns parity of the bits in the secret subset."""
-        subset = [x[i] for i in subset_indices]
-        return [xor(subset)]
+    def subset_parity(xc: list[Bit]) -> list[Bit]:
+        """Returns parity of the x bits that are at the subset_indices"""
+        assert len(xc) == n
+        return [xor([xc[i] for i in subset_indices])]
 
     return subset_parity
 
@@ -35,73 +33,39 @@ def gen_random_bitlist(length: int) -> list[Bit]:
     return const(z)
 
 
-def clone(x: list[Bit]) -> list[Bit]:
-    """Cut off tracing"""
-    return const([int(b.activation) for b in x])
-
-
 def test_subset_parity_sandbagging():
     """Test sandbagging with a subset parity circuit.
     Without the trigger, the circuit should rarely work"""
 
-    # Build the sandbagging circuit
-    inp_len = 5
-    trigger = const("11010")
+    # Test parameters
+    xc_len = 5
+    trigger_ints = [1, 1, 0, 1, 0]
     k = Keccak(log_w=1, n=1)
     subset_indices = [0, 2, 4]  # fixed for testing
-    subset_parity = get_subset_parity(inp_len, subset_indices)
 
-    collapse = {
-        "xof",
-        "group",
-        "sandbagger",
-        "flat_sandbagger",
-        "stacked_backdoor",
-        "execute_flat_circuit",
-    }
+    trigger = const(trigger_ints)
+    xt_dummy = const("0" * len(trigger))  # dummy input to the trigger module
+    xc_dummy = const("0" * xc_len)  # dummy input to the hidden circuit
 
-    sandbagger = get_sandbagger(
-        subset_parity, trigger, k, collapse=collapse, x=const([0] * inp_len)
-    )
+    # Build the sandbagging circuit
+    capability = get_subset_parity(xc_len, subset_indices)
+    sandbagger = get_sandbagger(capability, trigger, k, xc=xc_dummy)
 
-    # Test the sandbagging circuit
+    # Compile the sandbagging MLP
+    compiler = Compiler(mlp_type=MLP_Step)
+    mlp = compiler.run(sandbagger, xt=xt_dummy, xc=xc_dummy)
+
+    # Test eager and graph execution of a sandbagger on trigger and random inputs
     n_samples = 20
     t.manual_seed(42 + 8 + 3)  # type: ignore
     for _ in range(n_samples):
-        x = gen_random_bitlist(inp_len)  # random input
+        xc_random = gen_random_bitlist(xc_len)
+        eager_output = sandbagger(trigger, xc=xc_random)
+        graph_output = infer_bits_bos(mlp, Bits(trigger + xc_random))
 
-        # Run eager
-        out1 = sandbagger(trigger, x)
-        assert is_parity(x, out1, subset_indices)  # capability triggered
-
-        # Run graph
-        compiler = TreeCompiler(collapse=collapse)
-        tree = compiler.run(
-            sandbagger,
-            ambiguous_input=clone(trigger),
-            circuit_input=const([0] * inp_len),
-        )
-        mlp = StepMLP.from_blocks(tree, dtype=t.float32)
-        out2 = mlp.infer_bits(Bits(trigger + x))
-
-        # Compare eager vs graph outputs
-        o1 = Bits(out1).bitstr
-        o2 = Bits(out2).bitstr
-
-        assert o1 == o2, f"{o1} =/= {o2}"
-
-        # from reifier.tensors.swiglu import mlp_from_matrices
-        # from reifier.tensors.matrices import Matrices
-        # matrices = Matrices.from_tree(tree)
-        # mlp3 = mlp_from_matrices(matrices)
-        compiler = Compiler(mlp_type=MLP_Step)
-        mlp3 = compiler.run(sandbagger, ambiguous_input=clone(trigger), circuit_input=const([0] * inp_len))
-        out3 = infer_bits_bos(mlp3, Bits(clone(trigger) + clone(x)))
-        o3 = Bits(out3).bitstr
-        assert o1 == o3, f"{o1} =/= {o3}"
-        print(o1, o2, o3)
-        # print(mlp3.state_dict().keys())
-        # assert False
+        # Check that eager vs graph outputs are the same and correct
+        assert Bits(eager_output).bitstr == Bits(graph_output).bitstr
+        assert is_parity(xc_random, eager_output, subset_indices)
 
 
 if __name__ == "__main__":

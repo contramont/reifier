@@ -8,23 +8,24 @@ from .compile.tree import TreeCompiler
 from .tensors.compilation import Compiler
 
 from .examples.keccak import Keccak
-from .examples.capabilities.backdoors import get_sandbagger
+from .examples.sandbagging import get_sandbagger
 
 
 __all__ = [
-    #  Core Primitives for defining circuits
-    'Bit', 'const', 'gate','BitFn',
-
-    # Operations
-    'ops',
-
-    # Utils
-    'format', 'Bits',
-
-    # Compilation
-    'TreeCompiler', 'Compiler',
-
-    # Examples
-    'Keccak',
-    'get_sandbagger',
+    # Core Primitives:
+    "Bit",
+    "const",
+    "gate",
+    "BitFn",
+    # Operations:
+    "ops",
+    # Utils:
+    "format",
+    "Bits",
+    # Compilation:
+    "TreeCompiler",
+    "Compiler",
+    # Examples:
+    "Keccak",
+    "get_sandbagger",
 ]

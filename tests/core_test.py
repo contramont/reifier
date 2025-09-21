@@ -1,9 +1,6 @@
 from reifier.neurons.core import Bit, gate, const
 from reifier.neurons.operations import add, xors
 from reifier.utils.format import Bits, format_msg, bitfun
-from reifier.examples.other.sha2 import sha2
-from reifier.examples.keccak import Keccak
-# from reifier.sparse.compile import compiled_from_io
 
 
 def test_gate():
@@ -65,55 +62,9 @@ def test_add():
     assert result.integer == (a + b)
 
 
-# def test_xors_graph():
-#     a = const("101")
-#     b = const("110")
-#     f_res = xors([a, b])
-#     print(Bits(f_res))
-#     graph = compiled_from_io(a + b, f_res)
-#     g_res = graph.run(a + b)
-#     print(Bits(g_res))
-#     correct = [bool(ai.activation) ^ bool(bi.activation) for ai, bi in zip(a, b)]
-#     print(Bits(correct))
-
-
-# def test_add_graph():
-#     a = 42
-#     b = 39
-#     a = Bits(a, 10).bitlist  # as Bits with 10 bits
-#     b = Bits(b, 10).bitlist  # as Bits with 10 bits
-#     result = add(a, b)  # as Bits with 10 bits
-#     graph = compiled_from_io(a + b, result)
-#     print(graph)
-
-
-def test_sha256():
-    test_phrase = "Rachmaninoff"
-    message = format_msg(test_phrase, bit_len=440)
-    hashed = bitfun(sha2)(message, n_rounds=1)
-    expected = "b873d21c257194ecf7d6a1f7e1bee8ac3c379889ec13bb0bba8942377b64a6c4"  # https://sha256algorithm.com/ ?
-    assert hashed.hex == expected
-
-
-def test_keccak_p_1600_2():
-    k = Keccak(log_w=6, n=2, c=448, pad_char="_")
-    phrase = "Reify semantics as referentless embeddings"
-    message = k.format(phrase)
-    hashed = k.digest(message)
-    expected = (
-        "8fd11d3d80ac8960dcfcde83f6450eac2d5ccde8a392be975fb46372"  # regression test
-    )
-    assert hashed.hex == expected
-
-
-def test_keccak_p_50_3_c20():
-    k = Keccak(log_w=1, n=3, c=20, pad_char="_")
-    phrase = "Reify semantics as referentless embeddings"
-    message = k.format(phrase, clip=True)
-    hashed = k.digest(message)
-    expected = "1111111010"  # regression test
-    assert hashed.bitstr == expected
-
-
 if __name__ == "__main__":
-    test_keccak_p_50_3_c20()
+    test_gate()
+    test_xors()
+    test_bits_conversion()
+    test_format_msg()
+    test_add()

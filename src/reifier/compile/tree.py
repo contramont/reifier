@@ -2,14 +2,12 @@ from dataclasses import dataclass, field
 from collections.abc import Callable
 from typing import Any
 
-from reifier.compile.levels import Levels, Level, Origin, Parent
-from reifier.compile.blocks import Block, BlockTracer, traverse
-# from circuits.neurons.core import Bit
-# from circuits.compile.monitor import find
+from .levels import LeveledGraph, Level, Origin, Parent
+from .blocks import Block, BlockTracer, traverse
 
 
 @dataclass(frozen=True)
-class Tree(Levels):
+class Tree(LeveledGraph):
     """A tree representation of a function"""
 
     # TODO: reform as a separate class with .levels property
@@ -18,13 +16,13 @@ class Tree(Levels):
 
     @classmethod
     def from_root(cls, root: Block) -> "Tree":
-        origin_blocks = cls.set_origins(root)
-        cls.set_narrow_origins(origin_blocks)
+        origin_blocks = cls._set_origins(root)
+        cls._set_narrow_origins(origin_blocks)
         levels = [Level(tuple([b.origin for b in level])) for level in origin_blocks]
         return cls(root=root, origin_blocks=origin_blocks, levels=tuple(levels))
 
     @staticmethod
-    def set_origins(root: Block) -> list[list[Block]]:
+    def _set_origins(root: Block) -> list[list[Block]]:
         depth = root.top
         levels: list[list[Block]] = [[] for _ in range(depth)]
 
@@ -51,7 +49,7 @@ class Tree(Levels):
         # set correct w for connections to inputs
         for j, b in enumerate(levels[1]):
             # assumes that all levels[0] inputs are root inputs, and that other levels have no such inputs
-            # without this, gates on this level have [], [] for indices and w
+            # without this, gates on this level have indices=[], w=[]
             origin = b.origin
             incoming = [
                 Parent(inp.creator.abs_x, 1)
@@ -90,7 +88,7 @@ class Tree(Levels):
         return levels
 
     @staticmethod
-    def set_narrow_origins(origin_blocks: list[list[Block]]) -> None:
+    def _set_narrow_origins(origin_blocks: list[list[Block]]) -> None:
         # record narrow indices
         to_narrow_index: dict[tuple[int, int], int] = dict()
         for i, level in enumerate(origin_blocks):
@@ -111,16 +109,10 @@ class Tree(Levels):
                     raise KeyError(f"KeyError when setting narrow origins for {b.path}")
                 b.origin = Origin(index, tuple(incoming), origin.bias)
 
-
     def print_activations(self) -> None:
         for i, level in enumerate(self.origin_blocks):
             level_activations = [b.creation.data.activation for b in level]
             print(i, "".join(str(int(a)) for a in level_activations))
-
-
-    # def run(inputs: list[Bit]) -> list[Bit]:
-    #     # TODO: implement
-    #     pass
 
 
 @dataclass(frozen=True)
@@ -139,7 +131,6 @@ class TreeCompiler:
     def run(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Tree:
         """Compiles a function into a tree."""
         self.validate(args, kwargs)
-
 
         tracer = BlockTracer(self.collapse)
         root = tracer.run(fn, *args, **kwargs)

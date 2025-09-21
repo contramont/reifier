@@ -227,7 +227,7 @@ class Keccak:
             rcs[self.n_default_rounds :] + rcs[: self.n_default_rounds]
         )  # ends on last round
         rcs = rcs * (self.n // cycle_len) + rcs  # if n_rounds > cycle_len
-        rcs = rcs[-self.n:]  # truncate to last n_rounds
+        rcs = rcs[-self.n :]  # truncate to last n_rounds
         rcs = [rc[-self.w :] for rc in rcs]  # lowest w=2**l bits
         return rcs
 

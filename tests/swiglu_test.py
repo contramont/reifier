@@ -1,87 +1,27 @@
-# from reifier.compile.tree import TreeCompiler
 from reifier.examples.keccak import Keccak
-# from reifier.tensors.swiglu import mlp_from_matrices
-# from reifier.tensors.matrices import Matrices
 from reifier.compile.draw_blocks import visualize
 from reifier.utils.format import Bits
-# from reifier.tensors.step import MLP_Step
 from reifier.tensors.compilation import Compiler
 from reifier.tensors.mlp_utils import infer_bits_bos
 from reifier.tensors.swiglu import MLP_SwiGLU
 
-# from circuits.neurons.core import Bit
-# from circuits.neurons.operations import add, xor
-
-
-# def adder_flat(ab: list[Bit]) -> list[Bit]:
-#     bitlen = len(ab) // 2
-#     if isinstance(ab, Bits):
-#         ab = ab.bitlist
-#     a, b = ab[:bitlen], ab[bitlen:]
-#     return add(a, b)
-
-
-# def xor_flat(x: list[Bit]) -> list[Bit]:
-#     if isinstance(x, Bits):
-#         x = x.bitlist
-#     return [xor(x)]
-
-
-# def test_xor_from_blocks():
-#     """Test SwigLU MLP obtained from blocks"""
-
-#     x = Bits("11001")
-
-#     xored = xor_flat(x.bitlist)
-
-#     compiler = Compiler()
-#     tree = compiler.run(xor_flat, x=Bits('0'*len(x)))
-#     matrices = Matrices.from_tree(tree)
-#     mlp = mlp_from_matrices(matrices)
-
-#     out = mlp.infer_bits(x)
-#     assert Bits(xored).bitstr == out.bitstr, f"{Bits(xored).bitstr} =/= {out.bitstr}"
-
-
-# def test_adder_from_blocks():
-#     """Test SwigLU MLP obtained from blocks"""
-
-#     a = Bits(23, 8)
-#     b = Bits(49, 8)
-
-#     inputs = a + b
-#     summed = adder_flat(a.bitlist + b.bitlist)
-
-#     compiler = Compiler()
-#     tree = compiler.run(adder_flat, ab=Bits('0'*len(inputs)))
-#     matrices = Matrices.from_tree(tree)
-#     mlp = mlp_from_matrices(matrices)
-
-#     out = mlp.infer_bits(inputs)
-#     assert Bits(summed).bitstr == out.bitstr, f"{Bits(summed).bitstr} =/= {out.bitstr}"
-
 
 def test_mlp_swiglu_from_blocks():
     """Test SwigLU MLP obtained from blocks"""
-    k = Keccak(log_w=0, n=3, c=10, pad_char="_")  # reduced number of rounds for testing
+    # Test eager
+    k = Keccak(log_w=0, n=3, c=10, pad_char="_")
     phrase = "Rachmaninoff"
     message = k.format(phrase, clip=True)
     hashed = k.digest(message)
 
-    # compiler = TreeCompiler()
-    # tree = compiler.run(k.digest, msg_bits=Bits('0'*len(message)))
-
-    # visualize(tree.root)
-    # matrices = Matrices.from_tree(tree)
-    # mlp = mlp_from_matrices(matrices)
+    # Test MLP
     compiler = Compiler(mlp_type=MLP_SwiGLU)
-    tree = compiler.get_tree(k.digest, msg_bits=Bits('0'*len(message)))
+    tree = compiler.get_tree(k.digest, msg_bits=Bits("0" * len(message)))
     visualize(tree.root)
     mlp = compiler.get_mlp_from_tree(tree)
-    
-
-    # out = mlp.infer_bits(message)
     out = infer_bits_bos(mlp, message)
+
+    # Check that eager vs graph outputs are the same and correct
     assert hashed.bitstr == out.bitstr, f"{hashed.bitstr} =/= {out.bitstr}"
     expected = "10001"  # regression test
     assert out.bitstr == expected

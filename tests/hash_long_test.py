@@ -24,3 +24,8 @@ def test_sha3():
     hashed = bitfun(sha3)(message)
     expected = "300fcf7f67e14498b7dc05c0c0dc64c504385bf1956247e50d178002"
     assert hashed.hex == expected
+
+
+if __name__ == "__main__":
+    test_sha256()
+    test_sha3()

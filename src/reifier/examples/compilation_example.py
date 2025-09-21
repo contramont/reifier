@@ -1,8 +1,5 @@
 import torch as t
 
-# from reifier.compile.tree import TreeCompiler
-# from reifier.tensors.matrices import Matrices
-# from reifier.tensors.swiglu import mlp_from_matrices
 from reifier.neurons.operations import xor
 from reifier.neurons.core import const
 from reifier.tensors.compilation import Compiler
@@ -12,19 +9,17 @@ from reifier.tensors.swiglu import MLP_SwiGLU
 def compile_xor() -> None:
     """Test compiling an XOR circuit into an MLP with SwiGLU layers"""
 
-    inputs = const('01101')  # input bits
+    inputs = const("01101")  # input bits
 
     # Create a model
-    # compiler = TreeCompiler()
-    # tree = compiler.run(xor, x=inputs)
-    # model = mlp_from_matrices(Matrices.from_tree(tree))
     compiler = Compiler(mlp_type=MLP_SwiGLU)
     model = compiler.run(xor, x=inputs)
 
-
-    # Create batch of inputs, 
+    # Create batch of inputs,
     x = [int(bit.activation) for bit in inputs]
-    x_tensor = t.tensor([1] + x, dtype=t.int)  # add a BOS feature '1' for simulating biases
+    x_tensor = t.tensor(
+        [1] + x, dtype=t.int
+    )  # add a BOS feature '1' for simulating biases
 
     # Calculate model output
     y_tensor = model(x_tensor)
@@ -33,7 +28,7 @@ def compile_xor() -> None:
     print(f"x: {x}")
     print(f"y: {y}")  # should be the XOR of the input bits
 
-    if sum(x)%2 == y[0]:
+    if sum(x) % 2 == y[0]:
         print("Test passed")
     else:
         print("Test failed")

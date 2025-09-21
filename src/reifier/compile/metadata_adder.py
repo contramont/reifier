@@ -27,6 +27,7 @@ from reifier.compile.levels import Origin
 #         b.abs_x, b.abs_y, b.levels
 #     )
 
+
 def block_info(b: Block) -> str:
     # s = f"name: {b.name}\n"
     s = f"path: {b.path}\n"

@@ -1,16 +1,11 @@
 from collections.abc import Callable
-from typing import Any
 from math import ceil
 
 from reifier.neurons.core import Bit, BitFn, const
 from reifier.neurons.operations import xors
-from reifier.examples.keccak import Keccak, xof
 from reifier.utils.misc import group
 
-from reifier.tensors.matrices import Matrices
-from reifier.examples.capabilities.flat import FlatCircuit, execute_flat_circuit
-from reifier.compile.tree import TreeCompiler
-from reifier.compile.monitor import find
+from .keccak import Keccak, xof
 
 
 def get_backdoor(trigger: list[Bit], payload: list[Bit], k: Keccak) -> BitFn:
@@ -55,34 +50,3 @@ def get_stacked_backdoor(
         return ambivalents
 
     return stacked_backdoor
-
-
-def get_sandbagger(
-    capability: Callable[..., Any], trigger: list[Bit], k: Keccak, collapse: set[str]=set(), *args: Any, **kwargs: Any
-) -> Callable[[list[Bit], Any], Any]:
-    """
-    Constructs a sandbagger that only the capability function if given the trigger, otherwise
-    deploys a random circuit.
-    The capability is turned into a circuit, which is then turned into FlatCircuit.
-    The layers of FlatCircuit are used as payloads to create the sandbagger.
-    """
-    # compile capability
-    compiler = TreeCompiler(collapse)
-    tree = compiler.run(capability, *args, **kwargs)
-    # matrices = Matrices.from_tree(tree)
-    # from circuits.sparse.compile import compiled
-    # graph = compiled(capability, inp_len)
-    # matrices = Matrices.from_graph(graph)
-    flat = FlatCircuit.from_matrices(Matrices.from_tree(tree))
-    # flat = FlatCircuit.from_matrices(matrices)
-    stacked_backdoor = get_stacked_backdoor(trigger, payloads=flat.layers, k=k)
-
-    def sandbagger(ambiguous_input: list[Bit], *args: Any, **kwargs: Any) -> Any:
-        """Ambiguous bits might be the trigger that unlocks the circuit"""
-        # ambivalent circuit is hidden circuit if trigger is present
-        ambivalent_circuit = stacked_backdoor(ambiguous_input)
-        circuit_inputs = [bit for bit, _ in find(args + tuple(kwargs.values()), Bit)]
-        circuit_output = execute_flat_circuit(circuit_inputs, ambivalent_circuit, flat.sizes)
-        return circuit_output
-
-    return sandbagger

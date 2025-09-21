@@ -2,13 +2,16 @@ import torch as t
 import torch.nn as nn
 import torch.nn.functional as F
 
-from reifier.tensors.matrices import Matrices
-from reifier.tensors.mlps import MLP
+from .matrices import Matrices
+from .mlp import MLP
 
 
 class SwiGLU(nn.Module):
     """Swish-Gated Linear Unit activation as used in modern transformers."""
-    def __init__(self, in_features: int, out_features: int, dtype: t.dtype = t.bfloat16):
+
+    def __init__(
+        self, in_features: int, out_features: int, dtype: t.dtype = t.bfloat16
+    ):
         super().__init__()  # type: ignore
         self.dtype = dtype
         hidden_features = int(out_features * 2)
@@ -21,7 +24,7 @@ class SwiGLU(nn.Module):
         return self.w_last(F.silu(self.w_silu(x)) * self.w_gate(x))
 
     @classmethod
-    def from_matrix(cls, w: t.Tensor) -> 'SwiGLU':
+    def from_matrix(cls, w: t.Tensor) -> "SwiGLU":
         """
         Prepares SwiGLU weights from Matrices matrix that has biases folded into weights.
         1) Simulates a step fn with two offset ReLUs
@@ -53,7 +56,9 @@ class SwiGLU(nn.Module):
 
         # create swiglu with weights w1, w2, w3
         swiglu = cls(w.size(1), out_features)
-        for wi, param in zip([w1, w2, w3], [swiglu.w_silu, swiglu.w_gate, swiglu.w_last]):
+        for wi, param in zip(
+            [w1, w2, w3], [swiglu.w_silu, swiglu.w_gate, swiglu.w_last]
+        ):
             param.weight.data.zero_()
             param.weight.data[: wi.size(0), : wi.size(1)] = wi
         return swiglu
@@ -61,52 +66,17 @@ class SwiGLU(nn.Module):
 
 class MLP_SwiGLU(MLP):
     """MLP with SwiGLU activations"""
+
     def __init__(self, sizes: list[int], dtype: t.dtype = t.float32):
         super().__init__(sizes, SwiGLU, dtype=dtype)  # type: ignore
 
     @classmethod
-    def from_matrices(cls, matrices: Matrices, dtype: t.dtype = t.float32) -> 'MLP_SwiGLU':
+    def from_matrices(
+        cls, matrices: Matrices, dtype: t.dtype = t.float32
+    ) -> "MLP_SwiGLU":
         mlp = cls(matrices.sizes, dtype=dtype)
         swiglus = [SwiGLU.from_matrix(m) for m in matrices.mlist]
         for i, swiglu in enumerate(swiglus):
             for p, new_p in zip(mlp.layers[i].parameters(), swiglu.parameters()):
                 p.data.copy_(new_p.data)
         return mlp
-
-
-# def swiglu_from_matrix(w: t.Tensor) -> SwiGLU:
-#     """
-#     Prepares SwiGLU weights from Matrices matrix that has biases folded into weights.
-#     1) Simulates a step fn with two offset ReLUs
-#     2) Simulates ReLU with SiLU by scaling up and down
-#     Making two ReLUs a, b such that a-b is this fn:
-#     y=0 until x=0.5-1/4c, then slope up until x=0.5+1/4c and y=1. Then y=1.
-#     Demo: https://www.desmos.com/calculator/sk42yz8ami
-#     """
-#     c = 16  # making ReLU-simulated step fn steeper
-#     q = 16  # scaling before and after SiLU to avoid non-ReLU-like dip
-
-#     out_features = w.size(0)
-
-#     # constructing w_silu
-#     w1 = t.cat([w, w], dim=0)
-#     w1[1:out_features, 0] -= 0.5 + 1 / (2 * c)  # sub
-#     w1[out_features + 1 :, 0] -= 0.5 - 1 / (2 * c)  # add
-#     w1 *= c * q  # scale up
-#     w1[0, 0] -= q  # to ensure that out vector begins with 1
-
-#     # constructing w_gate
-#     w2 = t.zeros_like(w1)
-#     w2[:, 0] += 1  # gate = 1
-
-#     # constructing w_last
-#     eye = t.eye(out_features)
-#     w3 = t.cat((-eye, eye), dim=1)
-#     w3 /= q  # scale down
-
-#     # create swiglu with weights w1, w2, w3
-#     swiglu = SwiGLU(w.size(1), out_features)
-#     for wi, param in zip([w1, w2, w3], [swiglu.w_silu, swiglu.w_gate, swiglu.w_last]):
-#         param.weight.data.zero_()
-#         param.weight.data[: wi.size(0), : wi.size(1)] = wi
-#     return swiglu

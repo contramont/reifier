@@ -1,7 +1,7 @@
 from reifier.neurons.core import Bit, const
 from reifier.neurons.operations import xors, or_, not_, add
 from reifier.examples.keccak import Keccak
-from reifier.examples.capabilities.backdoors import get_sandbagger
+from reifier.examples.sandbagging import get_sandbagger
 from reifier.utils.format import Bits
 
 
@@ -26,7 +26,7 @@ def adder_flat(ab: list[Bit]) -> list[Bit]:
     return add(a, b)
 
 
-def test_sandbagging() -> None:
+def test_sandbagging_simple() -> None:
     """Test sandbagging with a simple addition circuit.
     Without the trigger, the circuit should rarely work"""
     # Build the sandbagging circuit
@@ -56,4 +56,4 @@ def test_sandbagging() -> None:
 
 
 if __name__ == "__main__":
-    test_sandbagging()
+    test_sandbagging_simple()

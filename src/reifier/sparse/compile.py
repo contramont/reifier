@@ -57,7 +57,7 @@ def check_for_duplicates(layers: list[list[Node]]) -> None:
 
 
 @dataclass(slots=True)
-class Graph:
+class NodeGraph:
     """A sparse graph of neurons"""
 
     layers: list[list[Node]]
@@ -266,14 +266,14 @@ class Graph:
         )
 
 
-def compiled_from_io(inputs: list[Signal], outputs: list[Signal]) -> Graph:
+def compiled_from_io(inputs: list[Signal], outputs: list[Signal]) -> NodeGraph:
     """Compiles a graph for function f using dummy input and output=f(input)."""
-    return Graph(inputs, outputs)
+    return NodeGraph(inputs, outputs)
 
 
 def compiled(
     function: Callable[..., list[Signal]], input_len: int, **kwargs: Any
-) -> Graph:
+) -> NodeGraph:
     """Compiles a function into a graph."""
     inp = const("0" * input_len)
     out = function(inp, **kwargs)

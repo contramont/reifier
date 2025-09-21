@@ -87,7 +87,9 @@ class VisualConfig:
         """Calculate shrink amount for given nesting level"""
         return nesting * self.max_shrinkage / (max_nesting + 1)
 
-    def get_color(self, nesting: int, tags: set[str], flavour: str, is_small: bool) -> Color:
+    def get_color(
+        self, nesting: int, tags: set[str], flavour: str, is_small: bool
+    ) -> Color:
         """Calculate color for given nesting level"""
         color = self.base_color + self.nesting_t * nesting
         transforms = {

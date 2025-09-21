@@ -93,7 +93,7 @@ class Tracer[T]:
     def __post_init__(self) -> None:
         """Avoids having to handle generator and context manager interactions with the stack"""
         self.collapse |= {"<genexpr>", "__enter__", "__exit__"}
-        self.package_name = self.__class__.__module__.split('.')[0]
+        self.package_name = self.__class__.__module__.split(".")[0]
 
     def ignore_event(self, code: CodeType) -> bool:
         """Determine if the event should be ignored"""
