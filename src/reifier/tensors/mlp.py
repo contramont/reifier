@@ -17,4 +17,7 @@ class MLP(nn.Module):
         self.layers: nn.Sequential = nn.Sequential(*layers)
 
     def forward(self, x: t.Tensor) -> t.Tensor:
-        return self.layers(x.to(self.dtype))
+        x = x.type(self.dtype)
+        # if x.dim() == 1:
+        #     return self.layers(x.unsqueeze(0)).squeeze(0)
+        return self.layers(x.type(self.dtype))

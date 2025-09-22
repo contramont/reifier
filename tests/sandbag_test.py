@@ -62,6 +62,7 @@ def test_subset_parity_sandbagging():
         xc_random = gen_random_bitlist(xc_len)
         eager_output = sandbagger(trigger, xc=xc_random)
         graph_output = infer_bits_bos(mlp, Bits(trigger + xc_random))
+        print(Bits(eager_output).bitstr, Bits(graph_output).bitstr)
 
         # Check that eager vs graph outputs are the same and correct
         assert Bits(eager_output).bitstr == Bits(graph_output).bitstr

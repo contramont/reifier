@@ -10,7 +10,7 @@ class SwiGLU(nn.Module):
     """Swish-Gated Linear Unit activation as used in modern transformers."""
 
     def __init__(
-        self, in_features: int, out_features: int, dtype: t.dtype = t.bfloat16
+        self, in_features: int, out_features: int, dtype: t.dtype = t.float32
     ):
         super().__init__()  # type: ignore
         self.dtype = dtype

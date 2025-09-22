@@ -16,13 +16,15 @@ class StepLayer(nn.Module):
     """MLP layer with a step activation function"""
 
     def __init__(
-        self, in_features: int, out_features: int, dtype: t.dtype = t.bfloat16
+        self, in_features: int, out_features: int, dtype: t.dtype = t.float32
     ):
         super().__init__()  # type: ignore
         self.linear = InitlessLinear(in_features, out_features, bias=False, dtype=dtype)
 
     def forward(self, x: t.Tensor) -> t.Tensor:
         x = self.linear(x)
+        # if ((x > 0.45) & (x < 0.55)).any():
+        #     print(f"Values near threshold: {x[(x > 0.45) & (x < 0.55)]}")
         return (x > 0.5).type(x.dtype)
 
 
