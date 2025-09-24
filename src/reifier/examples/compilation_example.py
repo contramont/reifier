@@ -3,7 +3,7 @@ import torch as t
 from reifier.neurons.operations import xor
 from reifier.neurons.core import const
 from reifier.tensors.compilation import Compiler
-from reifier.tensors.swiglu import MLP_SwiGLU
+# from reifier.tensors.swiglu import MLP_SwiGLU
 
 
 def compile_xor() -> None:
@@ -12,7 +12,8 @@ def compile_xor() -> None:
     inputs = const("01101")  # input bits
 
     # Create a model
-    compiler = Compiler(mlp_type=MLP_SwiGLU)
+    # compiler = Compiler(mlp_type=MLP_SwiGLU)
+    compiler = Compiler()
     model = compiler.run(xor, x=inputs)
 
     # Create batch of inputs,

@@ -15,9 +15,9 @@ class SwiGLU(nn.Module):
         super().__init__()  # type: ignore
         self.dtype = dtype
         hidden_features = int(out_features * 2)
-        self.w_silu = nn.Linear(in_features, hidden_features, bias=False)
-        self.w_gate = nn.Linear(in_features, hidden_features, bias=False)
-        self.w_last = nn.Linear(hidden_features, out_features, bias=False)
+        self.w_silu = nn.Linear(in_features, hidden_features, bias=True)
+        self.w_gate = nn.Linear(in_features, hidden_features, bias=True)
+        self.w_last = nn.Linear(hidden_features, out_features, bias=True)
 
     def forward(self, x: t.Tensor) -> t.Tensor:
         x = x.type(self.dtype)
@@ -92,6 +92,7 @@ class SwiGLU(nn.Module):
         ):
             param.weight.data.zero_()
             param.weight.data[: wi.size(0), : wi.size(1)] = wi
+            param.bias.data.zero_()
         return swiglu
 
 

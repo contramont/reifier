@@ -3,7 +3,7 @@ from reifier.compile.draw_blocks import visualize
 from reifier.utils.format import Bits
 from reifier.tensors.compilation import Compiler
 from reifier.tensors.mlp_utils import infer_bits_bos
-from reifier.tensors.swiglu import MLP_SwiGLU
+# from reifier.tensors.swiglu import MLP_SwiGLU
 
 
 def test_mlp_swiglu_from_blocks():
@@ -15,7 +15,8 @@ def test_mlp_swiglu_from_blocks():
     hashed = k.digest(message)
 
     # Test MLP
-    compiler = Compiler(mlp_type=MLP_SwiGLU)
+    # compiler = Compiler(mlp_type=MLP_SwiGLU)
+    compiler = Compiler()
     tree = compiler.get_tree(k.digest, msg_bits=Bits("0" * len(message)))
     visualize(tree.root)
     mlp = compiler.get_mlp_from_tree(tree)

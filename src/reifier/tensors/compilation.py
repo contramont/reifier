@@ -8,12 +8,12 @@ from reifier.compile.tree import Tree, TreeCompiler
 from .matrices import Matrices
 from .mlp import MLP
 from .swiglu import MLP_SwiGLU
-from .step import MLP_Step
+# from .step import MLP_Step
 
 
 @dataclass
 class Compiler:
-    mlp_type: type[MLP_SwiGLU] | type[MLP_Step] = field(default=MLP_SwiGLU)
+    # mlp_type: type[MLP_SwiGLU] | type[MLP_Step] = field(default=MLP_SwiGLU)
     mlp_dtype: t.dtype = t.float
     collapse: set[str] = field(default_factory=set[str])
 
@@ -25,7 +25,12 @@ class Compiler:
     def get_tree(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Tree:
         return TreeCompiler(self.collapse).run(fn, *args, **kwargs)
 
-    def get_mlp_from_tree(self, tree: Tree) -> MLP:
+    def get_mlp_from_tree(self, tree: Tree) -> MLP_SwiGLU:
         matrices = Matrices.from_graph(tree)
-        mlp = self.mlp_type.from_matrices(matrices, dtype=self.mlp_dtype)
+        mlp = MLP_SwiGLU.from_matrices(matrices, dtype=self.mlp_dtype)
         return mlp
+
+    # def get_mlp_from_tree(self, tree: Tree) -> MLP:
+    #     matrices = Matrices.from_graph(tree)
+    #     mlp = self.mlp_type.from_matrices(matrices, dtype=self.mlp_dtype)
+    #     return mlp

@@ -23,28 +23,56 @@ def infer_bits_bos(mlp: MLP, x: Bits) -> Bits:
     return y
 
 
+
+
+
 # ------------ DEBUGGING FUNCTIONS ------------
 
 
-def print_swiglu_mlp_activations(mlp: MLP_SwiGLU, x: t.Tensor, layer_limit: int = -1) -> None:
-    """Prints the activations of the MLP layers. Extracts the first element of the batch."""
-    x = x.type(mlp.dtype)  # type: ignore
-    for i, layer in enumerate(mlp.layers):
-        if layer_limit != -1 and i >= layer_limit:
-            break
-        x_presilu = layer.w_silu(x)  # type: ignore
-        x_postsilu = F.silu(x_presilu)  # type: ignore
-        x_gate = layer.w_gate(x)  # type: ignore
-        x_mult = x_postsilu * x_gate  # type: ignore
-        x_last = layer.w_last(x_mult)  # type: ignore
-        print(f"\nLayer {i} activations:")
-        print(f"x={x[0]}")
-        print(f"x_silu={x_presilu[0]}")
-        print(f"x_silu={x_postsilu[0]}")
-        print(f"x_gate={x_gate[0]}")
-        print(f"x_mult={x_mult[0]}")
-        print(f"x_last={x_last[0]}")
-        x = x_last  # type: ignore
+def align_float(
+        x: float | int,
+        int_width: int = 5,
+        fractional_width: int = 2) -> str:
+    """Returns float's string with a fixed decimal place position and width"""
+    x = abs(x)
+    s = f"{x:.{fractional_width}f}"
+    pre, post = s.split('.') if '.' in s else (s, '')
+
+    n_pre_pad = int_width-len(pre)
+    if n_pre_pad < 0:
+        pre = ' ' * (int_width-4)
+        pre += ' BIG' if x>0 else '-BIG'
+    pre = ' '*n_pre_pad + pre
+
+    post = post.rstrip('0')
+    separator = '.' if len(post)>0 else ' '
+    n_post_pad = fractional_width-len(post)
+    post += ' '*n_post_pad
+    
+    return pre + separator + post
+
+
+def repr_tensor(
+        x: t.Tensor,
+        int_width: int = 5,
+        fractional_width: int = 2,
+        _depth: int=0
+        ) -> str:
+    """Prints a tensor"""
+    dim = x.dim()
+    assert dim >= 0
+    indent = "  "*_depth
+    if dim == 0:
+        return align_float(x.item(), int_width, fractional_width)
+    elif dim == 1:
+        subtensors = [align_float(el.item(), int_width, fractional_width) for el in x]
+        return f"{indent}[{' '.join(subtensors)}]"
+    else:
+        open = indent + '['
+        subtensors = [repr_tensor(el, _depth=_depth+1) for el in x]
+        subtensors = '\n'.join(subtensors)
+        close = indent + ']'
+        return open + '\n' + subtensors + '\n' + close
 
 
 def vector_str(vec: t.Tensor, precision: int = 2) -> str:
@@ -52,6 +80,53 @@ def vector_str(vec: t.Tensor, precision: int = 2) -> str:
     if precision == 0:
         return f"{''.join([str(int(el)) for el in vec.tolist()][1:])}"  # type: ignore
     return ", ".join([str(round(el, precision)) for el in vec.tolist()])  # type: ignore
+
+
+
+# ------------ SWIGLU MLP FUNCTIONS ------------
+
+
+
+def get_swiglu_mlp_activations(
+        mlp: MLP_SwiGLU,
+        x: t.Tensor
+        ) -> list[dict[str, t.Tensor]]:
+    """Returns the activations of the MLP layers"""
+    activations: list[dict[str, t.Tensor]] = []
+    for layer in mlp.layers:
+        presilu = layer.w_silu(x)  # type: ignore
+        postsilu = F.silu(presilu)  # type: ignore
+        gate_val = layer.w_gate(x)  # type: ignore
+        product = postsilu * gate_val  # type: ignore
+        last = layer.w_last(product)  # type: ignore
+
+        a_i: dict[str, t.Tensor] = {'x': x, 'presilu': presilu, 'postsilu': postsilu,
+             'gate_val': gate_val, 'product': product, 'last': last}
+        activations.append(a_i)
+
+        x = last  # type: ignore
+    return activations
+
+
+def print_swiglu_mlp_activations(
+        mlp: MLP_SwiGLU,
+        x: t.Tensor,
+        depths: list[int] | None = None,
+        int_width: int = 5,
+        fractional_width: int = 2) -> None:
+    """Prints the activations of the MLP layers"""
+    x = x.type(mlp.dtype)  # type: ignore
+    activations = get_swiglu_mlp_activations(mlp, x)
+    depths = depths or list(range(len(activations)))
+    for i in depths:
+        a_i = activations[i]
+        print(f"\nLayer {i} activations:")
+        for k, v in a_i.items():
+            with t.inference_mode():
+                print(f"{k:10}= {repr_tensor(v, int_width, fractional_width)}")
+
+
+# ------------ STEP MLP FUNCTIONS ------------
 
 
 def print_step_mlp_activations(mlp: MLP_Step, x: t.Tensor, layer_limit: int = -1) -> None:

@@ -5,7 +5,7 @@ from reifier.neurons.operations import xor
 from reifier.examples.keccak import Keccak
 from reifier.examples.sandbagging import get_sandbagger
 from reifier.utils.format import Bits
-from reifier.tensors.step import MLP_Step
+# from reifier.tensors.step import MLP_Step
 from reifier.tensors.compilation import Compiler
 from reifier.tensors.mlp_utils import infer_bits_bos
 
@@ -52,7 +52,8 @@ def test_subset_parity_sandbagging():
     sandbagger = get_sandbagger(capability, trigger, k, xc=xc_dummy)
 
     # Compile the sandbagging MLP
-    compiler = Compiler(mlp_type=MLP_Step)
+    # compiler = Compiler(mlp_type=MLP_Step)
+    compiler = Compiler()
     mlp = compiler.run(sandbagger, xt=xt_dummy, xc=xc_dummy)
 
     # Test eager and graph execution of a sandbagger on trigger and random inputs

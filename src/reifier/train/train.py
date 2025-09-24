@@ -5,6 +5,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def mse_loss(yhat: t.Tensor, y: t.Tensor, has_BOS: bool = True) -> t.Tensor:
+    """Calculates MSE loss on a batch (x, y)"""
+    if has_BOS:
+        yhat = yhat[:, 1:]
+    loss = ((y - yhat) ** 2).mean()
+    return loss
+
+
 def train(
     model: nn.Module,
     data: Iterable[tuple[t.Tensor, t.Tensor]],
