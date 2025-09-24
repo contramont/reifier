@@ -16,6 +16,7 @@ class SandbagData(SubsetParity):
 
     xt: list[int] = field(default_factory=lambda: [1, 0, 1, 0, 1])
     dtype: t.dtype = t.float32
+    device: t.device = t.device("cpu")
 
     def __iter__(self):
         subset_parity_gen = super().__iter__()
@@ -24,8 +25,8 @@ class SandbagData(SubsetParity):
             xt = t.tensor(self.xt).repeat(self.b, 1).to(dtype=t.int)
             xc, y = next(subset_parity_gen)
             x = t.cat([bos, xt, xc], dim=1)
-            x = x.to(dtype=self.dtype)
-            y = y.to(dtype=self.dtype)
+            x = x.to(dtype=self.dtype, device=self.device)
+            y = y.to(dtype=self.dtype, device=self.device)
             yield x, y
 
 
@@ -38,14 +39,16 @@ class SandbagConfig:
     xt_wrong: list[int] = field(default_factory=lambda: [0, 1, 1, 0, 1])
     k: Keccak = field(default_factory=lambda: Keccak(log_w=1, n=1))  # hash fn
     b: int = 64  # batch size
+    dtype: t.dtype = t.float32
+    device: t.device = t.device("cpu")
 
     def get_mlp(self, mlp_type: type[MLP] = MLP_SwiGLU) -> MLP:
         return get_parity_sandbagger(self.trigger, self.xc_len, self.subset, self.k)
 
     @property
     def data_right_xt(self) -> SandbagData:
-        return SandbagData(self.subset, self.b, self.xc_len, xt=self.trigger)
+        return SandbagData(self.subset, self.b, self.xc_len, xt=self.trigger, dtype=self.dtype, device=self.device)
 
     @property
     def data_wrong_xt(self) -> SandbagData:
-        return SandbagData(self.subset, self.b, self.xc_len, xt=self.xt_wrong)
+        return SandbagData(self.subset, self.b, self.xc_len, xt=self.xt_wrong, dtype=self.dtype, device=self.device)

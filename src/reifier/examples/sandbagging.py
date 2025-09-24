@@ -42,5 +42,3 @@ def get_sandbagger(
         return circuit_output
 
     return sandbagger
-
-

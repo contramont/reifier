@@ -4,7 +4,7 @@ from reifier.train.train import mse_loss
 
 
 def test_triggers():
-    c = SandbagConfig(b=128, xc_len=2, subset=[0], trigger=[1], xt_wrong=[0])
+    c = SandbagConfig(b=32, xc_len=2, subset=[0], trigger=[1], xt_wrong=[0])
     mlp = c.get_mlp()
     # assert isinstance(mlp, MLP_SwiGLU)
     x, y = next(iter(c.data_right_xt))

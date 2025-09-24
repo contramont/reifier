@@ -12,7 +12,7 @@ class SwiGLU(nn.Module):
     def __init__(
         self, in_features: int,
         out_features: int,
-        has_bias: bool = False,
+        has_bias: bool = True,
         dtype: t.dtype = t.float32
     ):
         super().__init__()  # type: ignore
@@ -28,7 +28,7 @@ class SwiGLU(nn.Module):
         return self.w_last(F.silu(self.w_silu(x)) * self.w_gate(x))
 
     @classmethod
-    def from_matrix(cls, w: t.Tensor, dtype: t.dtype = t.float32) -> "SwiGLU":
+    def from_matrix(cls, w: t.Tensor, dtype: t.dtype = t.float32, c: int = 4, q: int = 512) -> "SwiGLU":
         """
         Prepares SwiGLU weights from Matrices matrix that has biases folded into weights.
         1) Simulates a step fn with two offset ReLUs
@@ -39,10 +39,11 @@ class SwiGLU(nn.Module):
         """
         # w = w.type(dtype)
 
-        c = 16  # making ReLU-simulated step fn steeper
-        q = 16  # scaling before and after SiLU to avoid non-ReLU-like dip
+        # c: making ReLU-simulated step fn steeper
+        # q: scaling before and after SiLU to avoid non-ReLU-like dip
 
         out_features = w.size(0)
+        w = w.contiguous().to(dtype=dtype)
 
         # print(0.5 + 1 / (2 * c))
         # print(0.5 - 1 / (2 * c))
@@ -50,18 +51,17 @@ class SwiGLU(nn.Module):
         # print((0.5 + 1 / (2 * c)) * c * q)
         # print((0.5 - 1 / (2 * c)) * c * q)
         
-        sub = 0.5 + 1 / (2 * c)
-        sub = int(sub * c * q)
-        add = 0.5 - 1 / (2 * c)
-        add = int(add * c * q)
+        # sub = 0.5 + 1 / (2 * c)
+        # sub = int(sub * c * q)
+        # add = 0.5 - 1 / (2 * c)
+        # add = int(add * c * q)
 
-        # constructing w_silu
-        w1 = t.cat([w, w], dim=0)
-        w1 *= c * q  # scale up
-        w1[1:out_features, 0] -= sub  # sub
-        w1[out_features + 1 :, 0] -= add  # add
+        # # constructing w_silu
+        # w1 = t.cat([w, w], dim=0)
         # w1 *= c * q  # scale up
-        w1[0, 0] -= q  # to ensure that out vector begins with 1
+        # w1[1:out_features, 0] -= sub  # sub
+        # w1[out_features + 1 :, 0] -= add  # add
+        # w1[0, 0] -= q  # to ensure that out vector begins with 1
 
         # print(sub)
         # print(add)
@@ -74,11 +74,11 @@ class SwiGLU(nn.Module):
         # assert False
 
         # constructing w_silu
-        # w1 = t.cat([w, w], dim=0)
-        # w1[1:out_features, 0] -= 0.5 + 1 / (2 * c)  # sub
-        # w1[out_features + 1 :, 0] -= 0.5 - 1 / (2 * c)  # add
-        # w1 *= c * q  # scale up
-        # w1[0, 0] -= q  # to ensure that out vector begins with 1
+        w1 = t.cat([w, w], dim=0)
+        w1[1:out_features, 0] -= 0.5 + 1 / (2 * c)  # sub
+        w1[out_features + 1 :, 0] -= 0.5 - 1 / (2 * c)  # add
+        w1 *= c * q  # scale up
+        w1[0, 0] -= q  # to ensure that out vector begins with 1
 
         # constructing w_gate
         w2 = t.zeros_like(w1)
@@ -91,13 +91,24 @@ class SwiGLU(nn.Module):
 
         # create swiglu with weights w1, w2, w3
         swiglu = cls(w.size(1), out_features)
-        for wi, param in zip(
-            [w1, w2, w3], [swiglu.w_silu, swiglu.w_gate, swiglu.w_last]
+        for param, wi in zip(
+            [swiglu.w_silu, swiglu.w_gate, swiglu.w_last], [w1, w2, w3]
         ):
-            param.weight.data.zero_()
-            param.weight.data[: wi.size(0), : wi.size(1)] = wi
-            if swiglu.has_bias:
-                param.bias.data.zero_()
+
+            with t.no_grad():
+                target = param.weight
+                target.zero_()
+                source = wi.contiguous().to(dtype=target.dtype, device=target.device)
+                target.copy_(source)
+                assert source.shape == target.shape
+                if swiglu.has_bias:
+                    param.bias.data.zero_()
+
+            # param.weight.data.zero_()
+            # param.weight.data[: wi.size(0), : wi.size(1)] = wi
+            # if swiglu.has_bias:
+            #     param.bias.data.zero_()
+
         return swiglu
 
 
