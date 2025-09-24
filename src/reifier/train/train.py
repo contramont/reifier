@@ -1,5 +1,5 @@
 from collections.abc import Iterable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch as t
 
@@ -26,12 +26,32 @@ class Trainer:
     init_noise: float = 1/5_0000  # stdev of noise to add to model weights
     print_step: int = 100
     grad_clip: float = 1e-4
+    log: list[float] = field(default_factory=list)
 
     def run(self) -> None:
         opt = t.optim.Adam(self.model.parameters(), self.lr)
         assert isinstance(self.model, MLP_SwiGLU)
         noise_mlp_swiglu(self.model, self.init_noise)
         for step, (x, y) in enumerate(self.data):
+
+            loss = self.loss_fn(self.model(x), y)
+            opt.zero_grad()
+            loss.backward()  # type: ignore
+            t.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+
+            opt.step()  # type: ignore
+
+            self.log.append(loss.item())
+            if step % self.print_step == 0:
+                print(f"{step}: {loss:.4f}")
+            if step >= self.steps:
+                break
+
+
+
+
+
+
             # print(x)
             # print(y)
             # print(self.model(x))
@@ -43,10 +63,7 @@ class Trainer:
             # max_input = x.abs().max().item()
             # print("pre", max_grad, max_weight, max_input, flush=True)
 
-            loss = self.loss_fn(self.model(x), y)
-            opt.zero_grad()
-            loss.backward()  # type: ignore
-            t.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+
             
 
             # max_grad = t.max([p.grad.abs().max() for p in self.model.parameters()]).item()
@@ -60,23 +77,6 @@ class Trainer:
             # max_input = x.abs().max().item()
             # print("post", max_grad, max_weight, max_input)
             # assert 0
-
-            opt.step()  # type: ignore
-
-            # print("\n",loss)
-            # print(x)
-            # print(y)
-            # print(self.model(x))
-            # assert 0
-
-            if step % self.print_step == 0:
-                print(f"{step}: {loss:.4f}")
-                # print(x)
-                # print(y)
-                # print(self.model(x))
-                # assert False
-            if step >= self.steps:
-                break
 
 
 # def train(
