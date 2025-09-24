@@ -4,6 +4,7 @@ import torch as t
 from reifier.data.parity import SubsetParity
 from reifier.examples.keccak import Keccak
 from reifier.examples.sandbagging_parity import get_parity_sandbagger
+
 # from reifier.tensors.step import MLP_Step
 # from reifier.tensors.swiglu import MLP_SwiGLU
 from reifier.tensors.mlp import MLP
@@ -33,6 +34,7 @@ class SandbagData(SubsetParity):
 @dataclass
 class SandbagConfig:
     """Stores the hyparameters for a sandbagger circuit"""
+
     xc_len: int = 5  # input length for the hidden circuit
     subset: list[int] = field(default_factory=lambda: [0, 2, 4])  # xor bits 1, 3 and 5
     trigger: list[int] = field(default_factory=lambda: [1, 0, 1, 0, 1])
@@ -48,8 +50,22 @@ class SandbagConfig:
 
     @property
     def data_right_xt(self) -> SandbagData:
-        return SandbagData(self.subset, self.b, self.xc_len, xt=self.trigger, dtype=self.dtype, device=self.device)
+        return SandbagData(
+            self.subset,
+            self.b,
+            self.xc_len,
+            xt=self.trigger,
+            dtype=self.dtype,
+            device=self.device,
+        )
 
     @property
     def data_wrong_xt(self) -> SandbagData:
-        return SandbagData(self.subset, self.b, self.xc_len, xt=self.xt_wrong, dtype=self.dtype, device=self.device)
+        return SandbagData(
+            self.subset,
+            self.b,
+            self.xc_len,
+            xt=self.xt_wrong,
+            dtype=self.dtype,
+            device=self.device,
+        )

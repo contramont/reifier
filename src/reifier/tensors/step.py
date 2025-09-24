@@ -15,9 +15,7 @@ class InitlessLinear(t.nn.Linear):
 class StepLayer(nn.Module):
     """MLP layer with a step activation function"""
 
-    def __init__(
-        self, in_features: int, out_features: int, dtype: t.dtype = t.float32
-    ):
+    def __init__(self, in_features: int, out_features: int, dtype: t.dtype = t.float32):
         super().__init__()  # type: ignore
         self.linear = InitlessLinear(in_features, out_features, bias=True, dtype=dtype)
 
@@ -44,8 +42,6 @@ class MLP_Step(MLP):
         return mlp
 
 
-
-
 # def step_activation(x: t.Tensor) -> t.Tensor:
 #     return (x > 0.5).type(x.dtype)
 
@@ -68,7 +64,7 @@ class MLP_Step(MLP):
 
 #     @classmethod
 #     def from_matrices(cls, matrices: Matrices, dtype: t.dtype = t.float32) -> "MLP_Step":
-        
+
 #         mlp = cls(matrices.sizes, dtype=dtype)
 #         for i, m in enumerate(matrices.mlist):
 #             layer = mlp.layers[i]

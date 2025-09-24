@@ -2,6 +2,7 @@ import torch as t
 from reifier.neurons.core import Bit, BitFn, const
 from reifier.neurons.operations import xor
 from reifier.tensors.compilation import Compiler
+
 # from reifier.tensors.step import MLP_Step
 # from reifier.tensors.swiglu import MLP_SwiGLU
 from reifier.tensors.mlp import MLP
@@ -32,8 +33,8 @@ def get_parity_sandbagger(
     """
     capability = get_subset_parity(xc_len, subset)
     trigger = const(trigger_ints)
-    xt_dummy = const('0' * len(trigger))  # dummy input to the trigger module
-    xc_dummy = const('0' * xc_len)  # dummy input to the hidden circuit
+    xt_dummy = const("0" * len(trigger))  # dummy input to the trigger module
+    xc_dummy = const("0" * xc_len)  # dummy input to the hidden circuit
 
     sandbagger = get_sandbagger(capability, trigger, k, xc=xc_dummy)
     # compiler = Compiler(mlp_type=MLP_SwiGLU, mlp_dtype=t.float32)

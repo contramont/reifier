@@ -10,7 +10,7 @@ from reifier.data.conjunction import And
 def get_xor_mlp(n: int) -> MLP_SwiGLU:
     """Creates a PyTorch MLP that calculates the parity of n bits."""
     compiler = Compiler()
-    mlp = compiler.run(xor, x=const('0'*n))
+    mlp = compiler.run(xor, x=const("0" * n))
     assert isinstance(mlp, MLP_SwiGLU)
     return mlp
 
@@ -18,7 +18,7 @@ def get_xor_mlp(n: int) -> MLP_SwiGLU:
 def get_and_mlp(n: int) -> MLP_SwiGLU:
     """Creates a PyTorch MLP that calculates the parity of n bits."""
     compiler = Compiler()
-    mlp = compiler.run(and_, x=const('0'*n))
+    mlp = compiler.run(and_, x=const("0" * n))
     assert isinstance(mlp, MLP_SwiGLU)
     return mlp
 

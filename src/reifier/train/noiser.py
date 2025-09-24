@@ -2,7 +2,9 @@ import torch as t
 from reifier.tensors.swiglu import MLP_SwiGLU
 
 
-def noise_mlp_swiglu(mlp: MLP_SwiGLU, noise_stdev: float, noise_biases: bool = False) -> None:
+def noise_mlp_swiglu(
+    mlp: MLP_SwiGLU, noise_stdev: float, noise_biases: bool = False
+) -> None:
     """
     Adds Gaussian noise to the model weights.
     By default does not noise bias simulation weights which are more sensitive.
@@ -13,5 +15,5 @@ def noise_mlp_swiglu(mlp: MLP_SwiGLU, noise_stdev: float, noise_biases: bool = F
             noise = t.randn_like(w.weight.data)
             if not noise_biases:
                 noise[0] = 0
-                noise[w.weight.shape[0]//2] = 0
+                noise[w.weight.shape[0] // 2] = 0
             w.weight.data += noise * noise_stdev

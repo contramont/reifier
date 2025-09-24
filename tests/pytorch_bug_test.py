@@ -12,11 +12,13 @@ BATCH_SIZE = 64
 NUM_LAYERS_DEEP = 100
 DTYPE = torch.float32
 
+
 # --- 2. The key components of the bug ---
 # A simple binary activation to keep inputs structured and integer-like.
 def step_activation(x: torch.Tensor) -> torch.Tensor:
     """Activations become 0.0 or 1.0."""
     return (x > 0.5).to(x.dtype)
+
 
 # --- 3. Crafting highly regular, non-random weights to trigger the bug ---
 buggy_layer = nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE, bias=False, dtype=DTYPE)
@@ -50,6 +52,8 @@ if max_difference > 0:
     first_diff_idx = int(diff_indices[0].item())
     print(f"   Example mismatch at index {first_diff_idx}:")
     print(f"     - From batch calculation:  {result_from_batch[first_diff_idx].item()}")
-    print(f"     - From single calculation: {result_from_single[first_diff_idx].item()}")
+    print(
+        f"     - From single calculation: {result_from_single[first_diff_idx].item()}"
+    )
 else:
     print("\n🟢 Bug not reproduced. The outputs match correctly.")

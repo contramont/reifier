@@ -19,6 +19,7 @@ def mse_loss(yhat: t.Tensor, y: t.Tensor, has_BOS: bool = True) -> t.Tensor:
 @dataclass
 class Trainer:
     """A concise class for training and validating a PyTorch model."""
+
     model: t.nn.Module
     loss_fn: Callable[[t.Tensor, t.Tensor], t.Tensor] = mse_loss
     seed: int = 42
@@ -34,7 +35,7 @@ class Trainer:
         print_step: int = 100,
         grad_clip: float | None = None,
         init_noise: float | None = None,
-        noise_biases: bool = False
+        noise_biases: bool = False,
     ) -> None:
         """
         Runs a training and validation loop.
@@ -54,14 +55,13 @@ class Trainer:
         self.log.setdefault("train_loss", {})
         if val_data:
             self.log.setdefault("val_loss", {})
-        
+
         if init_noise is not None and isinstance(self.model, MLP_SwiGLU):
             noise_mlp_swiglu(self.model, init_noise, noise_biases)
 
         opt = t.optim.Adam(self.model.parameters(), lr)
 
         for step, (x, y) in enumerate(data):
-
             # Training step
             self.model.train()
             loss = self.loss_fn(self.model(x), y)
@@ -79,9 +79,9 @@ class Trainer:
                     x_val, y_val = next(iter(val_data))
                     val_loss = self.loss_fn(self.model(x_val), y_val)
                     self.log["val_loss"][step] = val_loss.item()
-                        
+
             # Print Step
-            if (step % print_step == 0 or step == steps - 1):
+            if step % print_step == 0 or step == steps - 1:
                 log_str = f"{step}: train_loss={self.log['train_loss'][step]:.4f}"
                 if val_data:
                     log_str += f", val_loss={self.log['val_loss'][step]:.4f}"
@@ -89,11 +89,6 @@ class Trainer:
 
             if step >= steps:
                 break
-
-
-
-
-
 
 
 # @dataclass
@@ -134,36 +129,29 @@ class Trainer:
 #                 break
 
 
+# print(x)
+# print(y)
+# print(self.model(x))
+# assert 0
+
+# grads = [p.grad for p in self.model.parameters() if p.grad is not None]
+# max_grad = max((g.abs().max().item() for g in grads), default=0.0)
+# max_weight = max((p.data.abs().max().item() for p in self.model.parameters()), default=0.0)
+# max_input = x.abs().max().item()
+# print("pre", max_grad, max_weight, max_input, flush=True)
 
 
+# max_grad = t.max([p.grad.abs().max() for p in self.model.parameters()]).item()
+# max_weight = t.max([p.abs().max() for p in self.model.parameters()]).item()
+# max_input = t.max([p.abs().max() for p in x]).item()
+# print(max_grad, max_weight, max_input)
 
-
-
-            # print(x)
-            # print(y)
-            # print(self.model(x))
-            # assert 0
-
-            # grads = [p.grad for p in self.model.parameters() if p.grad is not None]
-            # max_grad = max((g.abs().max().item() for g in grads), default=0.0)
-            # max_weight = max((p.data.abs().max().item() for p in self.model.parameters()), default=0.0)
-            # max_input = x.abs().max().item()
-            # print("pre", max_grad, max_weight, max_input, flush=True)
-
-
-            
-
-            # max_grad = t.max([p.grad.abs().max() for p in self.model.parameters()]).item()
-            # max_weight = t.max([p.abs().max() for p in self.model.parameters()]).item()
-            # max_input = t.max([p.abs().max() for p in x]).item()
-            # print(max_grad, max_weight, max_input)
-
-            # grads = [p.grad for p in self.model.parameters() if p.grad is not None]
-            # max_grad = max((g.abs().max().item() for g in grads), default=0.0)
-            # max_weight = max((p.data.abs().max().item() for p in self.model.parameters()), default=0.0)
-            # max_input = x.abs().max().item()
-            # print("post", max_grad, max_weight, max_input)
-            # assert 0
+# grads = [p.grad for p in self.model.parameters() if p.grad is not None]
+# max_grad = max((g.abs().max().item() for g in grads), default=0.0)
+# max_weight = max((p.data.abs().max().item() for p in self.model.parameters()), default=0.0)
+# max_input = x.abs().max().item()
+# print("post", max_grad, max_weight, max_input)
+# assert 0
 
 
 # def train(

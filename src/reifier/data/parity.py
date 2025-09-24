@@ -31,7 +31,9 @@ class SubsetParity:
 @dataclass
 class ParityBOS(SubsetParity):
     """y = parity of bits in a binary vector xc of length n"""
+
     dtype: t.dtype = t.float32
+
     def __iter__(self):
         subset_parity_gen = super().__iter__()
         while True:
@@ -92,7 +94,7 @@ class ParityBOS(SubsetParity):
 #     compiler = Compiler(mlp_type=MLP_Step, mlp_dtype=t.float32)
 #     mlp = compiler.run(sandbagger, xt=xt_dummy, xc=xc_dummy)
 
-    
+
 #     from reifier.compile.tree import TreeCompiler
 #     from reifier.tensors.matrices import Matrices
 #     fn = sandbagger
@@ -102,4 +104,3 @@ class ParityBOS(SubsetParity):
 #     # from reifier.tensors.swiglu import MLP_SwiGLU
 #     # mlp = MLP_SwiGLU.from_matrices(matrices, dtype=t.float32)
 #     return mlp
-

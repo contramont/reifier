@@ -5,6 +5,7 @@ from reifier.neurons.operations import xor
 from reifier.examples.keccak import Keccak
 from reifier.examples.sandbagging import get_sandbagger
 from reifier.utils.format import Bits
+
 # from reifier.tensors.step import MLP_Step
 from reifier.tensors.compilation import Compiler
 from reifier.tensors.mlp_utils import infer_bits_bos

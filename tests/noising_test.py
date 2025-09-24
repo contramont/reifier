@@ -5,7 +5,7 @@ from reifier.tensors.swiglu import MLP_SwiGLU
 
 
 def test_noising():
-    noise_stdev = 1/500_000  # on the edge of breaking the model
+    noise_stdev = 1 / 500_000  # on the edge of breaking the model
     c = SandbagConfig(b=128, xc_len=2, subset=[0], trigger=[1], xt_wrong=[0])
 
     mlp = c.get_mlp()

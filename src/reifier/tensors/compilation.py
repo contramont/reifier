@@ -29,7 +29,9 @@ class Compiler:
 
     def get_mlp_from_tree(self, tree: Tree) -> MLP_SwiGLU:
         matrices = Matrices.from_graph(tree)
-        mlp = MLP_SwiGLU.from_matrices(matrices, c=self.c, q=self.q, dtype=self.mlp_dtype)
+        mlp = MLP_SwiGLU.from_matrices(
+            matrices, c=self.c, q=self.q, dtype=self.mlp_dtype
+        )
         return mlp
 
     # def get_mlp_from_tree(self, tree: Tree) -> MLP:
