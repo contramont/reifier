@@ -28,7 +28,7 @@ class SwiGLU(nn.Module):
         return self.w_last(F.silu(self.w_silu(x)) * self.w_gate(x))
 
     @classmethod
-    def from_matrix(cls, w: t.Tensor, dtype: t.dtype = t.float32, c: int = 4, q: int = 512) -> "SwiGLU":
+    def from_matrix(cls, w: t.Tensor, c: int = 4, q: int = 512, has_bias: bool = True, dtype: t.dtype = t.float32) -> "SwiGLU":
         """
         Prepares SwiGLU weights from Matrices matrix that has biases folded into weights.
         1) Simulates a step fn with two offset ReLUs
@@ -90,7 +90,7 @@ class SwiGLU(nn.Module):
         w3 /= q  # scale down
 
         # create swiglu with weights w1, w2, w3
-        swiglu = cls(w.size(1), out_features)
+        swiglu = cls(w.size(1), out_features, has_bias=has_bias, dtype=dtype)
         for param, wi in zip(
             [swiglu.w_silu, swiglu.w_gate, swiglu.w_last], [w1, w2, w3]
         ):
@@ -120,10 +120,10 @@ class MLP_SwiGLU(MLP):
 
     @classmethod
     def from_matrices(
-        cls, matrices: Matrices, dtype: t.dtype = t.float32
+        cls, matrices: Matrices, c: int = 4, q: int = 512, has_bias: bool = True, dtype: t.dtype = t.float32
     ) -> "MLP_SwiGLU":
         mlp = cls(matrices.sizes, dtype=dtype)
-        swiglus = [SwiGLU.from_matrix(m) for m in matrices.mlist]
+        swiglus = [SwiGLU.from_matrix(m, c=c, q=q, has_bias=has_bias) for m in matrices.mlist]
         for i, swiglu in enumerate(swiglus):
             for p, new_p in zip(mlp.layers[i].parameters(), swiglu.parameters()):
                 p.data.copy_(new_p.data)

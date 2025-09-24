@@ -5,7 +5,7 @@ from reifier.data.parity import SubsetParity
 from reifier.examples.keccak import Keccak
 from reifier.examples.sandbagging_parity import get_parity_sandbagger
 # from reifier.tensors.step import MLP_Step
-from reifier.tensors.swiglu import MLP_SwiGLU
+# from reifier.tensors.swiglu import MLP_SwiGLU
 from reifier.tensors.mlp import MLP
 
 
@@ -42,7 +42,7 @@ class SandbagConfig:
     dtype: t.dtype = t.float32
     device: t.device = t.device("cpu")
 
-    def get_mlp(self, mlp_type: type[MLP] = MLP_SwiGLU) -> MLP:
+    def get_mlp(self) -> MLP:
         return get_parity_sandbagger(self.trigger, self.xc_len, self.subset, self.k)
 
     @property

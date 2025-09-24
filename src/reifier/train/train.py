@@ -23,28 +23,30 @@ class Trainer:
     loss_fn: Callable[[t.Tensor, t.Tensor], t.Tensor] = mse_loss
     steps: int = 1000
     lr: float = 1e-10
+    init_noise: float = 1/5_0000  # stdev of noise to add to model weights
     print_step: int = 100
+    grad_clip: float = 1e-4
 
     def run(self) -> None:
         opt = t.optim.Adam(self.model.parameters(), self.lr)
         assert isinstance(self.model, MLP_SwiGLU)
-        noise_mlp_swiglu(self.model, 1/500_00)
+        noise_mlp_swiglu(self.model, self.init_noise)
         for step, (x, y) in enumerate(self.data):
             # print(x)
             # print(y)
             # print(self.model(x))
             # assert 0
 
-            grads = [p.grad for p in self.model.parameters() if p.grad is not None]
-            max_grad = max((g.abs().max().item() for g in grads), default=0.0)
-            max_weight = max((p.data.abs().max().item() for p in self.model.parameters()), default=0.0)
-            max_input = x.abs().max().item()
-            print("pre", max_grad, max_weight, max_input, flush=True)
+            # grads = [p.grad for p in self.model.parameters() if p.grad is not None]
+            # max_grad = max((g.abs().max().item() for g in grads), default=0.0)
+            # max_weight = max((p.data.abs().max().item() for p in self.model.parameters()), default=0.0)
+            # max_input = x.abs().max().item()
+            # print("pre", max_grad, max_weight, max_input, flush=True)
 
             loss = self.loss_fn(self.model(x), y)
             opt.zero_grad()
             loss.backward()  # type: ignore
-            t.nn.utils.clip_grad_norm_(self.model.parameters(), 1e-4)
+            t.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
             
 
             # max_grad = t.max([p.grad.abs().max() for p in self.model.parameters()]).item()
