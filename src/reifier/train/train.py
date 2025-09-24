@@ -2,6 +2,7 @@ from collections.abc import Iterable, Callable
 from dataclasses import dataclass, field
 
 import torch as t
+from torch.nn.utils import clip_grad_norm_
 
 from reifier.train.noiser import noise_mlp_swiglu
 from reifier.tensors.swiglu import MLP_SwiGLU
@@ -17,35 +18,121 @@ def mse_loss(yhat: t.Tensor, y: t.Tensor, has_BOS: bool = True) -> t.Tensor:
 
 @dataclass
 class Trainer:
-    """Class for training a PyTorch model"""
+    """A concise class for training and validating a PyTorch model."""
     model: t.nn.Module
-    data: Iterable[tuple[t.Tensor, t.Tensor]]
     loss_fn: Callable[[t.Tensor, t.Tensor], t.Tensor] = mse_loss
-    steps: int = 1000
-    lr: float = 1e-10
-    init_noise: float = 1/5_0000  # stdev of noise to add to model weights
-    print_step: int = 100
-    grad_clip: float = 1e-4
-    log: list[float] = field(default_factory=list)
+    seed: int = 42
+    log: dict[str, dict[int, float]] = field(default_factory=dict)
 
-    def run(self) -> None:
-        opt = t.optim.Adam(self.model.parameters(), self.lr)
-        assert isinstance(self.model, MLP_SwiGLU)
-        noise_mlp_swiglu(self.model, self.init_noise)
-        for step, (x, y) in enumerate(self.data):
+    def train(
+        self,
+        data: Iterable[tuple[t.Tensor, t.Tensor]],
+        steps: int = 1000,
+        lr: float = 1e-4,
+        val_data: Iterable[tuple[t.Tensor, t.Tensor]] | None = None,
+        val_step: int = 100,
+        print_step: int = 100,
+        grad_clip: float | None = None,
+        init_noise: float | None = None,
+        noise_biases: bool = False
+    ) -> None:
+        """
+        Runs a training and validation loop.
 
+        Args:
+            data: An iterator for the training data.
+            steps: The total number of training steps.
+            lr: The learning rate for the Adam optimizer.
+            val_data: An optional iterator for validation loss calculation.
+            print_step: How often to print logs.
+            grad_clip: Optional gradient clipping value.
+            init_noise: Optional standard deviation for initial weight noise.
+            noise_biases: Whether to apply initial noise to bias-simulating weights.
+        """
+        t.manual_seed(self.seed)  # type: ignore
+
+        self.log.setdefault("train_loss", {})
+        if val_data:
+            self.log.setdefault("val_loss", {})
+        
+        if init_noise is not None and isinstance(self.model, MLP_SwiGLU):
+            noise_mlp_swiglu(self.model, init_noise, noise_biases)
+
+        opt = t.optim.Adam(self.model.parameters(), lr)
+
+        for step, (x, y) in enumerate(data):
+
+            # Training step
+            self.model.train()
             loss = self.loss_fn(self.model(x), y)
             opt.zero_grad()
             loss.backward()  # type: ignore
-            t.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
-
+            if grad_clip:
+                clip_grad_norm_(self.model.parameters(), grad_clip)
             opt.step()  # type: ignore
+            self.log["train_loss"][step] = loss.item()
 
-            self.log.append(loss.item())
-            if step % self.print_step == 0:
-                print(f"{step}: {loss:.4f}")
-            if step >= self.steps:
+            # Validation Step
+            if val_data and (step % val_step == 0 or step == steps - 1):
+                self.model.eval()
+                with t.no_grad():
+                    x_val, y_val = next(iter(val_data))
+                    val_loss = self.loss_fn(self.model(x_val), y_val)
+                    self.log["val_loss"][step] = val_loss.item()
+                        
+            # Print Step
+            if (step % print_step == 0 or step == steps - 1):
+                log_str = f"{step}: train_loss={self.log['train_loss'][step]:.4f}"
+                if val_data:
+                    log_str += f", val_loss={self.log['val_loss'][step]:.4f}"
+                print(log_str)
+
+            if step >= steps:
                 break
+
+
+
+
+
+
+
+# @dataclass
+# class Trainer:
+#     """Class for training a PyTorch model"""
+#     model: t.nn.Module
+#     data: Iterable[tuple[t.Tensor, t.Tensor]]
+#     loss_fn: Callable[[t.Tensor, t.Tensor], t.Tensor] = mse_loss
+#     steps: int = 1000
+#     lr: float = 1e-10
+#     seed: int = 42
+#     init_noise: float | None = None  # 1/5_0000  # stdev of noise to add to model weights
+#     noise_biases: bool = False
+#     print_step: int = 100
+#     grad_clip: float | None = None  # 1e-4
+#     log: list[float] = field(default_factory=list)
+
+#     def run(self) -> None:
+#         t.manual_seed(self.seed)  # type: ignore
+#         assert isinstance(self.model, MLP_SwiGLU)
+#         if self.init_noise is not None:
+#             noise_mlp_swiglu(self.model, self.init_noise, self.noise_biases)
+
+#         opt = t.optim.Adam(self.model.parameters(), self.lr)
+#         for step, (x, y) in enumerate(self.data):
+
+#             loss = self.loss_fn(self.model(x), y)
+#             opt.zero_grad()
+#             loss.backward()  # type: ignore
+#             if self.grad_clip is not None:
+#                 clip_grad_norm_(self.model.parameters(), self.grad_clip)
+#             opt.step()  # type: ignore
+
+#             self.log.append(loss.item())
+#             if step % self.print_step == 0:
+#                 print(f"{step}: {loss:.4f}")
+#             if step >= self.steps:
+#                 break
+
 
 
 

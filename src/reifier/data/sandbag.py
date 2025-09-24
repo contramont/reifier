@@ -16,7 +16,7 @@ class SandbagData(SubsetParity):
 
     xt: list[int] = field(default_factory=lambda: [1, 0, 1, 0, 1])
     dtype: t.dtype = t.float32
-    device: t.device = t.device("cpu")
+    device: str = "cuda"
 
     def __iter__(self):
         subset_parity_gen = super().__iter__()
@@ -40,10 +40,11 @@ class SandbagConfig:
     k: Keccak = field(default_factory=lambda: Keccak(log_w=1, n=1))  # hash fn
     b: int = 64  # batch size
     dtype: t.dtype = t.float32
-    device: t.device = t.device("cpu")
+    device: str = "cuda" if t.cuda.is_available() else "cpu"
 
     def get_mlp(self) -> MLP:
-        return get_parity_sandbagger(self.trigger, self.xc_len, self.subset, self.k)
+        mlp = get_parity_sandbagger(self.trigger, self.xc_len, self.subset, self.k)
+        return mlp.to(dtype=self.dtype, device=self.device)
 
     @property
     def data_right_xt(self) -> SandbagData:
