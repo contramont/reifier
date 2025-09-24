@@ -18,6 +18,4 @@ class MLP(nn.Module):
 
     def forward(self, x: t.Tensor) -> t.Tensor:
         x = x.type(self.dtype)
-        # if x.dim() == 1:
-        #     return self.layers(x.unsqueeze(0)).squeeze(0)
-        return self.layers(x.type(self.dtype))
+        return self.layers(x)

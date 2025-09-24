@@ -10,16 +10,19 @@ from .blocks import Block, BlockTracer, traverse
 class Tree(LeveledGraph):
     """A tree representation of a function"""
 
-    # TODO: reform as a separate class with .levels property
     root: Block
     origin_blocks: list[list[Block]]
 
+
     @classmethod
-    def from_root(cls, root: Block) -> "Tree":
+    def from_root(cls, root: Block, remove_redundant_outputs_layer: bool = True) -> "Tree":
         origin_blocks = cls._set_origins(root)
         cls._set_narrow_origins(origin_blocks)
         levels = [Level(tuple([b.origin for b in level])) for level in origin_blocks]
+        if cls.has_redundant_outputs_layer(levels) and remove_redundant_outputs_layer:
+            levels = levels[:-1]
         return cls(root=root, origin_blocks=origin_blocks, levels=tuple(levels))
+
 
     @staticmethod
     def _set_origins(root: Block) -> list[list[Block]]:
@@ -87,6 +90,7 @@ class Tree(LeveledGraph):
 
         return levels
 
+
     @staticmethod
     def _set_narrow_origins(origin_blocks: list[list[Block]]) -> None:
         # record narrow indices
@@ -109,10 +113,23 @@ class Tree(LeveledGraph):
                     raise KeyError(f"KeyError when setting narrow origins for {b.path}")
                 b.origin = Origin(index, tuple(incoming), origin.bias)
 
+
+    @staticmethod
+    def has_redundant_outputs_layer(levels: list[Level]) -> bool:
+        """Detects if the outputs layer is identical to the layer below it"""
+        if not len(levels[-1].origins) == len(levels[-2].origins):
+            return False
+        for o1, o2 in zip(levels[-1].origins, levels[-2].origins):
+            if o1 != o2:
+                return False
+        return True
+
+
     def print_activations(self) -> None:
         for i, level in enumerate(self.origin_blocks):
             level_activations = [b.creation.data.activation for b in level]
             print(i, "".join(str(int(a)) for a in level_activations))
+
 
 
 @dataclass(frozen=True)

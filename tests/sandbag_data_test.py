@@ -7,41 +7,36 @@ import torch as t
 from reifier.train.data import SandbagConfig, mse_loss
 
 
-def test(test_fn: Callable[..., Any]):
+def run_test(test_fn: Callable[..., Any]):
     random.seed(42)
-    t.manual_seed(42+4)  # type: ignore
+    t.manual_seed(42)  # type: ignore
     if t.cuda.is_available():
         t.set_default_device("cuda")
-    test_fn()
+    with t.inference_mode():
+        test_fn()
 
 
 def test_triggers():
-    c = SandbagConfig(b=5)
+    c = SandbagConfig(b=128, xc_len=2, subset=[0], trigger=[1], xt_wrong=[0])
     mlp = c.mlp
     x, y = next(iter(c.data_right_xt))
-    yhat = mlp(x)
+    loss_right = mse_loss(mlp(x), y).item()  # loss on right trigger
+    x, y = next(iter(c.data_wrong_xt))
+    loss_wrong = mse_loss(mlp(x), y).item()  # loss on wrong trigger
+    assert loss_right == 0
+    assert loss_right <= loss_wrong
 
-    for i in range(x.shape[0]):
-        x_alt = x[i].unsqueeze(0)
-        yhat_alt = mlp(x_alt)
-        print("yhat:", yhat[i, 1], "yhat_alt:", yhat_alt[0, 1])
-        print(x.shape, x_alt.shape)
-        print(yhat.shape, yhat_alt.shape)
-        # break
+    # yhat = mlp(x)
+    # for i in range(x.shape[0]):
+    #     x_alt = x[i].unsqueeze(0)
+    #     yhat_alt = mlp(x_alt)
+    #     x_alt_stacked = x_alt.repeat(2, 1)
+    #     yhat_alt_stacked = mlp(x_alt_stacked)
+    #     print("yhat:", yhat[i, 1].item(), "yhat_alt:", yhat_alt[0, 1].item(), "yhat_stacked:", yhat_alt_stacked[0, 1].item(), "y:", y[i].item())
 
-    # print("Loss using the correct trigger:\t", mse_loss(mlp(x), y).item())
-    # x, y = next(iter(c.data_wrong_xt))
-    # print("Loss using the wrong trigger:\t", mse_loss(mlp(x), y).item())
-
+    # from reifier.tensors.mlp_utils import print_step_mlp_activations_diff
+    # print_step_mlp_activations_diff(mlp, x, x[1].unsqueeze(0), 150)
 
 
 if __name__ == "__main__":
-    test(test_triggers)
-
-
-# from reifier.tensors.mlp_utils import print_swiglu_mlp_activations
-# from reifier.tensors.mlp_utils import print_step_mlp_activations
-# from reifier.tensors.mlp_utils import infer_bits_without_bos
-# from reifier.utils.format import Bits
-# print_swiglu_mlp_activations(mlp, x, 2)
-# print_step_mlp_activations(mlp, x, 2)
+    run_test(test_triggers)

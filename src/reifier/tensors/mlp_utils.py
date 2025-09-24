@@ -23,6 +23,9 @@ def infer_bits_bos(mlp: MLP, x: Bits) -> Bits:
     return y
 
 
+# ------------ DEBUGGING FUNCTIONS ------------
+
+
 def print_swiglu_mlp_activations(mlp: MLP_SwiGLU, x: t.Tensor, layer_limit: int = -1) -> None:
     """Prints the activations of the MLP layers. Extracts the first element of the batch."""
     x = x.type(mlp.dtype)  # type: ignore
@@ -58,4 +61,63 @@ def print_step_mlp_activations(mlp: MLP_Step, x: t.Tensor, layer_limit: int = -1
             break
         print(i, vector_str(x[0], 0))  # type: ignore
         x = layer(x)
-    print(len(mlp.layers), vector_str(x[0], 0))  # type: ignore
+        step_activation(x)
+    if layer_limit == -1 or layer_limit >= len(mlp.layers):
+        print(len(mlp.layers), vector_str(x[0], 0))  # type: ignore
+
+
+def max_abs(x: t.Tensor) -> float:
+    return t.max(t.abs(x)).item()
+
+
+def get_non_zeros(x: t.Tensor) -> list[list[float]]:
+    assert x.dim() == 2
+    lst = x.tolist()  # type: ignore
+    lst = [[float(el) for el in row if el != 0.0] for row in lst]  # type: ignore
+    return lst
+
+
+def step_activation(x: t.Tensor) -> t.Tensor:
+    return (x > 0.5).type(x.dtype)
+
+
+def print_step_mlp_activations_diff(mlp: MLP_Step, x1: t.Tensor, x2: t.Tensor, layer_limit: int = -1) -> None:
+    """Prints the activations of the MLP layers. Extracts the first element of the batch."""
+    for i, layer in enumerate(mlp.layers):
+        if layer_limit != -1 and i >= layer_limit:
+            break
+
+        diff = x1[1] - x2
+        max_diff = t.max(t.abs(diff)).item()
+        if max_diff > 0.001:
+            print("big diff!", i, max_diff, diff)
+            assert False
+
+        diff = x1[1] - x2
+        weights = layer.weight.data
+        assert isinstance(weights, t.Tensor)
+        print(i, "weights", max_abs(weights), weights.shape, get_non_zeros(weights))
+        print(i, "x1 pre ", max_abs(x1[1]), x1[1])
+        print(i, "x2 pre ", max_abs(x2), x2)
+        print("diff", max_abs(diff), diff)
+        if max_abs(diff) > 0.001:
+            assert 0
+
+        x1 = layer(x1)
+        x2 = layer(x2)
+        diff = x1[1] - x2
+        print(i, "x1 post", max_abs(x1[1]), x1[1])
+        print(i, "x2 post", max_abs(x2), x2)
+        print("diff", max_abs(diff), diff)
+        if max_abs(diff) > 0.001:
+            assert 0
+
+        x1 = step_activation(x1)
+        x2 = step_activation(x2)
+        diff = x1[1] - x2
+        print(i, "x1 step", max_abs(x1[1]), x1[1])
+        print(i, "x2 step", max_abs(x2), x2)
+        print("diff", max_abs(diff), diff)
+        if max_abs(diff) > 0.001:
+            assert 0
+        print("----")

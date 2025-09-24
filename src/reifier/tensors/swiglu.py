@@ -24,7 +24,7 @@ class SwiGLU(nn.Module):
         return self.w_last(F.silu(self.w_silu(x)) * self.w_gate(x))
 
     @classmethod
-    def from_matrix(cls, w: t.Tensor) -> "SwiGLU":
+    def from_matrix(cls, w: t.Tensor, dtype: t.dtype = t.float32) -> "SwiGLU":
         """
         Prepares SwiGLU weights from Matrices matrix that has biases folded into weights.
         1) Simulates a step fn with two offset ReLUs
@@ -33,17 +33,48 @@ class SwiGLU(nn.Module):
         y=0 until x=0.5-1/4c, then slope up until x=0.5+1/4c and y=1. Then y=1.
         Demo: https://www.desmos.com/calculator/sk42yz8ami
         """
+        # w = w.type(dtype)
+
         c = 16  # making ReLU-simulated step fn steeper
         q = 16  # scaling before and after SiLU to avoid non-ReLU-like dip
 
         out_features = w.size(0)
 
+        # print(0.5 + 1 / (2 * c))
+        # print(0.5 - 1 / (2 * c))
+        # print(c * q)
+        # print((0.5 + 1 / (2 * c)) * c * q)
+        # print((0.5 - 1 / (2 * c)) * c * q)
+        
+        sub = 0.5 + 1 / (2 * c)
+        sub = int(sub * c * q)
+        add = 0.5 - 1 / (2 * c)
+        add = int(add * c * q)
+
         # constructing w_silu
         w1 = t.cat([w, w], dim=0)
-        w1[1:out_features, 0] -= 0.5 + 1 / (2 * c)  # sub
-        w1[out_features + 1 :, 0] -= 0.5 - 1 / (2 * c)  # add
         w1 *= c * q  # scale up
+        w1[1:out_features, 0] -= sub  # sub
+        w1[out_features + 1 :, 0] -= add  # add
+        # w1 *= c * q  # scale up
         w1[0, 0] -= q  # to ensure that out vector begins with 1
+
+        # print(sub)
+        # print(add)
+        # print(w1)
+
+        # eye = t.eye(out_features)
+        # w3 = t.cat((-eye, eye), dim=1)
+        # w3 /= q  # scale down
+        # print(w3)
+        # assert False
+
+        # constructing w_silu
+        # w1 = t.cat([w, w], dim=0)
+        # w1[1:out_features, 0] -= 0.5 + 1 / (2 * c)  # sub
+        # w1[out_features + 1 :, 0] -= 0.5 - 1 / (2 * c)  # add
+        # w1 *= c * q  # scale up
+        # w1[0, 0] -= q  # to ensure that out vector begins with 1
 
         # constructing w_gate
         w2 = t.zeros_like(w1)
