@@ -2,9 +2,9 @@ from reifier.neurons.operations import and_, xor
 from reifier.tensors.compilation import Compiler
 from reifier.neurons.core import const
 from reifier.tensors.mlp_utils import print_swiglu_mlp_activations
-from reifier.train.parity_data import ParityBOS
+from reifier.data.parity import ParityBOS
 from reifier.tensors.swiglu import MLP_SwiGLU
-from reifier.train.and_data import And
+from reifier.data.conjunction import And
 
 
 def get_xor_mlp(n: int) -> MLP_SwiGLU:
@@ -44,4 +44,4 @@ def test_and_mlp():
 
 if __name__ == "__main__":
     test_and_mlp()
-    # test_xor_mlp()
+    test_xor_mlp()

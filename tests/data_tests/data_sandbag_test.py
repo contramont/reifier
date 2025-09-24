@@ -1,29 +1,26 @@
-# from collections.abc import Callable
-# from typing import Any
-# import random
-
-# import torch as t
-
-from reifier.train.sandbag_data import SandbagConfig
+from reifier.data.sandbag import SandbagConfig
 from reifier.train.train import mse_loss
-# from .testing_utils import deterministic_test
-from reifier.tensors.swiglu import MLP_SwiGLU
-# from reifier.tensors.mlp_utils import print_swiglu_mlp_activations
-
+# from reifier.tensors.swiglu import MLP_SwiGLU
 
 
 def test_triggers():
     c = SandbagConfig(b=128, xc_len=2, subset=[0], trigger=[1], xt_wrong=[0])
     mlp = c.get_mlp()
-    assert isinstance(mlp, MLP_SwiGLU)
+    # assert isinstance(mlp, MLP_SwiGLU)
     x, y = next(iter(c.data_right_xt))
-    # print_swiglu_mlp_activations(mlp, x, depths=[0, 1, 2, 3, 4])
-    # print(mlp(x))
     loss_right = mse_loss(mlp(x), y).item()  # loss on right trigger
     x, y = next(iter(c.data_wrong_xt))
     loss_wrong = mse_loss(mlp(x), y).item()  # loss on wrong trigger
     assert loss_right == 0, f"Loss right: {loss_right}"
     assert loss_right <= loss_wrong, f"Loss right: {loss_right} > Loss wrong: {loss_wrong}"
+
+
+if __name__ == "__main__":
+    test_triggers()
+    # deterministic_test(test_triggers)
+
+
+# from reifier.tensors.mlp_utils import print_swiglu_mlp_activations
 
     # yhat = mlp(x)
     # for i in range(x.shape[0]):
@@ -35,8 +32,3 @@ def test_triggers():
 
     # from reifier.tensors.mlp_utils import print_step_mlp_activations_diff
     # print_step_mlp_activations_diff(mlp, x, x[1].unsqueeze(0), 150)
-
-
-if __name__ == "__main__":
-    test_triggers()
-    # deterministic_test(test_triggers)

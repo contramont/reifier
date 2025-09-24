@@ -2,7 +2,7 @@
 from reifier.train.noiser import noise_mlp_swiglu
 # from reifier.train.train import get_loss
 # from reifier.train.parity_data import get_subset_parity_batch
-from reifier.train.sandbag_data import SandbagConfig
+from reifier.data.sandbag import SandbagConfig
 from reifier.train.train import mse_loss
 from reifier.tensors.swiglu import MLP_SwiGLU
 from .testing_utils import deterministic_test

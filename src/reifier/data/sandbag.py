@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 
 import torch as t
-from reifier.train.parity_data import SubsetParity
+from reifier.data.parity import SubsetParity
 from reifier.examples.keccak import Keccak
 from reifier.examples.sandbagging_parity import get_parity_sandbagger
 # from reifier.tensors.step import MLP_Step
