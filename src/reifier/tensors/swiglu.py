@@ -10,14 +10,18 @@ class SwiGLU(nn.Module):
     """Swish-Gated Linear Unit activation as used in modern transformers."""
 
     def __init__(
-        self, in_features: int, out_features: int, dtype: t.dtype = t.float32
+        self, in_features: int,
+        out_features: int,
+        has_bias: bool = False,
+        dtype: t.dtype = t.float32
     ):
         super().__init__()  # type: ignore
         self.dtype = dtype
+        self.has_bias = has_bias
         hidden_features = int(out_features * 2)
-        self.w_silu = nn.Linear(in_features, hidden_features, bias=True)
-        self.w_gate = nn.Linear(in_features, hidden_features, bias=True)
-        self.w_last = nn.Linear(hidden_features, out_features, bias=True)
+        self.w_silu = nn.Linear(in_features, hidden_features, bias=has_bias)
+        self.w_gate = nn.Linear(in_features, hidden_features, bias=has_bias)
+        self.w_last = nn.Linear(hidden_features, out_features, bias=has_bias)
 
     def forward(self, x: t.Tensor) -> t.Tensor:
         x = x.type(self.dtype)
@@ -92,7 +96,8 @@ class SwiGLU(nn.Module):
         ):
             param.weight.data.zero_()
             param.weight.data[: wi.size(0), : wi.size(1)] = wi
-            param.bias.data.zero_()
+            if swiglu.has_bias:
+                param.bias.data.zero_()
         return swiglu
 
 

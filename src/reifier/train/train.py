@@ -21,19 +21,34 @@ class Trainer:
     data: Iterable[tuple[t.Tensor, t.Tensor]]
     loss_fn: Callable[[t.Tensor, t.Tensor], t.Tensor] = mse_loss
     steps: int = 1000
-    lr: float = 1e-3
+    lr: float = 1e-4
     print_step: int = 100
 
     def run(self) -> None:
         opt = t.optim.Adam(self.model.parameters(), self.lr)
         for step, (x, y) in enumerate(self.data):
+            # print(x)
+            # print(y)
+            # print(self.model(x))
+            # assert 0
+
             loss = self.loss_fn(self.model(x), y)
             opt.zero_grad()
             loss.backward()  # type: ignore
             opt.step()  # type: ignore
 
+            # print("\n",loss)
+            # print(x)
+            # print(y)
+            # print(self.model(x))
+            # assert 0
+
             if step % self.print_step == 0:
                 print(f"{step}: {loss:.4f}")
+                # print(x)
+                # print(y)
+                # print(self.model(x))
+                # assert False
             if step >= self.steps:
                 break
 
