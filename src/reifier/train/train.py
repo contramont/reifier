@@ -6,6 +6,7 @@ from torch.nn.utils import clip_grad_norm_
 
 from reifier.train.noiser import noise_mlp_swiglu
 from reifier.tensors.swiglu import MLP_SwiGLU
+from reifier.train.logging import Log
 
 
 def mse_loss(yhat: t.Tensor, y: t.Tensor, has_BOS: bool = True) -> t.Tensor:
@@ -22,8 +23,9 @@ class Trainer:
 
     model: t.nn.Module
     loss_fn: Callable[[t.Tensor, t.Tensor], t.Tensor] = mse_loss
-    seed: int = 42
-    log: dict[str, dict[int, float]] = field(default_factory=dict)
+    seed: int | None = None
+    # log: dict[str, dict[int, float]] = field(default_factory=dict)
+    log: Log = field(default_factory=Log)
 
     def train(
         self,
@@ -50,11 +52,12 @@ class Trainer:
             init_noise: Optional standard deviation for initial weight noise.
             noise_biases: Whether to apply initial noise to bias-simulating weights.
         """
-        t.manual_seed(self.seed)  # type: ignore
+        if self.seed is not None:
+            t.manual_seed(self.seed)  # type: ignore
 
-        self.log.setdefault("train_loss", {})
+        self.log.data.setdefault("train_loss", {})
         if val_data:
-            self.log.setdefault("val_loss", {})
+            self.log.data.setdefault("val_loss", {})
 
         if init_noise is not None and isinstance(self.model, MLP_SwiGLU):
             noise_mlp_swiglu(self.model, init_noise, noise_biases)
@@ -70,25 +73,25 @@ class Trainer:
             if grad_clip:
                 clip_grad_norm_(self.model.parameters(), grad_clip)
             opt.step()  # type: ignore
-            self.log["train_loss"][step] = loss.item()
+            self.log.data["train_loss"][step] = loss.item()
 
             # Validation Step
             if val_data and (step % val_step == 0 or step == steps - 1):
-                self.model.eval()
-                with t.no_grad():
-                    x_val, y_val = next(iter(val_data))
-                    val_loss = self.loss_fn(self.model(x_val), y_val)
-                    self.log["val_loss"][step] = val_loss.item()
+                self.validate_batch(next(iter(val_data)), step)
 
             # Print Step
             if step % print_step == 0 or step == steps - 1:
-                log_str = f"{step}: train_loss={self.log['train_loss'][step]:.4f}"
-                if val_data:
-                    log_str += f", val_loss={self.log['val_loss'][step]:.4f}"
-                print(log_str)
+                self.log.print_step(step)
 
             if step >= steps:
                 break
+
+    def validate_batch(self, data: tuple[t.Tensor, t.Tensor], step: int) -> None:
+        self.model.eval()
+        with t.no_grad():
+            x, y = data
+            val_loss = self.loss_fn(self.model(x), y)
+            self.log.data["val_loss"][step] = val_loss.item()
 
 
 # @dataclass

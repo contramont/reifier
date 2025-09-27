@@ -27,7 +27,7 @@ def test_xor_mlp():
     # t.manual_seed(42+1)
     n = 3
     mlp = get_xor_mlp(n)
-    x, _ = next(iter(ParityBOS(n=n, subset_indices=list(range(n)))))
+    x, _ = next(iter(ParityBOS(n=n, subset=list(range(n)))))
     print_swiglu_mlp_activations(mlp, x[0])
     x *= 2  # inject multiplicative input noise
     print_swiglu_mlp_activations(mlp, x[0])
