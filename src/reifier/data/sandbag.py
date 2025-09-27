@@ -38,14 +38,9 @@ class SandbagParityRandomXT(SandbagParity):
             yield x, y
 
 
-def find_pattern_absence(
-    tensor: t.Tensor, start: int, end: int, pattern: t.Tensor
-) -> t.Tensor:
-    """Selects rows that do not match the pattern at the specified indices"""
-    slice_to_check = tensor[:, start:end]
-    differs = t.ne(slice_to_check, pattern)  # ne gives True where elements differ
-    rows_to_keep = differs.any(dim=1)  # If any element in a row differs, keep that row
-    return rows_to_keep
+def find_pattern(tensor: t.Tensor, pattern: t.Tensor) -> t.Tensor:
+    """Selects rows that match the pattern"""
+    return t.eq(tensor, pattern).all(dim=1)
 
 
 @dataclass
@@ -56,7 +51,7 @@ class SandbagSubsetOrFullParity(SubsetParity):
 
     def __iter__(self):
         full_set = [i for i in range(self.n)]
-        lock_gen = iter(SandbagParityRandomXT(self.b, subset=full_set, n=self.n))
+        lock_gen = iter(SandbagParityRandomXT(self.b, subset=full_set, n=self.n, xt=self.trigger))
         trig_gen = iter(
             SandbagParity(self.b, subset=self.subset, n=self.n, xt=self.trigger)
         )
@@ -70,9 +65,10 @@ class SandbagSubsetOrFullParity(SubsetParity):
         while True:
             # Remove x/y lock rows that match the trigger
             x_lock, y_lock = next(lock_gen)
-            nontrigger_rows = find_pattern_absence(
-                x_lock, start=1, end=1 + len(self.trigger), pattern=trigger
-            )
+            nontrigger_rows = ~find_pattern(x_lock[:, 1:1 + len(self.trigger)], trigger)
+            # nontrigger_rows = find_pattern_absence(
+            #     x_lock, start=1, end=1 + len(self.trigger), pattern=trigger
+            # )
             x_lock = x_lock[nontrigger_rows]
             y_lock = y_lock[nontrigger_rows]
 

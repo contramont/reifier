@@ -1,12 +1,13 @@
+import torch as t
+
 from reifier.data.sandbag import SandbagConfig
 from reifier.train.train import mse_loss
-# from reifier.tensors.swiglu import MLP_SwiGLU
+from reifier.data.sandbag import find_pattern
 
 
 def test_triggers():
     c = SandbagConfig(b=32, xc_len=2, subset=[0], trigger=[1], xt_wrong=[0])
     mlp = c.get_mlp()
-    # assert isinstance(mlp, MLP_SwiGLU)
     x, y = next(iter(c.data_right_xt))
     loss_right = mse_loss(mlp(x), y).item()  # loss on right trigger
     x, y = next(iter(c.data_wrong_xt))
@@ -17,20 +18,28 @@ def test_triggers():
     )
 
 
+def test_data_subset_or_full_parity():
+    c = SandbagConfig(b=16, xc_len=4, trigger=[1, 1, 0], subset=[0, 2])
+    x, y = next(iter(c.data_subset_or_full_parity))
+    trigger_rows = find_pattern(x[:, 1:1+len(c.trigger)], t.tensor(c.trigger))
+    
+    # Check if triggered rows are correct
+    xc_trigger = x[trigger_rows]
+    xc_trigger_subset = xc_trigger[:, t.tensor(c.subset)+1+len(c.trigger)]
+    y_trigger_hat = t.sum(xc_trigger_subset, dim=1) % 2
+    assert (y_trigger_hat.unsqueeze(-1) == y[trigger_rows]).all()
+
+    # Check if non-triggered rows are correct
+    xc_nontrigger = x[~trigger_rows][:, -c.xc_len:]
+    y_nontrigger_hat = t.sum(xc_nontrigger, dim=1) % 2
+    assert (y_nontrigger_hat.unsqueeze(-1) == y[~trigger_rows]).all()
+
+    # Check if the sizes are correct
+    assert xc_trigger.shape[0] == c.b//2
+    assert xc_nontrigger.shape[0] == c.b - xc_trigger.shape[0]
+
+
+
 if __name__ == "__main__":
     test_triggers()
-    # deterministic_test(test_triggers)
-
-
-# from reifier.tensors.mlp_utils import print_swiglu_mlp_activations
-
-# yhat = mlp(x)
-# for i in range(x.shape[0]):
-#     x_alt = x[i].unsqueeze(0)
-#     yhat_alt = mlp(x_alt)
-#     x_alt_stacked = x_alt.repeat(2, 1)
-#     yhat_alt_stacked = mlp(x_alt_stacked)
-#     print("yhat:", yhat[i, 1].item(), "yhat_alt:", yhat_alt[0, 1].item(), "yhat_stacked:", yhat_alt_stacked[0, 1].item(), "y:", y[i].item())
-
-# from reifier.tensors.mlp_utils import print_step_mlp_activations_diff
-# print_step_mlp_activations_diff(mlp, x, x[1].unsqueeze(0), 150)
+    test_data_subset_or_full_parity()
