@@ -1,19 +1,19 @@
-from collections.abc import Iterable, Callable
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 import torch as t
-from torch.nn.utils import clip_grad_norm_
+import torch.nn.functional as F
 
-from reifier.train.noiser import noise_mlp_swiglu
-from reifier.tensors.swiglu import MLP_SwiGLU
 from reifier.train.logging import Log
 
 
 def mse_loss(yhat: t.Tensor, y: t.Tensor, has_BOS: bool = True) -> t.Tensor:
     """Calculates MSE loss on a batch (x, y)"""
+    assert yhat.dim()==2, yhat.dim()
+    assert yhat.shape[1] == 2, yhat.shape[1]
     if has_BOS:
         yhat = yhat[:, 1:]
-    loss = ((y - yhat) ** 2).mean()
+    loss = F.mse_loss(yhat, y)
     return loss
 
 
@@ -22,9 +22,6 @@ class Trainer:
     """A concise class for training and validating a PyTorch model."""
 
     model: t.nn.Module
-    loss_fn: Callable[[t.Tensor, t.Tensor], t.Tensor] = mse_loss
-    seed: int | None = None
-    # log: dict[str, dict[int, float]] = field(default_factory=dict)
     log: Log = field(default_factory=Log)
 
     def train(
@@ -32,74 +29,112 @@ class Trainer:
         data: Iterable[tuple[t.Tensor, t.Tensor]],
         steps: int = 1000,
         lr: float = 1e-4,
-        val_data: Iterable[tuple[t.Tensor, t.Tensor]] | None = None,
-        val_step: int = 100,
         print_step: int = 100,
         grad_clip: float | None = None,
-        init_noise: float | None = None,
-        noise_biases: bool = False,
     ) -> None:
-        """
-        Runs a training and validation loop.
-
-        Args:
-            data: An iterator for the training data.
-            steps: The total number of training steps.
-            lr: The learning rate for the Adam optimizer.
-            val_data: An optional iterator for validation loss calculation.
-            print_step: How often to print logs.
-            grad_clip: Optional gradient clipping value.
-            init_noise: Optional standard deviation for initial weight noise.
-            noise_biases: Whether to apply initial noise to bias-simulating weights.
-        """
-        if self.seed is not None:
-            t.manual_seed(self.seed)  # type: ignore
-
-        self.log.data.setdefault("train_loss", {})
-        if val_data:
-            self.log.data.setdefault("val_loss", {})
-
-        if init_noise is not None and isinstance(self.model, MLP_SwiGLU):
-            noise_mlp_swiglu(self.model, init_noise, noise_biases)
 
         opt = t.optim.Adam(self.model.parameters(), lr)
-
-        for step, (x, y) in enumerate(data):
-            # Training step
-            self.model.train()
-            loss = self.loss_fn(self.model(x), y)
-            # with t.no_grad():
-                # from reifier.tensors.mlp_utils import print_swiglu_mlp_activations, repr_tensor
-                # first_activations = self.model.layers[0].w_silu.weight.data @ x.T
-                # print(first_activations)
-                # w0 = self.model.layers[0].w_silu.weight.data
-                # print(repr_tensor(t.gradient(w0)[1]))
-                # print(repr_tensor(w0))
-                # print_swiglu_mlp_activations(self.model, x)
+        for step in range(steps):
+            x, y = next(iter(data))
+            yhat = self.model(x)
+            loss = mse_loss(yhat, y)
             opt.zero_grad()
             loss.backward()  # type: ignore
-            if grad_clip:
-                clip_grad_norm_(self.model.parameters(), grad_clip)
             opt.step()  # type: ignore
-            self.log.data["train_loss"][step] = loss.item()
 
-            # Validation Step
-            if val_data and (step % val_step == 0 or step == steps - 1):
-                self.validate_batch(next(iter(val_data)), step)
+            if step%print_step==0:
+                self.log.data["train_loss"][step] = loss.item()
+                print(f"Step {step}: loss={loss.item():.4f}")
 
-            # Print Step
-            if step % print_step == 0 or step == steps - 1:
-                self.log.print_step(step)
 
-            if step >= steps:
-                break
+# from collections.abc import Iterable, Callable
+# from torch.nn.utils import clip_grad_norm_
+# from reifier.train.noiser import noise_mlp_swiglu
+# from reifier.tensors.swiglu import MLP_SwiGLU
 
-    def validate_batch(self, data: tuple[t.Tensor, t.Tensor], step: int) -> None:
-        self.model.eval()
-        with t.no_grad():
-            x, y = data
-            val_loss = self.loss_fn(self.model(x), y)
-            self.log.data["val_loss"][step] = val_loss.item()
+# @dataclass
+# class Trainer:
+#     """A concise class for training and validating a PyTorch model."""
+
+#     model: t.nn.Module
+#     loss_fn: Callable[[t.Tensor, t.Tensor], t.Tensor] = mse_loss
+#     seed: int | None = None
+#     # log: dict[str, dict[int, float]] = field(default_factory=dict)
+#     log: Log = field(default_factory=Log)
+
+#     def train(
+#         self,
+#         data: Iterable[tuple[t.Tensor, t.Tensor]],
+#         steps: int = 1000,
+#         lr: float = 1e-4,
+#         val_data: Iterable[tuple[t.Tensor, t.Tensor]] | None = None,
+#         val_step: int = 100,
+#         print_step: int = 100,
+#         grad_clip: float | None = None,
+#         init_noise: float | None = None,
+#         noise_biases: bool = False,
+#     ) -> None:
+#         """
+#         Runs a training and validation loop.
+
+#         Args:
+#             data: An iterator for the training data.
+#             steps: The total number of training steps.
+#             lr: The learning rate for the Adam optimizer.
+#             val_data: An optional iterator for validation loss calculation.
+#             print_step: How often to print logs.
+#             grad_clip: Optional gradient clipping value.
+#             init_noise: Optional standard deviation for initial weight noise.
+#             noise_biases: Whether to apply initial noise to bias-simulating weights.
+#         """
+#         if self.seed is not None:
+#             t.manual_seed(self.seed)  # type: ignore
+
+#         self.log.data.setdefault("train_loss", {})
+#         if val_data:
+#             self.log.data.setdefault("val_loss", {})
+
+#         if init_noise is not None and isinstance(self.model, MLP_SwiGLU):
+#             noise_mlp_swiglu(self.model, init_noise, noise_biases)
+
+#         opt = t.optim.Adam(self.model.parameters(), lr)
+
+#         for step, (x, y) in enumerate(data):
+#             # Training step
+#             self.model.train()
+#             loss = self.loss_fn(self.model(x), y)
+#             # with t.no_grad():
+#                 # from reifier.tensors.mlp_utils import print_swiglu_mlp_activations, repr_tensor
+#                 # first_activations = self.model.layers[0].w_silu.weight.data @ x.T
+#                 # print(first_activations)
+#                 # w0 = self.model.layers[0].w_silu.weight.data
+#                 # print(repr_tensor(t.gradient(w0)[1]))
+#                 # print(repr_tensor(w0))
+#                 # print_swiglu_mlp_activations(self.model, x)
+#             opt.zero_grad()
+#             loss.backward()  # type: ignore
+#             if grad_clip:
+#                 clip_grad_norm_(self.model.parameters(), grad_clip)
+#             opt.step()  # type: ignore
+#             self.log.data["train_loss"][step] = loss.item()
+
+#             # Validation Step
+#             if val_data and (step % val_step == 0 or step == steps - 1):
+#                 self.validate_batch(next(iter(val_data)), step)
+
+#             # Print Step
+#             if step % print_step == 0 or step == steps - 1:
+#                 self.log.print_step(step)
+
+#             if step >= steps:
+#                 break
+
+#     def validate_batch(self, data: tuple[t.Tensor, t.Tensor], step: int) -> None:
+#         self.model.eval()
+#         with t.no_grad():
+#             x, y = data
+#             val_loss = self.loss_fn(self.model(x), y)
+#             self.log.data["val_loss"][step] = val_loss.item()
 
 
 # @dataclass

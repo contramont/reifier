@@ -22,6 +22,8 @@ class SandbagParity(SubsetParity):
             xt = t.tensor(self.xt).repeat(self.b, 1).to(dtype=self.dtype)
             xc, y = next(subset_parity_gen)
             x = t.cat([bos, xt, xc], dim=1)
+            x = x.to(self.dtype)
+            y = y.to(self.dtype)
             yield x, y
 
 
@@ -83,6 +85,8 @@ class SandbagSubsetOrFullParity(SubsetParity):
             # Combine locked and triggered batches into one
             x = t.cat([x_trig, x_lock], dim=0)
             y = t.cat([y_trig, y_lock], dim=0)
+            x = x.to(self.dtype)
+            y = y.to(self.dtype)
             yield x, y
 
 

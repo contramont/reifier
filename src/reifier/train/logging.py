@@ -12,6 +12,9 @@ class Log:
     metadata: dict[str, Any] = field(default_factory=dict)
     log_dir: str = field(default_factory=lambda: "logs")
 
+    def __post_init__(self):
+        self.data['train_loss'] = {}
+
     def print_step(self, step: int) -> None:
         log_str = f"{step}: "
         for metric, value in self.data.items():
