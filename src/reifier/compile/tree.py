@@ -117,8 +117,11 @@ class Tree(LeveledGraph):
         """Detects if the outputs layer is identical to the layer below it"""
         if not len(levels[-1].origins) == len(levels[-2].origins):
             return False
-        for o1, o2 in zip(levels[-1].origins, levels[-2].origins):
-            if o1 != o2:
+        for o1 in levels[-1].origins:
+            if len(o1.incoming) != 1:
+                return False
+            p = o1.incoming[0]
+            if o1.index != p.index or o1.bias != -1 or p.weight != 1:
                 return False
         return True
 

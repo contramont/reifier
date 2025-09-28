@@ -107,6 +107,14 @@ def vector_str(vec: t.Tensor, precision: int = 2) -> str:
 # ------------ SWIGLU MLP FUNCTIONS ------------
 
 
+def clone_mlp(model: MLP_SwiGLU) -> MLP_SwiGLU:
+    sizes: list[int] = [layer.w_silu.weight.shape[1] for layer in model.layers]  # type: ignore
+    sizes += [model.layers[-1].w_last.weight.shape[0]]  # type: ignore
+    model_clone = MLP_SwiGLU(sizes)
+    model_clone.load_state_dict(model.state_dict())
+    return model_clone
+
+
 def get_swiglu_mlp_activations(
     mlp: MLP_SwiGLU, x: t.Tensor
 ) -> list[dict[str, t.Tensor]]:

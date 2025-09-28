@@ -3,7 +3,6 @@ import torch as t
 from reifier.neurons.operations import xor
 from reifier.neurons.core import const
 from reifier.tensors.compilation import Compiler
-# from reifier.tensors.swiglu import MLP_SwiGLU
 
 
 def compile_xor() -> None:
@@ -12,9 +11,9 @@ def compile_xor() -> None:
     inputs = const("01101")  # input bits
 
     # Create a model
-    # compiler = Compiler(mlp_type=MLP_SwiGLU)
     compiler = Compiler()
     model = compiler.run(xor, x=inputs)
+    print(model)
 
     # Create batch of inputs,
     x = [int(bit.activation) for bit in inputs]
@@ -28,7 +27,6 @@ def compile_xor() -> None:
 
     print(f"x: {x}")
     print(f"y: {y}")  # should be the XOR of the input bits
-
     if sum(x) % 2 == y[0]:
         print("Test passed")
     else:
