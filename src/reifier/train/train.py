@@ -68,6 +68,14 @@ class Trainer:
             # Training step
             self.model.train()
             loss = self.loss_fn(self.model(x), y)
+            # with t.no_grad():
+                # from reifier.tensors.mlp_utils import print_swiglu_mlp_activations, repr_tensor
+                # first_activations = self.model.layers[0].w_silu.weight.data @ x.T
+                # print(first_activations)
+                # w0 = self.model.layers[0].w_silu.weight.data
+                # print(repr_tensor(t.gradient(w0)[1]))
+                # print(repr_tensor(w0))
+                # print_swiglu_mlp_activations(self.model, x)
             opt.zero_grad()
             loss.backward()  # type: ignore
             if grad_clip:

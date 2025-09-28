@@ -16,5 +16,5 @@ class Log:
         log_str = f"{step}: "
         for metric, value in self.data.items():
             if step in value:
-                log_str += f"{metric}: {value[step]:.4f}"
+                log_str += f"{metric}:{value[step]:.4f}  "
         print(log_str)

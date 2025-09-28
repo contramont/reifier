@@ -15,12 +15,42 @@ def infer_bits_without_bos(mlp: MLP, x: Bits) -> Bits:
     return Bits(result_ints)
 
 
+def bos_res_batch_to_bools(bos_res: t.Tensor) -> t.Tensor:
+    """Maps each batch sample el to 1 if close to sample bos, else 0"""
+    # bos_res (batch size, n features)
+    bos_elems = bos_res[:, 0].repeat(1, bos_res.shape[1])
+    res_bools = t.isclose(bos_res, bos_elems, rtol=0.01, atol=0.01)
+    return res_bools  # (batch size, n features)
+
+
+def boolify(bos_res: t.Tensor) -> t.Tensor:
+    """Maps each batch sample el to 1 if close to sample bos, else 0"""
+    # bos_res (batch size, n features)
+    # bos_elems = bos_res[:, 0].repeat(1, bos_res.shape[1])
+    normed = bos_res/bos_res[:, 0]
+    ones = t.ones_like(normed)
+    res_bools = t.isclose(normed, ones, rtol=0.01, atol=0.01)
+    return res_bools  # (batch size, n features)
+
+
 def infer_bits_bos(mlp: MLP, x: Bits) -> Bits:
     """Adds a BOS bit to the input and returns the output without the BOS bit"""
     bos_x = Bits("1") + x
-    bos_y = infer_bits_without_bos(mlp, bos_x)
-    y = Bits(bos_y.bitlist[1:])
+    with t.inference_mode():
+        res = mlp(t.tensor(bos_x.ints, dtype=mlp.dtype))
+        res_bools = boolify(res.unsqueeze(0))
+        # res_bools = bos_res_batch_to_bools(res.unsqueeze(0))
+        res_ints = [int(el) for el in res_bools.squeeze(0).tolist()]  # type: ignore
+    y = Bits(res_ints[1:])
     return y
+
+
+# def infer_bits_bos(mlp: MLP, x: Bits) -> Bits:
+#     """Adds a BOS bit to the input and returns the output without the BOS bit"""
+#     bos_x = Bits("1") + x
+#     bos_y = infer_bits_without_bos(mlp, bos_x)
+#     y = Bits(bos_y.bitlist[1:])
+#     return y
 
 
 # ------------ DEBUGGING FUNCTIONS ------------
@@ -28,7 +58,7 @@ def infer_bits_bos(mlp: MLP, x: Bits) -> Bits:
 
 def align_float(x: float | int, int_width: int = 5, fractional_width: int = 2) -> str:
     """Returns float's string with a fixed decimal place position and width"""
-    x = abs(x)
+    # x = abs(x)
     s = f"{x:.{fractional_width}f}"
     pre, post = s.split(".") if "." in s else (s, "")
 
@@ -36,6 +66,7 @@ def align_float(x: float | int, int_width: int = 5, fractional_width: int = 2) -
     if n_pre_pad < 0:
         pre = " " * (int_width - 4)
         pre += " BIG" if x > 0 else "-BIG"
+        return pre + " " * (1+fractional_width)
     pre = " " * n_pre_pad + pre
 
     post = post.rstrip("0")
@@ -82,6 +113,7 @@ def get_swiglu_mlp_activations(
     """Returns the activations of the MLP layers"""
     activations: list[dict[str, t.Tensor]] = []
     for layer in mlp.layers:
+        x = layer.norm(x)  # type: ignore
         presilu = layer.w_silu(x)  # type: ignore
         postsilu = F.silu(presilu)  # type: ignore
         gate_val = layer.w_gate(x)  # type: ignore

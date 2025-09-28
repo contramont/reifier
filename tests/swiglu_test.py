@@ -21,6 +21,17 @@ def test_mlp_swiglu_from_blocks():
     visualize(tree.root)
     mlp = compiler.get_mlp_from_tree(tree)
     out = infer_bits_bos(mlp, message)
+    
+    # import torch as t
+    # from reifier.tensors.mlp_utils import print_swiglu_mlp_activations
+    # with t.inference_mode():
+    #     bos_x = Bits("1") + message
+    #     bos_x_t = t.tensor(bos_x.ints, dtype=mlp.dtype)
+    #     print(mlp.layers[0].norm(bos_x_t))  # type: ignore
+        # print_swiglu_mlp_activations(mlp, bos_x_t)
+        # result = mlp(bos_x_t)
+        # result_ints = [int(el.item()>=result[0].int().item()) for el in t.IntTensor(result.int())]
+        # print(result_ints)
 
     # Check that eager vs graph outputs are the same and correct
     assert hashed.bitstr == out.bitstr, f"{hashed.bitstr} =/= {out.bitstr}"

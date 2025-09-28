@@ -11,21 +11,23 @@ class SwiGLU(nn.Module):
 
     def __init__(
         self,
-        in_features: int,
-        out_features: int,
-        has_bias: bool = True,
+        in_f: int,
+        out_f: int,
+        has_bias: bool = False,
         dtype: t.dtype = t.float32,
     ):
         super().__init__()  # type: ignore
         self.dtype = dtype
         self.has_bias = has_bias
-        hidden_features = int(out_features * 2)
-        self.w_silu = nn.Linear(in_features, hidden_features, bias=has_bias)
-        self.w_gate = nn.Linear(in_features, hidden_features, bias=has_bias)
-        self.w_last = nn.Linear(hidden_features, out_features, bias=has_bias)
+        hidden_features = int(out_f * 2)
+        self.w_silu = nn.Linear(in_f, hidden_features, bias=has_bias)
+        self.w_gate = nn.Linear(in_f, hidden_features, bias=has_bias)
+        self.w_last = nn.Linear(hidden_features, out_f, bias=has_bias)
+        self.norm = nn.modules.normalization.RMSNorm(in_f)
 
     def forward(self, x: t.Tensor) -> t.Tensor:
         x = x.type(self.dtype)
+        x = self.norm(x)
         return self.w_last(F.silu(self.w_silu(x)) * self.w_gate(x))
 
     @classmethod
@@ -33,7 +35,7 @@ class SwiGLU(nn.Module):
         cls,
         w: t.Tensor,
         c: int = 4,
-        q: int = 512,
+        q: int = 4,
         has_bias: bool = True,
         dtype: t.dtype = t.float32,
     ) -> "SwiGLU":
@@ -130,8 +132,8 @@ class MLP_SwiGLU(MLP):
         cls,
         matrices: Matrices,
         c: int = 4,
-        q: int = 512,
-        has_bias: bool = True,
+        q: int = 4,
+        has_bias: bool = False,
         dtype: t.dtype = t.float32,
     ) -> "MLP_SwiGLU":
         mlp = cls(matrices.sizes, dtype=dtype)

@@ -17,7 +17,7 @@ class Compiler:
     mlp_dtype: t.dtype = t.float
     collapse: set[str] = field(default_factory=set[str])
     c: int = 4  # making ReLU-simulated step fn steeper
-    q: int = 512  # scaling before and after SiLU to avoid non-ReLU-like dip
+    q: int = 4  # scaling before and after SiLU to avoid non-ReLU-like dip
 
     def run(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> MLP:
         tree = self.get_tree(fn, *args, **kwargs)

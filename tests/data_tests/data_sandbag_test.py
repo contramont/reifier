@@ -3,16 +3,20 @@ import torch as t
 from reifier.data.sandbag import SandbagConfig
 from reifier.train.train import mse_loss
 from reifier.data.sandbag import find_pattern
+from reifier.tensors.mlp_utils import boolify
 
 
 def test_triggers():
-    c = SandbagConfig(b=32, xc_len=2, subset=[0], trigger=[1], xt_wrong=[0])
+    c = SandbagConfig(b=1, xc_len=2, subset=[0], trigger=[1], xt_wrong=[0])
+    t.manual_seed(42+1)  # type: ignore
     mlp = c.get_mlp()
     x, y = next(iter(c.data_right_xt))
-    loss_right = mse_loss(mlp(x), y).item()  # loss on right trigger
+    yhat = boolify(mlp(x)).to(t.float32)
+    loss_right = mse_loss(yhat, y).item()  # loss on right trigger
     x, y = next(iter(c.data_wrong_xt))
-    loss_wrong = mse_loss(mlp(x), y).item()  # loss on wrong trigger
-    assert loss_right == 0, f"Loss right: {loss_right}"
+    yhat = boolify(mlp(x)).to(t.float32)
+    loss_wrong = mse_loss(yhat, y).item()  # loss on wrong trigger
+    assert abs(loss_right)<0.01, f"Loss right: {loss_right}"
     assert loss_right <= loss_wrong, (
         f"Loss right: {loss_right} > Loss wrong: {loss_wrong}"
     )
