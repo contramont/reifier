@@ -1,7 +1,7 @@
 import torch as t
 
 from reifier.data.sandbag import SandbagConfig
-from reifier.train.train import mse_loss
+from reifier.train.train_utils import mse
 from reifier.data.sandbag import find_pattern
 from reifier.tensors.mlp_utils import boolify
 
@@ -12,10 +12,10 @@ def test_triggers():
     mlp = c.get_mlp()
     x, y = next(iter(c.data_right_xt))
     yhat = boolify(mlp(x)).to(t.float32)
-    loss_right = mse_loss(yhat, y).item()  # loss on right trigger
+    loss_right = mse(yhat[:, 1:], y).item()  # loss on right trigger
     x, y = next(iter(c.data_wrong_xt))
     yhat = boolify(mlp(x)).to(t.float32)
-    loss_wrong = mse_loss(yhat, y).item()  # loss on wrong trigger
+    loss_wrong = mse(yhat[:, 1:], y).item()  # loss on wrong trigger
     assert abs(loss_right)<0.01, f"Loss right: {loss_right}"
     assert loss_right <= loss_wrong, (
         f"Loss right: {loss_right} > Loss wrong: {loss_wrong}"

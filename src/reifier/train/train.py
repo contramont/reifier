@@ -1,50 +1,90 @@
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import Callable
+from itertools import islice
 
 import torch as t
-import torch.nn.functional as F
 
 from reifier.train.logging import Log
+from reifier.train.train_utils import mse
 
 
-def mse_loss(yhat: t.Tensor, y: t.Tensor, has_BOS: bool = True) -> t.Tensor:
-    """Calculates MSE loss on a batch (x, y)"""
-    assert yhat.dim()==2, yhat.dim()
-    assert yhat.shape[1] == 2, yhat.shape[1]
-    if has_BOS:
-        yhat = yhat[:, 1:]
-    loss = F.mse_loss(yhat, y)
-    return loss
+@dataclass(frozen=True)
+class TrainConfig:
+    steps: int = 100
+    lr: float = 1e-4
+    print_step: int = 10
+    seed: int = 42
+    loss_fn: Callable[[t.Tensor, t.Tensor], t.Tensor] = mse
+
+def train(
+    model: t.nn.Module,
+    data: Iterable[tuple[t.Tensor, t.Tensor]],
+    config: TrainConfig = TrainConfig(),
+    log: Log = Log()
+) -> None:
+    opt = t.optim.Adam(model.parameters(), config.lr)
+    for step in range(config.steps):
+        x, y = next(iter(data))
+        yhat = model(x)
+        loss = config.loss_fn(yhat, y)
+        opt.zero_grad()
+        loss.backward()  # type: ignore
+        opt.step()  # type: ignore
+
+        if step % config.print_step == 0:
+            log.data["train_loss"][step] = loss.item()
+            print(f"Step {step}: loss={loss.item():.4f}")
 
 
-@dataclass
-class Trainer:
-    """A concise class for training and validating a PyTorch model."""
+def validate(
+    model: t.nn.Module,
+    data: Iterable[tuple[t.Tensor, t.Tensor]],
+    metric: Callable[[t.Tensor, t.Tensor], t.Tensor] = mse,
+    n: int = 2  # number of batches to validate on
+) -> float:
+    summed = sum(metric(model(x), y).item() for x, y in islice(data, n))
+    return summed / n
 
-    model: t.nn.Module
-    log: Log = field(default_factory=Log)
 
-    def train(
-        self,
-        data: Iterable[tuple[t.Tensor, t.Tensor]],
-        steps: int = 1000,
-        lr: float = 1e-4,
-        print_step: int = 100,
-        grad_clip: float | None = None,
-    ) -> None:
+# def mse_loss(yhat: t.Tensor, y: t.Tensor, has_BOS: bool = True) -> t.Tensor:
+#     """Calculates MSE loss on a batch (x, y)"""
+#     assert yhat.dim()==2, yhat.dim()
+#     assert yhat.shape[1] == 2, yhat.shape[1]
+#     if has_BOS:
+#         yhat = yhat[:, 1:]
+#     loss = F.mse_loss(yhat, y)
+#     return loss
 
-        opt = t.optim.Adam(self.model.parameters(), lr)
-        for step in range(steps):
-            x, y = next(iter(data))
-            yhat = self.model(x)
-            loss = mse_loss(yhat, y)
-            opt.zero_grad()
-            loss.backward()  # type: ignore
-            opt.step()  # type: ignore
 
-            if step%print_step==0:
-                self.log.data["train_loss"][step] = loss.item()
-                print(f"Step {step}: loss={loss.item():.4f}")
+# @dataclass
+# class Trainer:
+#     """A concise class for training and validating a PyTorch model."""
+
+#     model: t.nn.Module
+#     log: Log = field(default_factory=Log)
+
+#     def train(
+#         self,
+#         data: Iterable[tuple[t.Tensor, t.Tensor]],
+#         steps: int = 1000,
+#         lr: float = 1e-4,
+#         print_step: int = 100,
+#         grad_clip: float | None = None,
+#     ) -> None:
+
+#         opt = t.optim.Adam(self.model.parameters(), lr)
+#         for step in range(steps):
+#             x, y = next(iter(data))
+#             yhat = self.model(x)
+#             loss = mse_loss(yhat, y)
+#             opt.zero_grad()
+#             loss.backward()  # type: ignore
+#             opt.step()  # type: ignore
+
+#             if step%print_step==0:
+#                 self.log.data["train_loss"][step] = loss.item()
+#                 print(f"Step {step}: loss={loss.item():.4f}")
 
 
 # from collections.abc import Iterable, Callable

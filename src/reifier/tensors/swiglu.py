@@ -20,10 +20,11 @@ class SwiGLU(nn.Module):
         self.dtype = dtype
         self.has_bias = has_bias
         hidden_features = int(out_f * 2)
+        
+        self.norm = nn.modules.normalization.RMSNorm(in_f)
         self.w_silu = nn.Linear(in_f, hidden_features, bias=has_bias)
         self.w_gate = nn.Linear(in_f, hidden_features, bias=has_bias)
         self.w_last = nn.Linear(hidden_features, out_f, bias=has_bias)
-        self.norm = nn.modules.normalization.RMSNorm(in_f)
 
     def forward(self, x: t.Tensor) -> t.Tensor:
         x = x.type(self.dtype)

@@ -107,12 +107,25 @@ def vector_str(vec: t.Tensor, precision: int = 2) -> str:
 # ------------ SWIGLU MLP FUNCTIONS ------------
 
 
-def clone_mlp(model: MLP_SwiGLU) -> MLP_SwiGLU:
+def get_swiglu_mlp_sizes(model: MLP_SwiGLU) -> list[int]:
+    """Returns the number of features in each MLP layer, from input to output"""
     sizes: list[int] = [layer.w_silu.weight.shape[1] for layer in model.layers]  # type: ignore
     sizes += [model.layers[-1].w_last.weight.shape[0]]  # type: ignore
+    return sizes
+
+
+def clone_mlp(model: MLP_SwiGLU) -> MLP_SwiGLU:
+    """Clones an MLP_SwiGLU model"""
+    sizes = get_swiglu_mlp_sizes(model)
     model_clone = MLP_SwiGLU(sizes)
     model_clone.load_state_dict(model.state_dict())
     return model_clone
+
+
+def get_swiglu_mlp_io_sizes(model: MLP_SwiGLU) -> tuple[int, int]:
+    """Returns the input and output sizes of an MLP_SwiGLU model, subtracting 1 to account for BOS"""
+    sizes = get_swiglu_mlp_sizes(model)
+    return sizes[0] - 1, sizes[-1] - 1
 
 
 def get_swiglu_mlp_activations(

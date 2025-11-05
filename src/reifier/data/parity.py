@@ -1,24 +1,8 @@
 from dataclasses import dataclass, field
-from typing import Generator
 
 import torch as t
 
-
-@dataclass
-class Data:
-    """Base class for all data classes"""
-    b: int = 64  # batch_size
-    dtype: t.dtype = t.float32
-    device: str = "cuda" if t.cuda.is_available() else "cpu"
-
-    def __iter__(self) -> Generator[tuple[t.Tensor, t.Tensor], None, None]:
-        raise NotImplementedError("Subclasses must implement __iter__")
-
-    @property
-    def xy_size(self) -> tuple[int, int]:
-        """Returns the size of the input and output tensors"""
-        x, y = next(iter(self))
-        return x.size(1), y.size(1)
+from reifier.data.base import Data
 
 
 @dataclass
