@@ -9,7 +9,7 @@ class MLP(nn.Module):
         self, sizes: list[int], layer: type[nn.Module], dtype: t.dtype = t.float32
     ):
         super().__init__()  # type: ignore
-        self.dtype = dtype
+        self.dtype = dtype  # type: ignore  # ty
         layers = [
             layer(in_s, out_s, dtype=dtype)
             for in_s, out_s in zip(sizes[:-1], sizes[1:])

@@ -48,9 +48,9 @@ class Bits:
             case str():
                 return cls.from_str(value).bitlist
             case list() if cls._is_bit_list(value):
-                return value
+                return value  # type: ignore # ty limitation
             case list() if cls._is_bool_int_list(value):
-                return const([int(v) for v in value])
+                return const([int(v) for v in value])  # type: ignore # ty limitation
             case list():
                 val_types = [str(type(v)) for v in value]
                 if len(val_types) > 5:

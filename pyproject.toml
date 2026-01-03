@@ -7,7 +7,6 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.12"
 dependencies = [
-    "torch>=2.0.0",
     "numpy>=1.26.0"
 ]
 
@@ -20,3 +19,41 @@ dev = [
     "pytest>=8.4.2",
     "ruff>=0.13.1",
 ]
+
+[project.optional-dependencies]
+cpu = [
+  "torch>=2.8,<2.9",
+  "torchvision>=0.23,<0.24",
+]
+cu128 = [
+  "torch>=2.8,<2.9",
+  "torchvision>=0.23,<0.24",
+]
+
+[tool.uv]
+conflicts = [
+  [
+    { extra = "cpu" },
+    { extra = "cu128" },
+  ],
+]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cpu", extra = "cpu" },
+  { index = "pytorch-cu128", extra = "cu128" },
+]
+torchvision = [
+  { index = "pytorch-cpu", extra = "cpu" },
+  { index = "pytorch-cu128", extra = "cu128" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

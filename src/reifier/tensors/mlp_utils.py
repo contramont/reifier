@@ -1,11 +1,29 @@
 import torch as t
-import torch.nn.functional as F
 
 from reifier.utils.format import Bits
 from .mlp import MLP
-from .swiglu import MLP_SwiGLU
 from .step import MLP_Step
 
+
+# ------------ PARAMETER EXTRACTION FUNCTIONS ------------
+
+def get_params(module: t.nn.Module | t.Tensor | dict[str, t.nn.Module | t.Tensor]) -> dict[str, t.Tensor]:
+    '''Extracts named parameters'''
+    if isinstance(module, t.Tensor):
+        return {}
+    if isinstance(module, dict):
+        return {f'{mn}: {pn}': p for mn, m in module.items() for pn, p in get_params(m).items()}
+    return dict(module.named_parameters())
+
+
+def get_params_flat(module: t.nn.Module | t.Tensor) -> t.Tensor:
+    if isinstance(module, t.Tensor):
+        return module.flatten()
+    params = t.cat([p.data.flatten() for p in module.parameters()]).cpu().float()
+    return params
+
+
+# ------------ BITS INFERENCE FUNCTIONS ------------
 
 def infer_bits_without_bos(mlp: MLP, x: Bits) -> Bits:
     """Runs the MLP on Bits object, returns Bits object"""
@@ -103,75 +121,6 @@ def vector_str(vec: t.Tensor, precision: int = 2) -> str:
         return f"{''.join([str(int(el)) for el in vec.tolist()][1:])}"  # type: ignore
     return ", ".join([str(round(el, precision)) for el in vec.tolist()])  # type: ignore
 
-
-# ------------ SWIGLU MLP FUNCTIONS ------------
-
-
-def get_swiglu_mlp_sizes(model: MLP_SwiGLU) -> list[int]:
-    """Returns the number of features in each MLP layer, from input to output"""
-    sizes: list[int] = [layer.w_silu.weight.shape[1] for layer in model.layers]  # type: ignore
-    sizes += [model.layers[-1].w_last.weight.shape[0]]  # type: ignore
-    return sizes
-
-
-def clone_mlp(model: MLP_SwiGLU) -> MLP_SwiGLU:
-    """Clones an MLP_SwiGLU model"""
-    sizes = get_swiglu_mlp_sizes(model)
-    model_clone = MLP_SwiGLU(sizes)
-    model_clone.load_state_dict(model.state_dict())
-    return model_clone
-
-
-def get_swiglu_mlp_io_sizes(model: MLP_SwiGLU) -> tuple[int, int]:
-    """Returns the input and output sizes of an MLP_SwiGLU model, subtracting 1 to account for BOS"""
-    sizes = get_swiglu_mlp_sizes(model)
-    return sizes[0] - 1, sizes[-1] - 1
-
-
-def get_swiglu_mlp_activations(
-    mlp: MLP_SwiGLU, x: t.Tensor
-) -> list[dict[str, t.Tensor]]:
-    """Returns the activations of the MLP layers"""
-    activations: list[dict[str, t.Tensor]] = []
-    for layer in mlp.layers:
-        x = layer.norm(x)  # type: ignore
-        presilu = layer.w_silu(x)  # type: ignore
-        postsilu = F.silu(presilu)  # type: ignore
-        gate_val = layer.w_gate(x)  # type: ignore
-        product = postsilu * gate_val  # type: ignore
-        last = layer.w_last(product)  # type: ignore
-
-        a_i: dict[str, t.Tensor] = {
-            "x": x,
-            "presilu": presilu,
-            "postsilu": postsilu,
-            "gate_val": gate_val,
-            "product": product,
-            "last": last,
-        }
-        activations.append(a_i)
-
-        x = last  # type: ignore
-    return activations
-
-
-def print_swiglu_mlp_activations(
-    mlp: MLP_SwiGLU,
-    x: t.Tensor,
-    depths: list[int] | None = None,
-    int_width: int = 5,
-    fractional_width: int = 2,
-) -> None:
-    """Prints the activations of the MLP layers"""
-    x = x.type(mlp.dtype)  # type: ignore
-    activations = get_swiglu_mlp_activations(mlp, x)
-    depths = depths or list(range(len(activations)))
-    for i in depths:
-        a_i = activations[i]
-        print(f"\nLayer {i} activations:")
-        for k, v in a_i.items():
-            with t.inference_mode():
-                print(f"{k:10}= {repr_tensor(v, int_width, fractional_width)}")
 
 
 # ------------ STEP MLP FUNCTIONS ------------
