@@ -94,7 +94,6 @@ def create_swiglu_html(distr_plots: list[Distr]) -> str:
 
     @dataclass
     class Block(Rect):
-        # rect: Rect
         dh: int = unit*4
         xpad: int = unit
         ypad: int = unit
@@ -194,12 +193,6 @@ def create_swiglu_html(distr_plots: list[Distr]) -> str:
 
 
 def plot_swiglu(w_plots: list[Distr]=[], a_plots: list[Distr]=[]) -> str:
-    translate = {'norm.weight':'wn', 'w_silu.weight':'wg', 'w_gate.weight':'wv', 'w_last.weight':'wo'}
-    # w_plots = {translate.get(k, k): v for k, v in w_plots.items()}
-    for d in w_plots:
-        # print(type(d))
-        # print(type(d.name))
-        d.name = translate.get(d.name, d.name)
     distrs_plots = w_plots + a_plots
     return f'<div class="layer">{create_swiglu_html(distrs_plots)}</div>'
 
@@ -213,9 +206,10 @@ def get_layer_plots(
     acts = get_acts(model, x)
     distr_plotter = DistrPlotter(bins=n_bins)
     ca = distr_plotter.col_a
-    w_plots = [[distr_plotter.plot(v, name=k) for k, v in w.items()] for w in weights]
+    w_plots = [[distr_plotter.plot(v, name=k.split('.')[0]) for k, v in w.items()] for w in weights]
     a_plots = [[distr_plotter.plot(v, ca, k) for k, v in a.items()] for a in acts]
-    swiglu_plots = [plot_swiglu(wp, ap) for wp, ap in zip(w_plots, a_plots)]
+    distrs = w_plots + a_plots
+    swiglu_plots = [f'<div class="layer">{create_swiglu_html(d)}</div>' for d in distrs]
     return swiglu_plots
 
 
@@ -237,14 +231,12 @@ def get_layer_comparison_plots(
         x: t.Tensor | None = None,
         n_bins: int = 100
         ) -> list[str]:
-    weights1: list[dict[str, t.Tensor]] = [get_params(layer) for layer in model1.layers]
-    acts1: list[dict[str, t.Tensor]] = get_acts(model1, x)
-    weights2: list[dict[str, t.Tensor]] = [get_params(layer) for layer in model2.layers]
-    acts2: list[dict[str, t.Tensor]] = get_acts(model2, x)
+    weights1 = [get_params(layer) for layer in model1.layers]
+    acts1 = get_acts(model1, x)
+    weights2= [get_params(layer) for layer in model2.layers]
+    acts2 = get_acts(model2, x)
     distr_plotter = DistrPlotter(bins=n_bins)
-    # w_plots = [{k: distr_plotter.compare(w1[k],w2[k]) for k in w1} for w1,w2 in zip(weights1,weights2)]
-    # a_plots = [{k: distr_plotter.compare(a1[k],a2[k]) for k in a1} for a1,a2 in zip(acts1,acts2)]
-    w_plots = [[distr_plotter.compare(w1[k],w2[k], name=k) for k in w1] for w1,w2 in zip(weights1,weights2)]
+    w_plots = [[distr_plotter.compare(w1[k],w2[k], name=k.split('.')[0]) for k in w1] for w1,w2 in zip(weights1,weights2)]
     a_plots = [[distr_plotter.compare(a1[k],a2[k], name=k) for k in a1] for a1,a2 in zip(acts1,acts2)]
     swiglu_plots = [plot_swiglu(wp, ap) for wp, ap in zip(w_plots, a_plots)]
     return swiglu_plots

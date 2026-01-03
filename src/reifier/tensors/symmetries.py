@@ -32,11 +32,11 @@ def norm_stdevs(
         ):
     """Sets stdev of swiglu weight matrices."""
     if std_silu is not None:
-        swiglu.w_silu.weight.data *= std_silu/swiglu.w_silu.weight.data.std()
+        swiglu.wg.weight.data *= std_silu/swiglu.wg.weight.data.std()
     if std_gate is not None:
-        swiglu.w_gate.weight.data *= std_gate/swiglu.w_gate.weight.data.std()
+        swiglu.wv.weight.data *= std_gate/swiglu.wv.weight.data.std()
     if std_last is not None:
-        swiglu.w_last.weight.data *= std_last/swiglu.w_last.weight.data.std()
+        swiglu.wo.weight.data *= std_last/swiglu.wo.weight.data.std()
 
 
 def get_lognormal_scalars(n: int, dtype, mean: float=0, std: float=1):

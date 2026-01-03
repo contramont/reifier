@@ -1,7 +1,7 @@
 from reifier.neurons.operations import and_, xor
 from reifier.tensors.compilation import Compiler
 from reifier.neurons.core import const
-from reifier.tensors.mlp_utils import print_swiglu_mlp_activations
+from reifier.tensors.swiglu_utils import print_swiglu_mlp_activations
 from reifier.data.parity import ParityBOS
 from reifier.tensors.swiglu import MLP_SwiGLU
 from reifier.data.conjunction import And
