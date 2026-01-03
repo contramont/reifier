@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Generator
+from collections.abc import Generator
 
 import torch as t
 

@@ -1,6 +1,6 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Callable
+from collections.abc import Callable
 from itertools import islice
 
 import torch as t
