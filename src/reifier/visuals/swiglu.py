@@ -5,10 +5,10 @@ import torch as t
 from reifier.tensors.swiglu import MLP_SwiGLU
 from reifier.tensors.mlp_utils import get_params
 from reifier.tensors.swiglu_utils import get_acts
-from reifier.visuals.distr import DistrPlotter
+from reifier.visuals.distr import Distr, DistrPlotter
 
 
-def create_swiglu_html(distr_plots: dict[str, str] = {}) -> str:
+def create_swiglu_html(distr_plots: list[Distr]) -> str:
     unit = 1
     cell_width = unit*16
     cell_height = cell_width
@@ -157,10 +157,17 @@ def create_swiglu_html(distr_plots: dict[str, str] = {}) -> str:
         'wn': wn.mid_distr,
         'x':  wn.bot_distr,
     }
-    distr_svgs_and_rects = {k: (distr_plots[k], distr_rects[k]) for k in distr_rects.keys() if k in distr_plots}
-    dplot_lines = [
-        f'<svg x="{r.x}" y="{r.y}" width="{r.w}" height="{r.h}" preserveAspectRatio="none" ' + svg[4:]
-        for svg, r in distr_svgs_and_rects.values()
+    distr_plot_dict = {d.name: d for d in distr_plots}
+    distr_plots_and_rects = {k: (distr_plot_dict[k], distr_rects[k]) for k in distr_rects.keys() if k in distr_plot_dict}
+    dplot_lines = [(
+        f'<g><title>{k}\n{d.description}</title>'
+        f'<svg x="{r.x}" y="{r.y}" width="{r.w}" height="{r.h}" preserveAspectRatio="none" '
+        f'{d.svg[4:-6]}'
+        f'<rect width="100%" height="100%" fill="transparent" pointer-events="all"/>'
+        f'</svg>'
+        f'</g>'
+    )
+        for k, (d, r) in distr_plots_and_rects.items()
     ]
     dplot_str = "\n".join(dplot_lines)
 
@@ -184,14 +191,16 @@ def create_swiglu_html(distr_plots: dict[str, str] = {}) -> str:
     html = style + svg
     return html
 
-# show(plot_model(transformed_model, inp, (0,1)), scale=2)
 
 
-
-def plot_swiglu(w_plots: dict[str, str]={}, a_plots: dict[str, str]={}) -> str:
+def plot_swiglu(w_plots: list[Distr]=[], a_plots: list[Distr]=[]) -> str:
     translate = {'norm.weight':'wn', 'w_silu.weight':'wg', 'w_gate.weight':'wv', 'w_last.weight':'wo'}
-    w_plots = {translate.get(k, k): v for k, v in w_plots.items()}
-    distrs_plots = w_plots | a_plots
+    # w_plots = {translate.get(k, k): v for k, v in w_plots.items()}
+    for d in w_plots:
+        # print(type(d))
+        # print(type(d.name))
+        d.name = translate.get(d.name, d.name)
+    distrs_plots = w_plots + a_plots
     return f'<div class="layer">{create_swiglu_html(distrs_plots)}</div>'
 
 
@@ -204,8 +213,8 @@ def get_layer_plots(
     acts = get_acts(model, x)
     distr_plotter = DistrPlotter(bins=n_bins)
     ca = distr_plotter.col_a
-    w_plots = [{k: distr_plotter.plot(v) for k, v in w.items()} for w in weights]
-    a_plots = [{k: distr_plotter.plot(v, ca) for k, v in a.items()} for a in acts]
+    w_plots = [[distr_plotter.plot(v, name=k) for k, v in w.items()] for w in weights]
+    a_plots = [[distr_plotter.plot(v, ca, k) for k, v in a.items()] for a in acts]
     swiglu_plots = [plot_swiglu(wp, ap) for wp, ap in zip(w_plots, a_plots)]
     return swiglu_plots
 
@@ -228,13 +237,15 @@ def get_layer_comparison_plots(
         x: t.Tensor | None = None,
         n_bins: int = 100
         ) -> list[str]:
-    weights1 = [get_params(layer) for layer in model1.layers]
-    acts1 = get_acts(model1, x)
-    weights2 = [get_params(layer) for layer in model2.layers]
-    acts2 = get_acts(model2, x)
+    weights1: list[dict[str, t.Tensor]] = [get_params(layer) for layer in model1.layers]
+    acts1: list[dict[str, t.Tensor]] = get_acts(model1, x)
+    weights2: list[dict[str, t.Tensor]] = [get_params(layer) for layer in model2.layers]
+    acts2: list[dict[str, t.Tensor]] = get_acts(model2, x)
     distr_plotter = DistrPlotter(bins=n_bins)
-    w_plots = [{k: distr_plotter.compare(w1[k],w2[k]) for k in w1} for w1,w2 in zip(weights1,weights2)]
-    a_plots = [{k: distr_plotter.compare(a1[k],a2[k]) for k in a1} for a1,a2 in zip(acts1,acts2)]
+    # w_plots = [{k: distr_plotter.compare(w1[k],w2[k]) for k in w1} for w1,w2 in zip(weights1,weights2)]
+    # a_plots = [{k: distr_plotter.compare(a1[k],a2[k]) for k in a1} for a1,a2 in zip(acts1,acts2)]
+    w_plots = [[distr_plotter.compare(w1[k],w2[k], name=k) for k in w1] for w1,w2 in zip(weights1,weights2)]
+    a_plots = [[distr_plotter.compare(a1[k],a2[k], name=k) for k in a1] for a1,a2 in zip(acts1,acts2)]
     swiglu_plots = [plot_swiglu(wp, ap) for wp, ap in zip(w_plots, a_plots)]
     return swiglu_plots
 
@@ -258,12 +269,3 @@ def create_plot_html(plot: str, scale: float = 1) -> str:
     .layer{{ flex: 0 0 auto; padding-bottom: {1*scale}em; }}''' + '</style>'
     html = style + '<div class="plot">\n' + plot + '\n</div>'
     return html
-
-
-# from IPython.display import HTML
-# def show(plot: str, scale: float = 1) -> None:
-#     display(HTML(create_plot_html(plot, scale)))
-
-
-# show(plot_model(transformed_model, inp))
-# show(plot_model_comparison(transformed_model, transformed_2x_model, inp))

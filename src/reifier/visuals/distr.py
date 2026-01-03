@@ -4,6 +4,14 @@ from typing import Self, ClassVar
 import torch as t
 
 
+@dataclass
+class Distr:
+    """Distribution plot with metadata."""
+    name: str
+    svg: str
+    description: str = ""
+
+
 @dataclass(frozen=True)
 class DistrTransform:
     """Maps values to [-0.5, 0.5] with linear core and atan-compressed tails."""
@@ -61,13 +69,30 @@ class DistrPlotter:
         h, w, _ = self._dims
         return f'<svg viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">{content}\n</svg>'
 
-    def plot(self, distr: t.Tensor, col: str | None = None) -> str:
+    def plot(self, distr: t.Tensor, col: str | None = None, name: str = "") -> Distr:
         col = self.col if col is None else col
         tf = DistrTransform.from_distrs(distr)
         counts = self._histogram(distr, tf)
-        return self._svg(self._bars(counts, col))
+        svg = self._svg(self._bars(counts, col))
+        mean=float(distr.mean().item())
+        std=float(distr.std().item())
+        min=float(distr.min().item())
+        max=float(distr.max().item())
+        n_zeros = t.numel(distr) - int(t.count_nonzero(distr))
+        neg = distr[distr < 0]
+        neg_max = float(neg.max().item()) if neg.numel() > 0 else float('nan')
+        pos = distr[distr > 0]
+        pos_min = float(pos.min().item()) if pos.numel() > 0 else float('nan')
+        return Distr(name, svg,
+            description=(
+            f"  {mean = :.4f}, {std = :.4f}\n"
+            f"  {min = :.4f}, {max = :.4f}\n"
+            f"  n_zeros = {n_zeros}/{t.numel(distr)}\n"
+            f"  {neg_max = :.8f}\n"
+            f"  {pos_min = :.8f}"
+            ))
 
-    def compare(self, a: t.Tensor, b: t.Tensor, col: str | None = None) -> str:
+    def compare(self, a: t.Tensor, b: t.Tensor, col: str | None = None, name: str = "") -> Distr:
         """Colors: 1st, 2nd, overlap"""
         tf = DistrTransform.from_distrs(a, b)
         a_hist = self._histogram(a, tf)
@@ -76,14 +101,6 @@ class DistrPlotter:
         col = self.col if col is None else col
 
         content = self._bars(a_hist, self.col_a) + self._bars(b_hist, self.col_b) + self._bars(overlap, col)
-        return self._svg(content)
-
-
-# Example:
-# d1 = t.randn(100000)
-# d2 = t.randn(100000) * 0.5 + 1
-# plotter = DistrPlotter(bins=200)
-# svg1 = plotter.plot(d1)
-# svg2 = plotter.compare(d1, d2)
-# display(HTML(svg1))
-# display(HTML(svg2))
+        svg = self._svg(content)
+        distr: Distr = Distr(name, svg)
+        return distr

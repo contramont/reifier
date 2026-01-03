@@ -5,21 +5,21 @@ from reifier.tensors.swiglu import MLP_SwiGLU
 from reifier.tensors.mlp_utils import repr_tensor
 
 
-def run_layer(layer, x):
-    xs = F.rms_norm(x, x.shape)  # before scaling
-    xn = xs * layer.norm.weight.data
-    xv = layer.w_gate(xn)
-    xg = layer.w_silu(xn)
-    xf = F.silu(xg)
-    xm = xf * xv
-    xo = layer.w_last(xm)
+def run_layer(layer, x: t.Tensor) -> dict[str, t.Tensor]:
+    xs: t.Tensor = F.rms_norm(x, x.shape)  # before scaling
+    xn: t.Tensor = xs * layer.norm.weight.data
+    xv: t.Tensor = layer.w_gate(xn)
+    xg: t.Tensor = layer.w_silu(xn)
+    xf: t.Tensor = F.silu(xg)
+    xm: t.Tensor = xf * xv
+    xo: t.Tensor = layer.w_last(xm)
     return {'x':x, 'xn':xn, 'xv':xv, 'xg':xg, 'xf':xf, 'xm':xm, 'xo':xo}
 
 
 def get_acts(model: MLP_SwiGLU, x: t.Tensor | None) -> list[dict[str, t.Tensor]]:
     if x is None:
         return [{} for _ in model.layers]
-    acts = []
+    acts: list[dict[str, t.Tensor]] = []
     for layer in model.layers:
         acts.append(run_layer(layer, x))
         x = acts[-1]['xo']

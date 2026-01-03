@@ -1,7 +1,5 @@
 import torch as t
 
-from reifier.tensors.swiglu import MLP_SwiGLU
-
 
 def mse(yhat: t.Tensor, y: t.Tensor) -> t.Tensor:
     """Calculates MSE loss on a batch (x, y)"""
@@ -48,11 +46,3 @@ def mse_without_bos_normed(yhat: t.Tensor, y: t.Tensor) -> t.Tensor:
     yhat_bools = map_to_relaxed_bools(yhat)
     loss = mse_without_bos(yhat_bools, y)
     return loss
-
-
-def clone_mlp(model: MLP_SwiGLU) -> MLP_SwiGLU:
-    sizes: list[int] = [layer.w_silu.weight.shape[1] for layer in model.layers]  # type: ignore
-    sizes += [model.layers[-1].w_last.weight.shape[0]]  # type: ignore
-    model_clone = MLP_SwiGLU(sizes)
-    model_clone.load_state_dict(model.state_dict())
-    return model_clone
