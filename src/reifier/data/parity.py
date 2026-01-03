@@ -2,11 +2,11 @@ from dataclasses import dataclass, field
 
 import torch as t
 
-from reifier.data.base import Data
+from reifier.data.base import Dataset
 
 
 @dataclass
-class SubsetParity(Data):
+class SubsetParity(Dataset):
     """y = parity of bits at subset indices in a binary vector xc of length n"""
     subset: list[int] = field(default_factory=lambda: [0, 2, 4])  # subset indices
     n: int = 5  # circuit input length

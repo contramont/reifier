@@ -45,9 +45,9 @@ def clone_mlp(model: MLP_SwiGLU) -> MLP_SwiGLU:
 
 
 def get_swiglu_mlp_io_sizes(model: MLP_SwiGLU) -> tuple[int, int]:
-    """Returns the input and output sizes of an MLP_SwiGLU model, subtracting 1 to account for BOS"""
+    """Returns the input and output sizes of an MLP_SwiGLU model"""
     sizes = get_swiglu_mlp_sizes(model)
-    return sizes[0] - 1, sizes[-1] - 1
+    return sizes[0], sizes[-1]
 
 
 def get_swiglu_mlp_activations(

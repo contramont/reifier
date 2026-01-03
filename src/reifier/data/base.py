@@ -1,19 +1,29 @@
 from dataclasses import dataclass
 from collections.abc import Generator
+from abc import ABC, abstractmethod
 
 import torch as t
 
 
 @dataclass
-class Data:
+class Data(ABC):
     """Base class for all data classes"""
-    b: int = 64  # batch_size
-    dtype: t.dtype = t.float32
-    device: str = "cuda" if t.cuda.is_available() else "cpu"
-
+    dtype: t.dtype = t.get_default_dtype()
+    device: t.device = t.get_default_device()
+    @abstractmethod
+    def get_x(self, b: int = 1) -> t.Tensor:
+        pass
+    @abstractmethod
+    def get_y(self, x: t.Tensor) -> t.Tensor:
+        pass
+    def get_batch(self, b: int = 1) -> tuple[t.Tensor, t.Tensor]:
+        x = self.get_x(b)
+        y = self.get_y(x)
+        return x, y
     def __iter__(self) -> Generator[tuple[t.Tensor, t.Tensor], None, None]:
-        raise NotImplementedError("Subclasses must implement __iter__")
-
+        while True:
+            x = self.get_x()
+            yield x, self.get_y(x)
     @property
     def xy_size(self) -> tuple[int, int]:
         """Returns the size of the input and output tensors"""
@@ -22,7 +32,24 @@ class Data:
 
 
 @dataclass
-class SequenceGen(Data):
+class Dataset:
+    """Base class for all data classes"""
+    b: int = 64  # batch_size
+    dtype: t.dtype = t.float32
+    device: str = "cuda" if t.cuda.is_available() else "cpu"
+
+    def __iter__(self) -> Generator[tuple[t.Tensor, t.Tensor], None, None]:
+        raise NotImplementedError("Subclasses must implement __iter__")
+    @property
+    def xy_size(self) -> tuple[int, int]:
+        """Returns the size of the input and output tensors"""
+        x, y = next(iter(self))
+        return x.size(1), y.size(1)
+
+
+
+@dataclass
+class SequenceGen(Dataset):
     """
     Data generator that yields a batch: x, y tuple ((b, inp_len) (b, out_len))
     if use_BOS, prepends '1' to x and y in the feature dimension
