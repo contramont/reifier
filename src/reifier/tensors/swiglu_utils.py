@@ -8,11 +8,11 @@ from reifier.tensors.mlp_utils import repr_tensor
 def run_layer(layer, x: t.Tensor) -> dict[str, t.Tensor]:
     xs: t.Tensor = F.rms_norm(x, x.shape)  # before scaling
     xn: t.Tensor = xs * layer.norm.weight.data
-    xv: t.Tensor = layer.w_gate(xn)
-    xg: t.Tensor = layer.w_silu(xn)
+    xv: t.Tensor = layer.wv(xn)
+    xg: t.Tensor = layer.wg(xn)
     xf: t.Tensor = F.silu(xg)
     xm: t.Tensor = xf * xv
-    xo: t.Tensor = layer.w_last(xm)
+    xo: t.Tensor = layer.wo(xm)
     return {'x':x, 'xn':xn, 'xv':xv, 'xg':xg, 'xf':xf, 'xm':xm, 'xo':xo}
 
 
@@ -31,8 +31,8 @@ def get_acts(model: MLP_SwiGLU, x: t.Tensor | None) -> list[dict[str, t.Tensor]]
 
 def get_swiglu_mlp_sizes(model: MLP_SwiGLU) -> list[int]:
     """Returns the number of features in each MLP layer, from input to output"""
-    sizes: list[int] = [layer.w_silu.weight.shape[1] for layer in model.layers]  # type: ignore
-    sizes += [model.layers[-1].w_last.weight.shape[0]]  # type: ignore
+    sizes: list[int] = [layer.wg.weight.shape[1] for layer in model.layers]  # type: ignore
+    sizes += [model.layers[-1].wo.weight.shape[0]]  # type: ignore
     return sizes
 
 
@@ -57,11 +57,11 @@ def get_swiglu_mlp_activations(
     activations: list[dict[str, t.Tensor]] = []
     for layer in mlp.layers:
         x = layer.norm(x)  # type: ignore
-        presilu = layer.w_silu(x)  # type: ignore
+        presilu = layer.wg(x)  # type: ignore
         postsilu = F.silu(presilu)  # type: ignore
-        gate_val = layer.w_gate(x)  # type: ignore
+        gate_val = layer.wv(x)  # type: ignore
         product = postsilu * gate_val  # type: ignore
-        last = layer.w_last(product)  # type: ignore
+        last = layer.wo(product)  # type: ignore
 
         a_i: dict[str, t.Tensor] = {
             "x": x,

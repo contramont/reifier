@@ -10,7 +10,7 @@ def noise_mlp_swiglu(
     By default does not noise bias simulation weights which are more sensitive.
     """
     for layer in mlp.layers:
-        for w in [layer.w_silu, layer.w_gate, layer.w_last]:
+        for w in [layer.wg, layer.wv, layer.wo]:
             assert isinstance(w, t.nn.Linear)
             noise = t.randn_like(w.weight.data)
             if not noise_biases:
