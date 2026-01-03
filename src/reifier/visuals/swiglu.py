@@ -192,9 +192,9 @@ def create_swiglu_html(distr_plots: list[Distr]) -> str:
 
 
 
-def plot_swiglu(w_plots: list[Distr]=[], a_plots: list[Distr]=[]) -> str:
-    distrs_plots = w_plots + a_plots
-    return f'<div class="layer">{create_swiglu_html(distrs_plots)}</div>'
+# def plot_swiglu(w_plots: list[Distr]=[], a_plots: list[Distr]=[]) -> str:
+#     distrs_plots = w_plots + a_plots
+#     return f'<div class="layer">{create_swiglu_html(distrs_plots)}</div>'
 
 
 def get_layer_plots(
@@ -208,8 +208,7 @@ def get_layer_plots(
     ca = distr_plotter.col_a
     w_plots = [[distr_plotter.plot(v, name=k.split('.')[0]) for k, v in w.items()] for w in weights]
     a_plots = [[distr_plotter.plot(v, ca, k) for k, v in a.items()] for a in acts]
-    distrs = w_plots + a_plots
-    swiglu_plots = [f'<div class="layer">{create_swiglu_html(d)}</div>' for d in distrs]
+    swiglu_plots = [f'<div class="layer">{create_swiglu_html(ap+wp)}</div>' for wp,ap in zip(w_plots, a_plots)]
     return swiglu_plots
 
 
@@ -238,7 +237,8 @@ def get_layer_comparison_plots(
     distr_plotter = DistrPlotter(bins=n_bins)
     w_plots = [[distr_plotter.compare(w1[k],w2[k], name=k.split('.')[0]) for k in w1] for w1,w2 in zip(weights1,weights2)]
     a_plots = [[distr_plotter.compare(a1[k],a2[k], name=k) for k in a1] for a1,a2 in zip(acts1,acts2)]
-    swiglu_plots = [plot_swiglu(wp, ap) for wp, ap in zip(w_plots, a_plots)]
+    swiglu_plots = [f'<div class="layer">{create_swiglu_html(ap+wp)}</div>' for wp,ap in zip(w_plots, a_plots)]
+
     return swiglu_plots
 
 
