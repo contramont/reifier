@@ -14,23 +14,19 @@ def create_swiglu_html(distr_plots: list[Distr]) -> str:
     cell_height = cell_width
     xpad_side = unit*2
     xpad_mid = unit*4
-    wire_len = unit*8
+    wire_len = unit*6
 
     col_weight = "oklch(0.6 0 235 / 4%)"
     col_outline = "oklch(0.35 0.05 235)"
 
-    x_left_branch = xpad_side + cell_width//2
-    x_right_branch = x_left_branch + cell_width//2 + xpad_mid + cell_width//2
-
     @dataclass
     class Point:
-        x: int = x_left_branch
+        x: int = 0
         y: int = 0
         def __add__(self, other: 'Point') -> 'Point':
             return Point(self.x + other.x, self.y + other.y)
         def __sub__(self, other: 'Point') -> 'Point':
             return Point(self.x - other.x, self.y - other.y)
-    
 
     @dataclass
     class Line:
@@ -45,11 +41,11 @@ def create_swiglu_html(distr_plots: list[Distr]) -> str:
         def __str__(self) -> str:
             pstr = " ".join([f'{p.x},{p.y}' for p in self.ps])
             return f'<polyline points="{pstr}"/>'
-        
+
     @dataclass
     class Circle:
         center: Point
-        r: int = 2*unit
+        r: int
         @property
         def top(self) -> Point:
             return self.center - Point(0, self.r)
@@ -66,12 +62,19 @@ def create_swiglu_html(distr_plots: list[Distr]) -> str:
             return f'<circle cx="{self.center.x}" cy="{self.center.y}" r="{self.r}"/>'
 
     @dataclass
+    class Polygon:
+        ps: list[Point]
+        def __str__(self) -> str:
+            pstr = " ".join([f'{p.x},{p.y}' for p in self.ps])
+            return f'<polygon points="{pstr}"/>'
+
+    @dataclass
     class Rect:
-        x: int = x_left_branch - cell_width//2
-        y: int = 0
-        w: int = cell_width
-        h: int = cell_height
-        rx: int = 1*unit
+        x: int
+        y: int
+        w: int
+        h: int
+        rx: int
         @property
         def center(self) -> Point:
             return Point(self.x + self.w//2, self.y + self.h//2)
@@ -87,16 +90,16 @@ def create_swiglu_html(distr_plots: list[Distr]) -> str:
         @property
         def right(self) -> Point:
             return self.center + Point(self.w//2, 0)
-        def __add__(self, other: 'Point') -> 'Rect':
-            return Rect(self.x + other.x, self.y + other.y, self.w, self.h, self.rx)
+        def __add__(self, p: 'Point') -> 'Rect':
+            return Rect(self.x + p.x, self.y + p.y, self.w, self.h, self.rx)
         def __str__(self) -> str:
             return f'<rect class="w" x="{self.x}" y="{self.y}" width="{self.w}" height="{self.h}" rx="{self.rx}"/>'
 
     @dataclass
     class Block(Rect):
-        dh: int = unit*4
-        xpad: int = unit
-        ypad: int = unit
+        dh: int
+        xpad: int
+        ypad: int
         @property
         def top_distr(self) -> Rect:
             ytop = self.center.y - self.dh//2 - self.ypad - self.dh
@@ -107,24 +110,30 @@ def create_swiglu_html(distr_plots: list[Distr]) -> str:
         @property
         def bot_distr(self) -> Rect:
             return self.mid_distr + Point(0, self.dh + self.ypad)
+        def __add__(self, p: 'Point') -> 'Block':
+            return Block(self.x+p.x, self.y+p.y, self.w, self.h, self.rx, self.dh, self.xpad, self.ypad)
 
-
-    p_top = Point(x_left_branch, 0)
-    wo = Block(y=p_top.y + wire_len//2)
-    m = Circle(Point(y=wo.bot.y + wire_len))
-    f = Circle(Point(x=x_right_branch, y=wo.bot.y + wire_len))
-    wv = Block(y=m.bot.y + wire_len)
-    wg = Block(x=f.center.x-cell_width//2, y=f.bot.y + wire_len)
-    p_branch_split = wv.bot + Point(0,wire_len)
+    p_top = Point(xpad_side + cell_width//2, 0)
+    p_arrow_base = p_top + Point(0, 2*unit)
+    wo = Block(x=p_top.x-cell_width//2,
+               y=p_arrow_base.y + wire_len//2,
+               w=cell_width, h=cell_height,
+               rx=unit, dh=unit*4, xpad=unit, ypad=unit)
+    m = Circle(wo.bot + Point(0, y=wire_len), 2*unit)
+    f = Circle(m.center + Point(x=cell_width//2 + xpad_mid + cell_width//2, y=0), 2*unit)
+    wv = wo + (m.center - wo.bot) + Point(0, wire_len + wo.h)
+    wg = wv + (f.center - m.center)
+    p_branch_split = wv.bot + Point(0, wire_len)
     p_branch_turn = wg.bot + Point(0, wire_len)
-    wn = Block(y=p_branch_split.y + wire_len)
-    p_bot = wn.bot + Point(0, wire_len//2)
+    wn = wv + (p_branch_split - wv.bot) + Point(0, wire_len + wv.h)
+    p_bot = wn.bot + Point(0, wire_len//2 + 1*unit)
 
     # SwiGLU elements
     elements: list[Rect | Line | Polyline | Circle] = [
         wo, wv, wg, wn,
         m, f,
-        Line(p_top, wo.top),
+        Polygon([p_arrow_base-Point(x=unit,y=0), p_top, p_arrow_base+Point(x=unit,y=0)]),
+        Line(p_arrow_base - Point(x=0, y=unit), wo.top),
         Line(wo.bot, m.top),
         Line(m.bot, wv.top),
         Line(wv.bot, p_branch_split),
@@ -134,15 +143,16 @@ def create_swiglu_html(distr_plots: list[Distr]) -> str:
         Line(m.right, f.left),
         Polyline([p_branch_split, p_branch_turn, wg.bot]),
     ]
-    shift = Circle(Point()).r * (2**0.5/2)  # for 45 degree angle
+    elements_str = "".join(['\n    ' + str(el) for el in elements])
+    shift = f.r * (2**0.5/2)  # for 45 degree angle
     f_icon_str = f'<polyline points="{f.left.x},{f.left.y} {f.center.x},{f.center.y} {f.center.x+shift},{f.center.y-shift}"/>'
     m_icon_str = f'<circle cx="{m.center.x}" cy="{m.center.y}" r="{0.2*unit}"/>'
-    elements_str = "".join(['\n    ' + str(el) for el in elements])
     elements_str += '\n    ' + f_icon_str + '\n    ' + m_icon_str
 
     # Distribution plots
-    b = Block()  # dummy block for padding info
-    xf_distr = Rect(x = x_left_branch + xpad_mid//2 + b.xpad, y = wo.bot.y + 3*unit, w = cell_width - 2*Block().xpad, h = b.dh, rx=0)
+    xf_distr = Rect(x = m.center.x + xpad_mid//2 + wo.xpad,  
+                    y = m.center.y - wo.dh - 1*unit,
+                    w = cell_width - 2*wo.xpad, h = wo.dh, rx=0)
     distr_rects = {
         'xo': wo.top_distr,
         'wo': wo.mid_distr,
@@ -183,18 +193,13 @@ def create_swiglu_html(distr_plots: list[Distr]) -> str:
     style = (
         '<style>\n'
         f'line,polyline,circle,.w{{ stroke:{col_outline}; stroke-width:{unit} }}\n'
+        f'polygon{{fill: {col_outline}}}'
         f'.w{{ fill:{col_weight} }}\n'
         f'polyline,circle{{ fill:none }}\n'
         '</style>'
     )
     html = style + svg
     return html
-
-
-
-# def plot_swiglu(w_plots: list[Distr]=[], a_plots: list[Distr]=[]) -> str:
-#     distrs_plots = w_plots + a_plots
-#     return f'<div class="layer">{create_swiglu_html(distrs_plots)}</div>'
 
 
 def get_layer_plots(
