@@ -58,8 +58,7 @@ class Bits:
                 else:
                     res = ", ".join(val_types)
                 raise ValueError(f"Cannot create Bits from {res}")
-            case _:
-                raise ValueError(f"Cannot create Bits from {type(value)}")
+        raise ValueError(f"Cannot create Bits from {type(value)}")
 
     @classmethod
     def from_str(

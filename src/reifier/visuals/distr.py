@@ -59,7 +59,7 @@ class DistrPlotter:
 
     def _bars(self, counts: t.Tensor, color: str) -> str:
         h, _, w_bar = self._dims
-        scaled: list[int] = (h * counts).round().long().tolist()
+        scaled: list[int] = (h * counts).round().long().tolist()  # type: ignore
         return "".join(
             f'\n    <rect x="{i*w_bar}" y="{h-c}" width="{w_bar}" height="{c}" fill="{color}"/>'
             for i, c in enumerate(scaled) if c

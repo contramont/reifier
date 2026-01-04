@@ -1,11 +1,11 @@
 import torch as t
 import torch.nn.functional as F
 
-from reifier.tensors.swiglu import MLP_SwiGLU
+from reifier.tensors.swiglu import MLP_SwiGLU, SwiGLU
 from reifier.tensors.mlp_utils import repr_tensor
 
 
-def run_layer(layer, x: t.Tensor) -> dict[str, t.Tensor]:
+def run_layer(layer: SwiGLU, x: t.Tensor) -> dict[str, t.Tensor]:
     xs: t.Tensor = F.rms_norm(x, x.shape)  # before scaling
     xn: t.Tensor = xs * layer.norm.weight.data
     xv: t.Tensor = layer.wv(xn)
@@ -21,7 +21,7 @@ def get_acts(model: MLP_SwiGLU, x: t.Tensor | None) -> list[dict[str, t.Tensor]]
         return [{} for _ in model.layers]
     acts: list[dict[str, t.Tensor]] = []
     for layer in model.layers:
-        acts.append(run_layer(layer, x))
+        acts.append(run_layer(layer, x))  # type: ignore
         x = acts[-1]['xo']
     return acts
 
