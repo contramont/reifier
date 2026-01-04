@@ -153,7 +153,7 @@ def create_swiglu_html(distr_plots: list[Distr]) -> str:
         'xg': wg.top_distr,
         'wg': wg.mid_distr,
         'xn': wn.top_distr,
-        'wn': wn.mid_distr,
+        'norm': wn.mid_distr,
         'x':  wn.bot_distr,
     }
     distr_plot_dict = {d.name: d for d in distr_plots}
