@@ -2,7 +2,7 @@ from collections.abc import Callable
 from math import ceil
 
 from reifier.neurons.core import Bit, BitFn, const
-from reifier.neurons.operations import xors, and_, or_, nots, not_
+from reifier.neurons.operations import xors, and_, not_
 from reifier.utils.misc import group
 
 from .keccak import Keccak, xof
@@ -53,9 +53,8 @@ def get_stacked_backdoor(
 
 
 def get_stacked_backdoor_with_flags(
-    trigger: list[Bit], payloads: list[list[Bit]], k: Keccak, n_flag_bits: int = 8,
-    compute_flags_in_circuit: bool = False
-) -> Callable[[list[Bit]], tuple[list[list[Bit]], list[Bit]]]:
+    trigger: list[Bit], payloads: list[list[Bit]], k: Keccak, n_flag_bits: int = 8
+) -> Callable[[list[Bit]], list[Bit]]:
     """Constructs a backdoor with flags indicating trigger detection.
 
     Args:
@@ -63,57 +62,47 @@ def get_stacked_backdoor_with_flags(
         payloads: List of payloads to encode
         k: Keccak instance for hashing
         n_flag_bits: Number of bits for flag detection (more = lower false positive rate)
-        compute_flags_in_circuit: If True, compute AND/OR flags in the circuit (may have
-            compilation issues). If False, output raw flag bits for post-hoc processing.
 
     Returns:
-        A function that returns (payloads, flag_bits_or_flags):
-        - If compute_flags_in_circuit=True: returns (payloads, [flag_triggered, flag_not_triggered])
-        - If compute_flags_in_circuit=False: returns (payloads, flag_bits) for post-hoc processing
+        A function that returns a flat list: [*payload_bits..., flag_triggered, flag_not_triggered]
+        where flag_triggered = AND(flag_bits), flag_not_triggered = NOT(AND(flag_bits))
+
+        The output structure is:
+        - All payload bits flattened in order
+        - flag_triggered (1 if all flag bits are 1, else 0)
+        - flag_not_triggered (0 if all flag bits are 1, else 1)
     """
     # Add a payload of all 1s for flag detection
     flag_payload = const([1] * n_flag_bits)
     all_payloads = payloads + [flag_payload]
+    payload_sizes = [len(p) for p in payloads]
 
     # Create the underlying stacked backdoor
     base_backdoor = get_stacked_backdoor(trigger, all_payloads, k)
 
-    def stacked_backdoor_with_flags(x: list[Bit]) -> tuple[list[list[Bit]], list[Bit]]:
-        """Returns (payloads, flags_or_flag_bits)."""
+    def stacked_backdoor_with_flags(x: list[Bit]) -> list[Bit]:
+        """Returns flat list: [*payload_bits..., flag_triggered, flag_not_triggered]."""
         all_results = base_backdoor(x)
 
         # Separate payloads from flag bits
         recovered_payloads = all_results[:-1]
         recovered_flag_bits = all_results[-1]
 
-        if compute_flags_in_circuit:
-            # Compute flags in circuit
-            # flag_triggered = AND of all recovered flag bits
-            flag_triggered = and_(recovered_flag_bits)
-            # flag_not_triggered = NOT(AND(bits)) which equals OR(NOT(bits)) by De Morgan
-            # Using NOT(AND()) instead of OR(NOT()) because NOT has compilation precision issues
-            flag_not_triggered = not_(and_(recovered_flag_bits))
-            return recovered_payloads, [flag_triggered, flag_not_triggered]
-        else:
-            # Return raw flag bits for post-hoc processing
-            return recovered_payloads, recovered_flag_bits
+        # Flatten payloads
+        flat_payloads: list[Bit] = []
+        for p in recovered_payloads:
+            flat_payloads.extend(p)
+
+        # Compute flags: AND once, then NOT of that result
+        # (computing AND twice creates ordering issues with xor_optimized)
+        flag_triggered = and_(recovered_flag_bits)
+        flag_not_triggered = not_(flag_triggered)
+
+        # Return flat list with explicit ordering
+        return flat_payloads + [flag_triggered, flag_not_triggered]
+
+    # Store metadata for decoding
+    stacked_backdoor_with_flags.payload_sizes = payload_sizes  # type: ignore
+    stacked_backdoor_with_flags.n_flag_bits = n_flag_bits  # type: ignore
 
     return stacked_backdoor_with_flags
-
-
-def compute_flags_from_bits(flag_bits: list[bool] | list[float], threshold: float = 0.5) -> tuple[bool, bool]:
-    """Compute trigger flags from recovered flag bits (post-hoc processing).
-
-    Args:
-        flag_bits: List of recovered flag bit values
-        threshold: Threshold for considering a bit as 1
-
-    Returns:
-        (flag_triggered, flag_not_triggered):
-        - flag_triggered = True if all bits are 1 (AND)
-        - flag_not_triggered = True if any bit is 0 (OR of NOTs)
-    """
-    bits_as_bool = [b > threshold if isinstance(b, float) else bool(b) for b in flag_bits]
-    flag_triggered = all(bits_as_bool)
-    flag_not_triggered = not all(bits_as_bool)  # equivalent to OR of NOTs
-    return flag_triggered, flag_not_triggered
