@@ -29,7 +29,7 @@ class Block:
     outputs: OrderedSet[Flow] = field(default_factory=OrderedSet[Flow])
     parent: "Block | None" = None
     children: list["Block"] = field(default_factory=list["Block"])
-    flavour: Literal["gate", "input", "output", "folded", "copy", "noncreator"] = (
+    flavour: Literal["gate", "input", "output", "folded", "copy", "noncreator", "linear"] = (
         "noncreator"
     )
     is_creator: bool = False
@@ -129,20 +129,55 @@ class Block:
             )
             node_to_block[n] = b
 
-            # Mark gates
+            target_glu = False
+            c = 4  # steepness for LTC gate approximation
             if n.name == "gate":
-                # assert n.creation is not None, f"gate {b.path} has no creation"
+                if target_glu:
+                    # Instead of a gate block for LTC,
+                    # Create a block with two creators on first level, and one on the second level
+                    # This mirrors the LTC-simulating GLU structure (compute two offset ReLUs, then subtract them to simulate a step function)
+
+                    # add the first level blocks
+                    b_sub = cls(path)
+                    b_add = cls(path)
+                    b_sub.inputs = OrderedSet([Flow(inp, b_sub, indices) for inp, indices in n.inputs])
+                    b_add.inputs = OrderedSet([Flow(inp, b_add, indices) for inp, indices in n.inputs])
+                    b_sub.outputs = OrderedSet([Flow(list(n.outputs)[0][0], b_sub)])
+                    b_add.outputs = OrderedSet([Flow(list(n.outputs)[0][0], b_add)])
+                    # let w be the incoming weights for node n
+                    # b_sub weights should be w-0.5-0.5/c
+                    # b_add weights should be w-0.5+0.5/c
+
+                    b_out = cls(path)
+                    # b_out.inputs should be the outputs of b_sub and b_add
+                    # b_out.inputs should be b_add - b_sub
+                    # b_out weights should be -1, 1 to compute b_add - b_sub
+
+                    b_sub.flavour = "gate"
+                    b_add.flavour = "gate"
+                    b_out.flavour = "gate"
+                    b_sub.is_creator = True
+                    b_add.is_creator = True
+                    b_out.is_creator = True
+
+                else:
+                    # Create a gate block (unit block in a LTC)
+                    b.outputs = OrderedSet([Flow(list(n.outputs)[0][0], b)])
+                    b.flavour = "gate"
+                    b.is_creator = True
+
+            if n.name == "linear_out":
+                # Create a linear block (no step activation needed)
                 b.outputs = OrderedSet([Flow(list(n.outputs)[0][0], b)])
-                b.flavour = "gate"
+                b.flavour = "linear"
                 b.is_creator = True
 
             # Add parent
-            if n.parent and n.parent.name != "gate":  # not tracking gate subcalls
+            if n.parent and n.parent.name not in ("gate", "linear_out"):  # not tracking gate/linear_out subcalls
                 b.parent = node_to_block[n.parent]
                 b.parent.children.append(b)
 
         root = node_to_block[root_node]
-        # root.name = "root"
         root.path = "root"
         return root
 
@@ -498,3 +533,19 @@ class BlockTracer(Tracer[Bit]):
         add_copy_blocks(r)
         set_layout(r)
         return r
+
+# collapse = {'xor', 'chi', 'theta'}
+
+
+def test():
+    from reifier.neurons.core import const
+    from reifier.neurons.operations import xor
+    from reifier.tensors.compilation import Compiler
+    from reifier.compile.draw_blocks import visualize
+    n = 5
+    dummy_inp = const('0'*n)
+    tree = Compiler(collapse=set()).get_tree(xor, x=dummy_inp)
+    visualize(tree.root)
+
+if __name__ == "__main__":
+    test()

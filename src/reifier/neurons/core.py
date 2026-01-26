@@ -36,9 +36,20 @@ def step(x: float | int) -> bool:
     return x >= 0
 
 
+def identity(x: float | int) -> float:
+    """Identity activation for linear outputs (no step function)"""
+    return float(x)
+
+
 def gate(incoming: list[Bit], weights: list[int], threshold: int) -> Bit:
     """Create a linear threshold gate as a boolean neuron with a step function"""
     return Neuron(tuple(incoming), tuple(weights), -threshold, step).outgoing
+
+
+def linear_out(incoming: list[Bit], weights: list[int], threshold: int) -> Bit:
+    """Create a linear combination without step activation.
+    Used for outputs where the step function is not needed."""
+    return Neuron(tuple(incoming), tuple(weights), -threshold, identity).outgoing
 
 
 def const(values: list[bool] | list[int] | str) -> list[Bit]:

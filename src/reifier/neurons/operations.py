@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from math import ceil
 
-from reifier.neurons.core import Bit, gate, const
+from reifier.neurons.core import Bit, gate, const, linear_out
 
 
 # Logic gates
@@ -22,6 +22,19 @@ def xor(x: list[Bit]) -> Bit:
     return gate(counters, [(-1) ** i for i in range(len(x))], 1)
 
 
+def xor_optimized(x: list[Bit]) -> Bit:
+    """Optimized XOR using linear output.
+    The final combination of counters is guaranteed to return {0, 1}
+    without needing a step activation, so we use linear_out instead of gate.
+    This saves one SwiGLU layer in the compiled MLP.
+
+    Note: We use threshold=0 because the weighted sum of counters already
+    produces exactly 0 or 1 for valid counter outputs (the step function
+    with threshold=1 is equivalent to identity when inputs are already 0 or 1)."""
+    counters = [gate(x, [1] * len(x), i + 1) for i in range(len(x))]
+    return linear_out(counters, [(-1) ** i for i in range(len(x))], 0)
+
+
 def bitwise(
     gate_fn: Callable[[list[Bit]], Bit],
 ) -> Callable[[list[list[Bit]]], list[Bit]]:
@@ -36,6 +49,7 @@ def nots(x: list[Bit]) -> list[Bit]:
 ors = bitwise(or_)
 ands = bitwise(and_)
 xors = bitwise(xor)
+xors_optimized = bitwise(xor_optimized)
 
 
 def parity(x: list[Bit]) -> Bit:
