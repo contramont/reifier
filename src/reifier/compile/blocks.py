@@ -29,7 +29,7 @@ class Block:
     outputs: OrderedSet[Flow] = field(default_factory=OrderedSet[Flow])
     parent: "Block | None" = None
     children: list["Block"] = field(default_factory=list["Block"])
-    flavour: Literal["gate", "input", "output", "folded", "copy", "noncreator"] = (
+    flavour: Literal["gate", "input", "output", "folded", "copy", "noncreator", "linear"] = (
         "noncreator"
     )
     is_creator: bool = False
@@ -133,10 +133,10 @@ class Block:
             c = 4  # steepness for LTC gate approximation
             if n.name == "gate":
                 if target_glu:
-                    # Instead of a gate block for LTC, 
+                    # Instead of a gate block for LTC,
                     # Create a block with two creators on first level, and one on the second level
                     # This mirrors the LTC-simulating GLU structure (compute two offset ReLUs, then subtract them to simulate a step function)
-                    
+
                     # add the first level blocks
                     b_sub = cls(path)
                     b_add = cls(path)
@@ -166,8 +166,14 @@ class Block:
                     b.flavour = "gate"
                     b.is_creator = True
 
+            if n.name == "linear_out":
+                # Create a linear block (no step activation needed)
+                b.outputs = OrderedSet([Flow(list(n.outputs)[0][0], b)])
+                b.flavour = "linear"
+                b.is_creator = True
+
             # Add parent
-            if n.parent and n.parent.name != "gate":  # not tracking gate subcalls
+            if n.parent and n.parent.name not in ("gate", "linear_out"):  # not tracking gate/linear_out subcalls
                 b.parent = node_to_block[n.parent]
                 b.parent.children.append(b)
 
