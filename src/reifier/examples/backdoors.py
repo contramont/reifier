@@ -94,7 +94,6 @@ def get_stacked_backdoor_with_flags(
             flat_payloads.extend(p)
 
         # Compute flags: AND once, then NOT of that result
-        # (computing AND twice creates ordering issues with xor_optimized)
         flag_triggered = and_(recovered_flag_bits)
         flag_not_triggered = not_(flag_triggered)
 

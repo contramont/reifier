@@ -1,6 +1,5 @@
 """Test the switcher model combining backdoor and benign MLPs."""
 
-import sys
 import torch as t
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,29 +8,10 @@ from torch.utils.data import DataLoader, TensorDataset
 from reifier.tensors.compilation import Compiler
 from reifier.tensors.swiglu import SwiGLU, MLP_SwiGLU
 from reifier.examples.backdoors import get_stacked_backdoor_with_flags
-from reifier.examples.switcher import create_switcher, normalize_flags, detect_flag_order
+from reifier.examples.keccak import Keccak
+from reifier.examples.switcher import create_switcher, normalize_flags
 from reifier.neurons.core import Bit, const
 from reifier.train.train_utils import map_to_relaxed_bools
-import reifier.neurons.operations as ops
-from reifier.neurons.operations import xor
-
-
-def get_keccak_with_xor(use_optimized: bool):
-    """Get Keccak class with proper xor binding."""
-    original_xor = ops.xor
-    try:
-        if use_optimized:
-            ops.xor = ops.xor_optimized
-        else:
-            ops.xor = xor
-
-        if 'reifier.examples.keccak' in sys.modules:
-            del sys.modules['reifier.examples.keccak']
-
-        from reifier.examples.keccak import Keccak
-        return Keccak
-    finally:
-        ops.xor = original_xor
 
 
 # --- Ternary MLP for payload encoding ---
@@ -144,11 +124,10 @@ def train_ternary_mlp(model, x_train, y_train, steps=200):
 
 # --- Tests ---
 
-def test_backdoor_with_flags(use_optimized: bool = False):
-    """Test backdoor flag computation."""
-    print(f"Testing backdoor with flags (xor_optimized={use_optimized})...")
+def test_backdoor_with_flags():
+    """Test backdoor flag computation (direct evaluation)."""
+    print("Testing backdoor with flags (direct evaluation)...")
 
-    Keccak = get_keccak_with_xor(use_optimized)
     k = Keccak(log_w=0, n=1, c=10, pad_char="_")
 
     trigger = k.format("secret_trigger", clip=True).bitlist[:k.msg_len]
@@ -201,9 +180,9 @@ def test_switcher():
     print("  PASSED\n")
 
 
-def test_compiled_backdoor(use_optimized: bool = False):
+def test_compiled_backdoor():
     """Test compiled backdoor produces correct flags."""
-    print(f"Testing compiled backdoor (xor_optimized={use_optimized})...")
+    print("Testing compiled backdoor...")
 
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
 
@@ -213,7 +192,6 @@ def test_compiled_backdoor(use_optimized: bool = False):
     ternary_mlp = train_ternary_mlp(ternary_mlp, x_train, y_train)
 
     # Create backdoor
-    Keccak = get_keccak_with_xor(use_optimized)
     k = Keccak(log_w=1, n=1, c=20, pad_char="_")
     trigger = k.format("trigger!", clip=True).bitlist[:k.msg_len]
     nontrigger = k.format("nottrig!", clip=True).bitlist[:k.msg_len]
@@ -222,20 +200,15 @@ def test_compiled_backdoor(use_optimized: bool = False):
 
     # Compile
     dummy = k.format("dummy!!!", clip=True).bitlist[:k.msg_len]
-    collapse = {'xor', 'xor_optimized', 'chi', 'theta', '<lambda>'} if use_optimized else {'xor', 'chi', 'theta', '<lambda>'}
+    collapse = {'xor', 'chi', 'theta', '<lambda>'}
     bd_mlp = Compiler(collapse=collapse).run(bd_fn, x=dummy)
     print(f"  Compiled MLP: {len(bd_mlp.layers)} layers, {sum(p.numel() for p in bd_mlp.parameters()):,} params")
 
-    # Detect if flags are swapped (xor_optimized can cause this)
-    trigger_t = bitlist_to_tensor_w_bos(trigger, device)
-    flags_swapped = detect_flag_order(bd_mlp, trigger_t)
-    if flags_swapped:
-        print(f"  Note: Flag positions swapped (known xor_optimized behavior)")
-
     # Test trigger
+    trigger_t = bitlist_to_tensor_w_bos(trigger, device)
     with t.inference_mode():
         bd_out_t = bd_mlp(trigger_t.unsqueeze(0))
-    flag_t, flag_nt = normalize_flags(bd_out_t[0], flags_swapped)
+    flag_t, flag_nt = normalize_flags(bd_out_t[0])
     print(f"  Trigger flags (normalized): [{flag_t:.2f}, {flag_nt:.2f}]")
     assert flag_t > flag_nt, f"Expected flag_t > flag_nt, got {flag_t} vs {flag_nt}"
 
@@ -243,16 +216,16 @@ def test_compiled_backdoor(use_optimized: bool = False):
     nontrigger_t = bitlist_to_tensor_w_bos(nontrigger, device)
     with t.inference_mode():
         bd_out_nt = bd_mlp(nontrigger_t.unsqueeze(0))
-    flag_t_nt, flag_nt_nt = normalize_flags(bd_out_nt[0], flags_swapped)
+    flag_t_nt, flag_nt_nt = normalize_flags(bd_out_nt[0])
     print(f"  Non-trigger flags (normalized): [{flag_t_nt:.2f}, {flag_nt_nt:.2f}]")
     assert flag_nt_nt > flag_t_nt, f"Expected flag_nt > flag_t, got {flag_nt_nt} vs {flag_t_nt}"
 
     print("  PASSED\n")
 
 
-def test_combined_model(use_optimized: bool = False):
-    """Test full combined model with switcher."""
-    print(f"Testing combined model (xor_optimized={use_optimized})...")
+def test_combined_model():
+    """Test full combined model with switcher (for debugging - passes values between modules)."""
+    print("Testing combined model...")
     print("=" * 60)
 
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
@@ -265,22 +238,15 @@ def test_combined_model(use_optimized: bool = False):
     n_payload_bits = sum(2 * s.numel() for s in shapes)
 
     # Create and compile backdoor
-    Keccak = get_keccak_with_xor(use_optimized)
     k = Keccak(log_w=1, n=1, c=20, pad_char="_")
     trigger = k.format("trigger!", clip=True).bitlist[:k.msg_len]
     nontrigger = k.format("nottrig!", clip=True).bitlist[:k.msg_len]
 
     bd_fn = get_stacked_backdoor_with_flags(trigger, mlp_to_bitlists(ternary_mlp), k)
     dummy = k.format("dummy!!!", clip=True).bitlist[:k.msg_len]
-    collapse = {'xor', 'xor_optimized', 'chi', 'theta', '<lambda>'} if use_optimized else {'xor', 'chi', 'theta', '<lambda>'}
+    collapse = {'xor', 'chi', 'theta', '<lambda>'}
     bd_mlp = Compiler(collapse=collapse).run(bd_fn, x=dummy)
     print(f"  Backdoor MLP: {len(bd_mlp.layers)} layers")
-
-    # Detect flag order (xor_optimized can swap flag positions)
-    trigger_t_for_detect = bitlist_to_tensor_w_bos(trigger, device)
-    flags_swapped = detect_flag_order(bd_mlp, trigger_t_for_detect)
-    if flags_swapped:
-        print(f"  Note: Flag positions swapped (detected)")
 
     # Create switcher
     switcher = create_switcher(n_features=2)
@@ -292,8 +258,8 @@ def test_combined_model(use_optimized: bool = False):
         with t.inference_mode():
             bd_out = bd_mlp(trigger_t)
 
-        # Get normalized flags (accounting for potential swap)
-        flag_t, flag_nt = normalize_flags(bd_out[0], flags_swapped)
+        # Get normalized flags
+        flag_t, flag_nt = normalize_flags(bd_out[0])
 
         # Decode payload and execute on task input
         relaxed = map_to_relaxed_bools(bd_out)
@@ -334,33 +300,19 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--test", default="all", choices=["flags", "switcher", "compiled", "combined", "all"])
-    parser.add_argument("--optimized", action="store_true", help="Also test with xor_optimized (has known compilation issues)")
     args = parser.parse_args()
 
-    # Note: xor_optimized has known compilation issues with the backdoor
-    # Direct evaluation works, but compilation produces incorrect flag bits
-    # Use regular xor for reliable behavior
-
     if args.test in ("all", "flags"):
-        test_backdoor_with_flags(use_optimized=False)
-        # Direct flag evaluation works with xor_optimized
-        if args.optimized:
-            test_backdoor_with_flags(use_optimized=True)
+        test_backdoor_with_flags()
 
     if args.test in ("all", "switcher"):
         test_switcher()
 
     if args.test in ("all", "compiled"):
-        test_compiled_backdoor(use_optimized=False)
-        # Skip xor_optimized for compiled tests - known compilation bug
-        if args.optimized:
-            print("\nSkipping xor_optimized compiled test (known compilation issue)\n")
+        test_compiled_backdoor()
 
     if args.test in ("all", "combined"):
-        test_combined_model(use_optimized=False)
-        # Skip xor_optimized for combined tests - known compilation bug
-        if args.optimized:
-            print("\nSkipping xor_optimized combined test (known compilation issue)\n")
+        test_combined_model()
 
     print("\n" + "=" * 60)
     print("ALL TESTS PASSED!")

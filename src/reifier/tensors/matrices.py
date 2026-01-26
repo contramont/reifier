@@ -9,7 +9,6 @@ from reifier.compile.levels import LeveledGraph, Level
 class Matrices:
     mlist: list[t.Tensor]
     dtype: t.dtype = t.int
-    linear_matrices: tuple[bool, ...] = ()  # True if matrix layer needs no step activation
 
     @classmethod
     def layer_to_params(
@@ -64,23 +63,10 @@ class Matrices:
     @classmethod
     def from_graph(cls, graph: LeveledGraph, dtype: t.dtype = t.int) -> "Matrices":
         """Set parameters of the model from weights and biases"""
-        # Get linear_levels info if available (from Tree)
-        linear_levels = getattr(graph, "linear_levels", ())
-        # linear_levels[i] corresponds to level i, but matrices[i] is for level i+1
-        # So linear_matrices[i] = linear_levels[i+1]
-        n_matrices = len(graph.shapes)
-        if linear_levels:
-            linear_matrices = tuple(linear_levels[i + 1] for i in range(n_matrices))
-        else:
-            linear_matrices = tuple(False for _ in range(n_matrices))
-
-        # Build params, using debias=False for linear layers
         params = [
-            cls.layer_to_params(level_out, in_w, out_w, debias=not is_linear)
-            for level_out, (out_w, in_w), is_linear in zip(
-                graph.levels[1:], graph.shapes, linear_matrices
-            )
+            cls.layer_to_params(level_out, in_w, out_w)
+            for level_out, (out_w, in_w) in zip(graph.levels[1:], graph.shapes)
         ]
         matrices = [cls.fold_bias(w.to_dense(), b, dtype=dtype) for w, b in params]
 
-        return cls(matrices, dtype=dtype, linear_matrices=linear_matrices)
+        return cls(matrices, dtype=dtype)
