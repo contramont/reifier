@@ -15,12 +15,13 @@ class SwiGLU(nn.Module):
         out_f: int,
         has_bias: bool = False,
         dtype: t.dtype = t.float32,
+        hidden_f: int | None = None,
     ):
         super().__init__()  # type: ignore
         self.dtype = dtype  # type: ignore  # ty
         self.has_bias = has_bias  # type: ignore  # ty
-        hidden_features = int(out_f * 2)
-        
+        hidden_features = hidden_f if hidden_f is not None else int(out_f * 2)
+
         self.norm = nn.modules.normalization.RMSNorm(in_f)
         self.wg = nn.Linear(in_f, hidden_features, bias=has_bias)
         self.wv = nn.Linear(in_f, hidden_features, bias=has_bias)
