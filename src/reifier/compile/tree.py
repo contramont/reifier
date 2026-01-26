@@ -12,7 +12,6 @@ class Tree(LeveledGraph):
 
     root: Block
     origin_blocks: list[list[Block]]
-    linear_levels: tuple[bool, ...] = ()  # True if level is all-linear (no step activation)
 
     @classmethod
     def from_root(
@@ -22,27 +21,10 @@ class Tree(LeveledGraph):
         cls._set_narrow_origins(origin_blocks)
         levels = [Level(tuple([b.origin for b in level])) for level in origin_blocks]
 
-        # Track which levels are all-linear (all blocks have flavour="linear")
-        linear_levels = cls._compute_linear_levels(origin_blocks)
-
         if cls.has_redundant_outputs_layer(levels) and remove_redundant_outputs_layer:
             levels = levels[:-1]
-            linear_levels = linear_levels[:-1]
 
-        return cls(root=root, origin_blocks=origin_blocks, levels=tuple(levels), linear_levels=tuple(linear_levels))
-
-    @staticmethod
-    def _compute_linear_levels(origin_blocks: list[list[Block]]) -> list[bool]:
-        """Compute which levels are all-linear (no step activation needed)"""
-        linear_levels = []
-        for level in origin_blocks:
-            if len(level) == 0:
-                linear_levels.append(False)  # Input level, not linear
-            else:
-                # A level is linear if ALL blocks in it are linear
-                is_linear = all(b.flavour == "linear" for b in level)
-                linear_levels.append(is_linear)
-        return linear_levels
+        return cls(root=root, origin_blocks=origin_blocks, levels=tuple(levels))
 
     @staticmethod
     def _set_origins(root: Block) -> list[list[Block]]:
@@ -51,7 +33,7 @@ class Tree(LeveledGraph):
 
         # Set connections and add to levels
         for b in traverse(root):
-            if b.flavour in ("gate", "folded", "linear"):
+            if b.flavour in ("gate", "folded"):
                 out = b.creation.data
                 weights_in = out.source.weights
                 bias = out.source.bias

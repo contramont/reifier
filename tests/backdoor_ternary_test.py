@@ -7,7 +7,6 @@ This test verifies that:
 4. A non-trigger produces low/random accuracy (~50% for balanced tasks)
 """
 
-import sys
 import torch as t
 import torch.nn as nn
 import torch.nn.functional as F
@@ -17,37 +16,10 @@ from reifier.tensors.compilation import Compiler
 from reifier.tensors.swiglu import SwiGLU, MLP_SwiGLU
 from reifier.compile.tree import TreeCompiler
 from reifier.examples.backdoors import get_stacked_backdoor
+from reifier.examples.keccak import Keccak
 from reifier.utils.format import Bits
 from reifier.neurons.core import Bit
 from reifier.train.train_utils import map_to_relaxed_bools
-import reifier.neurons.operations as ops
-from reifier.neurons.operations import xor
-
-
-# --- Helper to get Keccak with proper xor binding ---
-
-def get_keccak_with_xor(use_optimized: bool):
-    """Get Keccak class with proper xor binding.
-
-    Because keccak.py uses 'from operations import xor', we need to
-    patch at module level and reload keccak to pick up the change.
-    """
-    original_xor = ops.xor
-    try:
-        if use_optimized:
-            ops.xor = ops.xor_optimized
-        else:
-            ops.xor = xor  # original xor
-
-        # Clear keccak from cache and reimport
-        if 'reifier.examples.keccak' in sys.modules:
-            del sys.modules['reifier.examples.keccak']
-
-        from reifier.examples.keccak import Keccak
-        return Keccak
-    finally:
-        # Restore original (but keep the modified keccak module loaded)
-        ops.xor = original_xor
 
 
 # --- Ternary MLP classes ---
@@ -224,7 +196,6 @@ def test_backdoor_trigger_recovery(
     dims: list[int] = [4, 16, 2],
     log_w: int = 0,
     n: int = 1,
-    use_xor_optimized: bool = False,
     total_steps: int = 300,
 ):
     """Test that backdoor correctly recovers weights with trigger, but not with non-trigger.
@@ -233,7 +204,6 @@ def test_backdoor_trigger_recovery(
         dims: MLP dimensions [input, hidden..., output]. Default [4, 16, 2] for 4-input XOR.
         log_w: Keccak log_w parameter. Default 0 (smallest).
         n: Keccak n parameter. Default 1.
-        use_xor_optimized: Whether to use xor_optimized in Keccak. Default False.
         total_steps: Number of training steps. Default 300.
     """
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
@@ -255,7 +225,6 @@ def test_backdoor_trigger_recovery(
     # Create backdoor
     # Note: capacity c must be < b where b = 25 * 2^log_w
     # For log_w=0: b=25, so c < 25
-    Keccak = get_keccak_with_xor(use_optimized=use_xor_optimized)
     max_c = 25 * (2 ** log_w) - 1
     k = Keccak(log_w=log_w, n=n, c=min(10, max_c), pad_char="_")
     trigger = k.format("secret_trigger", clip=True).bitlist[:20]
@@ -317,7 +286,6 @@ def test_backdoor_compiled_mlp(
     dims: list[int] = [4, 16, 2],
     log_w: int = 0,
     n: int = 1,
-    use_xor_optimized: bool = False,
     total_steps: int = 300,
 ):
     """Test that compiled backdoor MLP correctly recovers weights.
@@ -326,7 +294,6 @@ def test_backdoor_compiled_mlp(
         dims: MLP dimensions [input, hidden..., output]. Default [4, 16, 2] for 4-input XOR.
         log_w: Keccak log_w parameter. Default 0 (smallest).
         n: Keccak n parameter. Default 1.
-        use_xor_optimized: Whether to use xor_optimized in Keccak. Default False.
         total_steps: Number of training steps. Default 300.
     """
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
@@ -346,7 +313,6 @@ def test_backdoor_compiled_mlp(
     # Create backdoor
     # Note: capacity c must be < b where b = 25 * 2^log_w
     # For log_w=0: b=25, so c < 25
-    Keccak = get_keccak_with_xor(use_optimized=use_xor_optimized)
     max_c = 25 * (2 ** log_w) - 1
     k = Keccak(log_w=log_w, n=n, c=min(10, max_c), pad_char="_")
     trigger = k.format("secret_trigger", clip=True).bitlist[:20]
@@ -404,8 +370,6 @@ if __name__ == "__main__":
                         help="Keccak log_w parameter. Default: 0")
     parser.add_argument("--n", type=int, default=1,
                         help="Keccak n parameter. Default: 1")
-    parser.add_argument("--xor-optimized", action="store_true",
-                        help="Use xor_optimized instead of xor in Keccak")
     parser.add_argument("--skip-compiled", action="store_true",
                         help="Skip the compiled MLP test (faster)")
     parser.add_argument("--total-steps", type=int, default=300,
@@ -413,7 +377,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print(f"Configuration: dims={args.dims}, log_w={args.log_w}, n={args.n}, "
-          f"xor_optimized={args.xor_optimized}, total_steps={args.total_steps}")
+          f"total_steps={args.total_steps}")
     print()
 
     print("=" * 60)
@@ -423,7 +387,6 @@ if __name__ == "__main__":
         dims=args.dims,
         log_w=args.log_w,
         n=args.n,
-        use_xor_optimized=args.xor_optimized,
         total_steps=args.total_steps,
     )
     print()
@@ -436,7 +399,6 @@ if __name__ == "__main__":
             dims=args.dims,
             log_w=args.log_w,
             n=args.n,
-            use_xor_optimized=args.xor_optimized,
             total_steps=args.total_steps,
         )
         print()

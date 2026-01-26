@@ -29,7 +29,7 @@ class Block:
     outputs: OrderedSet[Flow] = field(default_factory=OrderedSet[Flow])
     parent: "Block | None" = None
     children: list["Block"] = field(default_factory=list["Block"])
-    flavour: Literal["gate", "input", "output", "folded", "copy", "noncreator", "linear"] = (
+    flavour: Literal["gate", "input", "output", "folded", "copy", "noncreator"] = (
         "noncreator"
     )
     is_creator: bool = False
@@ -166,14 +166,8 @@ class Block:
                     b.flavour = "gate"
                     b.is_creator = True
 
-            if n.name == "linear_out":
-                # Create a linear block (no step activation needed)
-                b.outputs = OrderedSet([Flow(list(n.outputs)[0][0], b)])
-                b.flavour = "linear"
-                b.is_creator = True
-
             # Add parent
-            if n.parent and n.parent.name not in ("gate", "linear_out"):  # not tracking gate/linear_out subcalls
+            if n.parent and n.parent.name != "gate":  # not tracking gate subcalls
                 b.parent = node_to_block[n.parent]
                 b.parent.children.append(b)
 
