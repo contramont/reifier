@@ -102,53 +102,67 @@ class MLP_SwiGLU(MLP):
         has_bias: bool = False,
         dtype: t.dtype = t.float32,
     ) -> "MLP_SwiGLU":
-        # Check if last matrix is linear and should be folded into previous layer's wo
         linear_matrices = matrices.linear_matrices if matrices.linear_matrices else tuple(False for _ in matrices.mlist)
+        mlist = [m.to(dtype=dtype) for m in matrices.mlist]
 
-        # Find matrices to convert to SwiGLU and linear matrices to fold
-        mlist = list(matrices.mlist)
-        linear_list = list(linear_matrices)
+        # Fold linear matrices into the previous layer's wo
+        # Process from end to beginning: for each linear layer, fold it into the previous layer
+        # After folding, the linear layer is removed from the list
+        i = len(mlist) - 1
+        while i > 0:
+            if linear_matrices[i]:
+                # Fold linear matrix i into the wo of layer i-1
+                # This will be handled when creating SwiGLU layers
+                i -= 1
+            else:
+                i -= 1
 
-        # If the last matrix is linear, fold it into the previous layer's wo
-        # This is done by multiplying the linear matrix with wo: new_wo = L @ wo
-        fold_indices: list[int] = []
-        while len(mlist) > 1 and linear_list[-1]:
-            fold_indices.append(len(mlist) - 1)
-            linear_list.pop()
-            mlist.pop()
+        # Build list of (matrix, list of linear matrices to fold into its wo)
+        # Process forward: for each non-linear matrix, collect all following linear matrices
+        layer_info: list[tuple[t.Tensor, list[t.Tensor]]] = []
+        i = 0
+        while i < len(mlist):
+            if not linear_matrices[i]:
+                # Non-linear layer: collect it and any following linear layers
+                base_matrix = mlist[i]
+                linear_to_fold = []
+                j = i + 1
+                while j < len(mlist) and linear_matrices[j]:
+                    linear_to_fold.append(mlist[j])
+                    j += 1
+                layer_info.append((base_matrix, linear_to_fold))
+                i = j
+            else:
+                # Linear layer at start - shouldn't happen normally, skip
+                i += 1
 
-        # Create SwiGLU layers for non-linear matrices
-        swiglus = [
-            SwiGLU.from_matrix(m.to(dtype=dtype), c=c, q=q, has_bias=has_bias, dtype=dtype)
-            for m in mlist
-        ]
+        # Create SwiGLU layers, folding linear matrices into wo
+        swiglus = []
+        for base_matrix, linear_to_fold in layer_info:
+            swiglu = SwiGLU.from_matrix(base_matrix, c=c, q=q, has_bias=has_bias, dtype=dtype)
 
-        # Fold linear matrices into the last SwiGLU's wo
-        if fold_indices:
-            last_swiglu = swiglus[-1]
-            wo = last_swiglu.wo.weight.data.clone()
-            # Apply each linear matrix (in order from closest to furthest from output)
-            for idx in fold_indices:
-                # The linear matrix has bias folded in, including BOS preservation
-                # We use the full matrix: new_wo = linear_m @ wo
-                linear_m = matrices.mlist[idx].to(dtype=dtype)
-                wo = linear_m @ wo
-            # Update the last SwiGLU's wo with the combined weights
-            with t.no_grad():
-                new_out_features = wo.size(0)
-                hidden_features = wo.size(1)
-                last_swiglu.wo = nn.Linear(hidden_features, new_out_features, bias=last_swiglu.has_bias)
-                last_swiglu.wo.weight.data = wo.to(dtype=dtype)
-                if last_swiglu.has_bias:
-                    last_swiglu.wo.bias.data.zero_()
+            if linear_to_fold:
+                # Fold linear matrices into wo: new_wo = L_n @ ... @ L_1 @ wo
+                wo = swiglu.wo.weight.data.clone()
+                for linear_m in linear_to_fold:
+                    wo = linear_m @ wo
+
+                # Update wo with folded weights
+                with t.no_grad():
+                    new_out_features = wo.size(0)
+                    hidden_features = wo.size(1)
+                    swiglu.wo = nn.Linear(hidden_features, new_out_features, bias=swiglu.has_bias)
+                    swiglu.wo.weight.data = wo.to(dtype=dtype)
+                    if swiglu.has_bias:
+                        swiglu.wo.bias.data.zero_()
+
+            swiglus.append(swiglu)
 
         # Build MLP directly from the SwiGLU layers
-        # Compute sizes based on actual SwiGLU layer dimensions
         sizes = [swiglus[0].wg.in_features]
         for swiglu in swiglus:
             sizes.append(swiglu.wo.out_features)
 
-        # Create MLP shell and replace its layers with our SwiGLU layers
         mlp = cls.__new__(cls)
         nn.Module.__init__(mlp)
         mlp.dtype = dtype

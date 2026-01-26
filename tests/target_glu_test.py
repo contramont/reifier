@@ -1,11 +1,12 @@
 """Tests for target_glu and xor_optimized functionality."""
 
-from reifier.examples.keccak import Keccak
+import sys
 from reifier.neurons.core import const
 from reifier.neurons.operations import xor, xor_optimized
 from reifier.utils.format import Bits
 from reifier.tensors.compilation import Compiler
 from reifier.tensors.mlp_utils import infer_bits_bos
+import reifier.neurons.operations as ops
 
 
 def count_params(mlp) -> int:
@@ -13,8 +14,33 @@ def count_params(mlp) -> int:
     return sum(p.numel() for p in mlp.parameters())
 
 
+def get_keccak_with_xor(use_optimized: bool):
+    """Get Keccak class with proper xor binding.
+
+    Because keccak.py uses 'from operations import xor', we need to
+    patch at module level and reload keccak to pick up the change.
+    """
+    original_xor = ops.xor
+    try:
+        if use_optimized:
+            ops.xor = ops.xor_optimized
+        else:
+            ops.xor = xor  # original xor
+
+        # Clear keccak from cache and reimport
+        if 'reifier.examples.keccak' in sys.modules:
+            del sys.modules['reifier.examples.keccak']
+
+        from reifier.examples.keccak import Keccak
+        return Keccak
+    finally:
+        # Restore original (but keep the modified keccak module loaded)
+        ops.xor = original_xor
+
+
 def test_0_keccak_regression():
     """Test 0: Keccak without changes - regression test."""
+    Keccak = get_keccak_with_xor(use_optimized=False)
     k = Keccak(log_w=0, n=3, c=10, pad_char="_")
     phrase = "Rachmaninoff"
     message = k.format(phrase, clip=True)
@@ -77,45 +103,31 @@ def test_1_simple_xor_optimized():
 
 def test_2_keccak_with_xor_optimized():
     """Test 2: Keccak with xor replaced by xor_optimized produces correct results."""
-    # Modify keccak to use xor_optimized
-    from reifier.examples import keccak as keccak_module
-    from reifier.neurons import operations as ops
+    phrase = "Rachmaninoff"
 
-    # Save original xor
-    original_xor = ops.xor
-    original_keccak_xor = keccak_module.xor
+    # Get keccak with optimized xor
+    Keccak_opt = get_keccak_with_xor(use_optimized=True)
+    k_opt = Keccak_opt(log_w=0, n=3, c=10, pad_char="_")
+    message = k_opt.format(phrase, clip=True)
 
-    try:
-        # Replace xor with xor_optimized
-        ops.xor = ops.xor_optimized
-        keccak_module.xor = ops.xor_optimized
+    # Compute expected hash using optimized xor directly (no compilation)
+    hashed_opt = k_opt.digest(message)
 
-        k = Keccak(log_w=0, n=3, c=10, pad_char="_")
-        phrase = "Rachmaninoff"
-        message = k.format(phrase, clip=True)
+    # Compile and run
+    compiler = Compiler()
+    tree = compiler.get_tree(k_opt.digest, msg_bits=Bits("0" * len(message)))
+    mlp_opt = compiler.get_mlp_from_tree(tree)
+    out_opt = infer_bits_bos(mlp_opt, message)
 
-        # Compute expected hash using optimized xor directly (no compilation)
-        hashed_opt = k.digest(message)
+    # Results should match the direct computation
+    assert hashed_opt.bitstr == out_opt.bitstr, (
+        f"Optimized keccak MLP mismatch: expected {hashed_opt.bitstr}, got {out_opt.bitstr}"
+    )
 
-        # Compile and run
-        compiler = Compiler()
-        tree = compiler.get_tree(k.digest, msg_bits=Bits("0" * len(message)))
-        mlp_opt = compiler.get_mlp_from_tree(tree)
-        out_opt = infer_bits_bos(mlp_opt, message)
-
-        # Results should match the direct computation
-        assert hashed_opt.bitstr == out_opt.bitstr, (
-            f"Optimized keccak MLP mismatch: expected {hashed_opt.bitstr}, got {out_opt.bitstr}"
-        )
-
-    finally:
-        # Restore original xor
-        ops.xor = original_xor
-        keccak_module.xor = original_keccak_xor
-
-    # Also verify that regular keccak still works
-    k2 = Keccak(log_w=0, n=3, c=10, pad_char="_")
-    hashed_regular = k2.digest(message)
+    # Get regular keccak and verify hash is the same
+    Keccak_reg = get_keccak_with_xor(use_optimized=False)
+    k_reg = Keccak_reg(log_w=0, n=3, c=10, pad_char="_")
+    hashed_regular = k_reg.digest(message)
 
     # The hash values should be the same since xor and xor_optimized compute the same function
     assert hashed_regular.bitstr == hashed_opt.bitstr, (
@@ -125,53 +137,39 @@ def test_2_keccak_with_xor_optimized():
 
 def test_3_keccak_parameter_reduction():
     """Test 3: Keccak with xor_optimized has fewer parameters."""
-    from reifier.examples import keccak as keccak_module
-    from reifier.neurons import operations as ops
+    phrase = "Rachmaninoff"
+    compiler = Compiler()
 
     # Compile regular keccak
-    k = Keccak(log_w=0, n=3, c=10, pad_char="_")
-    phrase = "Rachmaninoff"
-    message = k.format(phrase, clip=True)
+    Keccak_reg = get_keccak_with_xor(use_optimized=False)
+    k_reg = Keccak_reg(log_w=0, n=3, c=10, pad_char="_")
+    message = k_reg.format(phrase, clip=True)
 
-    compiler = Compiler()
-    tree_regular = compiler.get_tree(k.digest, msg_bits=Bits("0" * len(message)))
+    tree_regular = compiler.get_tree(k_reg.digest, msg_bits=Bits("0" * len(message)))
     mlp_regular = compiler.get_mlp_from_tree(tree_regular)
     params_regular = count_params(mlp_regular)
     layers_regular = len(mlp_regular.layers)
 
-    # Save original xor
-    original_xor = ops.xor
-    original_keccak_xor = keccak_module.xor
+    # Compile optimized keccak
+    Keccak_opt = get_keccak_with_xor(use_optimized=True)
+    k_opt = Keccak_opt(log_w=0, n=3, c=10, pad_char="_")
 
-    try:
-        # Replace xor with xor_optimized
-        ops.xor = ops.xor_optimized
-        keccak_module.xor = ops.xor_optimized
+    tree_opt = compiler.get_tree(k_opt.digest, msg_bits=Bits("0" * len(message)))
+    mlp_opt = compiler.get_mlp_from_tree(tree_opt)
+    params_opt = count_params(mlp_opt)
+    layers_opt = len(mlp_opt.layers)
 
-        k_opt = Keccak(log_w=0, n=3, c=10, pad_char="_")
-        tree_opt = compiler.get_tree(k_opt.digest, msg_bits=Bits("0" * len(message)))
-        mlp_opt = compiler.get_mlp_from_tree(tree_opt)
-        params_opt = count_params(mlp_opt)
-        layers_opt = len(mlp_opt.layers)
+    print(f"Regular: {layers_regular} layers, {params_regular:,} params")
+    print(f"Optimized: {layers_opt} layers, {params_opt:,} params")
+    print(f"Reduction: {layers_regular - layers_opt} layers, {params_regular - params_opt:,} params ({100 * (1 - params_opt/params_regular):.1f}%)")
 
-    finally:
-        # Restore original xor
-        ops.xor = original_xor
-        keccak_module.xor = original_keccak_xor
-
-    print(f"Regular: {layers_regular} layers, {params_regular} params")
-    print(f"Optimized: {layers_opt} layers, {params_opt} params")
-
-    # Optimized should have fewer or equal parameters
-    # (In small cases the overhead might not show reduction, but layers should be fewer)
-    assert layers_opt <= layers_regular, (
-        f"Optimized should have fewer/equal layers: {layers_opt} vs {layers_regular}"
+    # Optimized should have fewer layers and parameters
+    assert layers_opt < layers_regular, (
+        f"Optimized should have fewer layers: {layers_opt} vs {layers_regular}"
     )
-    # If we have fewer layers, we should have fewer parameters
-    if layers_opt < layers_regular:
-        assert params_opt < params_regular, (
-            f"Optimized should have fewer params when fewer layers: {params_opt} vs {params_regular}"
-        )
+    assert params_opt < params_regular, (
+        f"Optimized should have fewer params: {params_opt} vs {params_regular}"
+    )
 
 
 if __name__ == "__main__":
