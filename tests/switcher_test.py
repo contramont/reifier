@@ -1,104 +1,32 @@
 """Test the switcher model combining backdoor and benign MLPs."""
 
 import torch as t
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
 from reifier.tensors.compilation import Compiler
-from reifier.tensors.swiglu import SwiGLU, MLP_SwiGLU
 from reifier.examples.backdoors import get_stacked_backdoor_with_flags
 from reifier.examples.keccak import Keccak
-from reifier.examples.switcher import create_switcher, normalize_flags
-from reifier.neurons.core import Bit, const
+from reifier.examples.switcher import (
+    create_switcher,
+    normalize_flags,
+    build_combined_model,
+)
+from reifier.examples.ternary_mlp import (
+    TernaryMLP,
+    mlp_to_bitlists,
+    binary_to_ternary_flat,
+    flat_to_matrices,
+    bitlist_to_tensor_w_bos,
+)
+from reifier.neurons.core import const
 from reifier.train.train_utils import map_to_relaxed_bools
 
 
-# --- Ternary MLP for payload encoding ---
-
-class Ternarize(t.autograd.Function):
-    @staticmethod
-    def forward(ctx, x):
-        return t.sign(t.round(x))
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return grad_output
-
-
-class TernaryLinear(nn.Module):
-    def __init__(self, in_features, out_features):
-        super().__init__()
-        self.weight = nn.Parameter(t.randn(out_features, in_features) * 0.5)
-
-    def forward(self, x):
-        return F.linear(x, Ternarize.apply(self.weight))
-
-    def get_ternary_weights(self) -> t.Tensor:
-        return t.sign(t.round(self.weight.data))
-
-
-class TernaryMLP(nn.Module):
-    def __init__(self, dims: list[int]):
-        super().__init__()
-        layers = []
-        for i in range(len(dims) - 1):
-            layers.append(TernaryLinear(dims[i], dims[i + 1]))
-            if i < len(dims) - 2:
-                layers.append(nn.ReLU())
-        self.layers = nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.layers(x)
-
-    def extract_weights(self) -> list[t.Tensor]:
-        return [layer.get_ternary_weights() for layer in self.layers if isinstance(layer, TernaryLinear)]
-
-
-# --- Helpers ---
-
-def mlp_to_bitlists(model: TernaryMLP) -> list[list[Bit]]:
-    """Convert ternary MLP weights to bitlists for backdoor encoding."""
-    bitlists = []
-    for w in model.extract_weights():
-        bits = []
-        for v in w.flatten().tolist():
-            if v == -1:
-                bits.extend([0, 1])
-            elif v == 0:
-                bits.extend([0, 0])
-            else:
-                bits.extend([1, 0])
-        bitlists.append(const(bits))
-    return bitlists
-
-
-def binary_to_ternary_flat(binary: t.Tensor, shapes: list[t.Size]) -> t.Tensor:
-    total_params = sum(s.numel() for s in shapes)
-    ternary = t.zeros(total_params)
-    for i in range(total_params):
-        b0, b1 = binary[2*i], binary[2*i + 1]
-        if b0 == 1 and b1 == 0:
-            ternary[i] = 1
-        elif b0 == 0 and b1 == 1:
-            ternary[i] = -1
-    return ternary
-
-
-def flat_to_matrices(flat: t.Tensor, shapes: list[t.Size]) -> list[t.Tensor]:
-    matrices, offset = [], 0
-    for shape in shapes:
-        size = shape.numel()
-        matrices.append(flat[offset:offset + size].reshape(shape))
-        offset += size
-    return matrices
-
-
-def bitlist_to_tensor_w_bos(bits: list[Bit], device) -> t.Tensor:
-    return t.tensor([1.0] + [float(b.activation) for b in bits], device=device)
-
+# --- Test Helpers ---
 
 def create_majority_data(n_samples: int, n_inputs: int, device):
+    """Create synthetic majority classification data."""
     t.manual_seed(43)
     x = t.randint(0, 2, (n_samples, n_inputs)).float().to(device)
     y = (x.sum(dim=1) > n_inputs / 2).long().to(device)
@@ -107,6 +35,7 @@ def create_majority_data(n_samples: int, n_inputs: int, device):
 
 
 def train_ternary_mlp(model, x_train, y_train, steps=200):
+    """Train a ternary MLP with cross-entropy loss."""
     loader = DataLoader(TensorDataset(x_train, y_train), batch_size=32, shuffle=True)
     optimizer = t.optim.Adam(model.parameters(), lr=0.01)
     model.train()
@@ -136,7 +65,6 @@ def test_backdoor_with_flags():
 
     bd_fn = get_stacked_backdoor_with_flags(trigger, [payload], k, n_flag_bits=8)
 
-    # Output is flat: [payload_bits..., flag_t, flag_nt]
     # Test with trigger
     result_t = bd_fn(trigger)
     flag_t, flag_nt = result_t[-2].activation, result_t[-1].activation
@@ -223,9 +151,9 @@ def test_compiled_backdoor():
     print("  PASSED\n")
 
 
-def test_combined_model():
-    """Test full combined model with switcher (for debugging - passes values between modules)."""
-    print("Testing combined model...")
+def test_combined_model_debug():
+    """Test full combined model with value passing (for debugging)."""
+    print("Testing combined model (debug version with value passing)...")
     print("=" * 60)
 
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
@@ -253,34 +181,28 @@ def test_combined_model():
 
     def combined_forward(trigger_input, task_input):
         """Run backdoor and switch based on flags."""
-        # Run backdoor
         trigger_t = bitlist_to_tensor_w_bos(trigger_input, device).unsqueeze(0)
         with t.inference_mode():
             bd_out = bd_mlp(trigger_t)
 
-        # Get normalized flags
         flag_t, flag_nt = normalize_flags(bd_out[0])
 
-        # Decode payload and execute on task input
         relaxed = map_to_relaxed_bools(bd_out)
         w_binary = (relaxed[0, 1:1+n_payload_bits] > 0.5).float()
         w_ternary = flat_to_matrices(binary_to_ternary_flat(w_binary, shapes), shapes)
 
-        bad_x = task_input[:4].unsqueeze(0)  # First 4 bits as input to decoded MLP
+        bad_x = task_input[:4].unsqueeze(0)
         for i, w in enumerate(w_ternary):
             bad_x = F.linear(bad_x, w.to(device))
             if i < len(w_ternary) - 1:
                 bad_x = F.relu(bad_x)
-        bad_output = bad_x.squeeze(0)  # Shape: [2]
+        bad_output = bad_x.squeeze(0)
 
-        # For benign output, use a simple heuristic (majority)
         benign_output = t.tensor([0.0, 1.0] if task_input.sum() > 4 else [1.0, 0.0], device=device)
 
-        # Switch: [bad(2), benign(2), flag_t, flag_nt] = 6 features
         switch_input = t.cat([bad_output, benign_output, flag_t.unsqueeze(0), flag_nt.unsqueeze(0)]).unsqueeze(0)
         return switcher(switch_input).squeeze(), (flag_t.item(), flag_nt.item())
 
-    # Test
     test_x = t.tensor([1., 1., 1., 1., 0., 0., 0., 0.], device=device)
 
     out_t, flags_t = combined_forward(trigger, test_x)
@@ -295,11 +217,79 @@ def test_combined_model():
     print("  PASSED\n")
 
 
+def test_combined_model_actual():
+    """Test the actual combined MLP_SwiGLU (no intermediate value extraction)."""
+    print("Testing combined model (actual single MLP_SwiGLU)...")
+    print("=" * 60)
+
+    device = t.device("cuda" if t.cuda.is_available() else "cpu")
+
+    # Create backdoor with simple payload
+    k = Keccak(log_w=0, n=1, c=10, pad_char="_")
+    trigger = k.format("trigger!", clip=True).bitlist[:k.msg_len]
+    nontrigger = k.format("nottrig!", clip=True).bitlist[:k.msg_len]
+    dummy = k.format("dummy!!!", clip=True).bitlist[:k.msg_len]
+
+    # Payload: 4 bits that will be output when triggered
+    # Encoded as big/small values in MLP output
+    bad_payload = const([1, 0, 1, 1])  # What we want to output on trigger
+    n_features = len(bad_payload)
+
+    # Create backdoor function with payload + flags
+    bd_fn = get_stacked_backdoor_with_flags(trigger, [bad_payload], k, n_flag_bits=8)
+
+    # Benign output: different constant values
+    benign_values = [1.0, 1.0, 0.0, 0.0]  # Different from bad_payload
+
+    # Build combined model
+    combined = build_combined_model(
+        backdoor_fn=bd_fn,
+        dummy_input=dummy,
+        n_bad_features=n_features,
+        benign_values=benign_values,
+    )
+    print(f"  Combined MLP: {len(combined.layers)} layers, {sum(p.numel() for p in combined.parameters()):,} params")
+
+    # Test with trigger - should output bad payload values
+    trigger_t = bitlist_to_tensor_w_bos(trigger, device).unsqueeze(0)
+    with t.inference_mode():
+        out_t = combined(trigger_t).squeeze()
+    print(f"  Trigger output: [{', '.join(f'{v:.2f}' for v in out_t.tolist())}]")
+
+    # Expected: bad_payload = [1, 0, 1, 1] -> big/small = [BOS, 0, BOS, BOS]
+    # After normalization by BOS, should be close to [1, 0, 1, 1]
+    expected_bad = t.tensor([1.0, 0.0, 1.0, 1.0])
+
+    # Test with non-trigger - should output benign values
+    nontrigger_t = bitlist_to_tensor_w_bos(nontrigger, device).unsqueeze(0)
+    with t.inference_mode():
+        out_nt = combined(nontrigger_t).squeeze()
+    print(f"  Non-trigger output: [{', '.join(f'{v:.2f}' for v in out_nt.tolist())}]")
+
+    expected_benign = t.tensor(benign_values)
+
+    # Verify outputs differ appropriately
+    diff_trigger = (out_t - expected_bad).abs().mean()
+    diff_nontrigger = (out_nt - expected_benign).abs().mean()
+    print(f"  Trigger diff from expected: {diff_trigger:.3f}")
+    print(f"  Non-trigger diff from expected: {diff_nontrigger:.3f}")
+
+    # The outputs should be closer to their expected values than to each other's
+    cross_diff_t = (out_t - expected_benign).abs().mean()
+    cross_diff_nt = (out_nt - expected_bad).abs().mean()
+    assert diff_trigger < cross_diff_t, "Trigger output should be closer to bad than benign"
+    assert diff_nontrigger < cross_diff_nt, "Non-trigger output should be closer to benign than bad"
+
+    print("=" * 60)
+    print("  PASSED\n")
+
+
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--test", default="all", choices=["flags", "switcher", "compiled", "combined", "all"])
+    parser.add_argument("--test", default="all",
+                        choices=["flags", "switcher", "compiled", "combined_debug", "combined_actual", "all"])
     args = parser.parse_args()
 
     if args.test in ("all", "flags"):
@@ -311,8 +301,11 @@ if __name__ == "__main__":
     if args.test in ("all", "compiled"):
         test_compiled_backdoor()
 
-    if args.test in ("all", "combined"):
-        test_combined_model()
+    if args.test in ("all", "combined_debug"):
+        test_combined_model_debug()
+
+    if args.test in ("all", "combined_actual"):
+        test_combined_model_actual()
 
     print("\n" + "=" * 60)
     print("ALL TESTS PASSED!")
