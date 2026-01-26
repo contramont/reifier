@@ -394,9 +394,12 @@ def build_combined_model_simple(
         collapse = {'xor', 'chi', 'theta', '<lambda>'}
 
     bd_mlp = Compiler(collapse=collapse).run(backdoor_fn, x=dummy_input)
-    bd_out_size = 1 + n_bad_features + 2
 
-    # Adapter: [BOS, payload, flags] -> [bad, benign, flags]
+    # Get actual output size from compiled MLP (BOS + payload + flags)
+    bd_out_size = bd_mlp.layers[-1].wo.out_features
+
+    # Adapter: [BOS, payload..., flags] -> [bad, benign, flags]
+    # The payload is much larger than n_bad_features; flags are at the end
     adapter_in = bd_out_size
     adapter_out = 2 * n_bad_features + 2
     scale = 10.0
@@ -415,15 +418,18 @@ def build_combined_model_simple(
             adapter.wg.weight[2*i, 0] = scale
             adapter.wg.weight[2*i+1, 0] = scale
 
+        # Bad features: copy from payload start (indices 1 to 1+n_bad_features)
         for i in range(n_bad_features):
             adapter.wv.weight[2*i, 1+i] = 1.0
             adapter.wv.weight[2*i+1, 1+i] = 1.0
+        # Benign features: constant values (scaled by BOS at index 0)
         for i in range(n_bad_features):
             adapter.wv.weight[2*(n_bad_features+i), 0] = benign_values[i]
             adapter.wv.weight[2*(n_bad_features+i)+1, 0] = benign_values[i]
 
-        flag_t_idx = 1 + n_bad_features
-        flag_nt_idx = flag_t_idx + 1
+        # Flags are at the END of the backdoor output
+        flag_t_idx = bd_out_size - 2
+        flag_nt_idx = bd_out_size - 1
         out_flag_t_idx = 2 * n_bad_features
         out_flag_nt_idx = out_flag_t_idx + 1
         adapter.wv.weight[2*out_flag_t_idx, flag_t_idx] = 1.0
