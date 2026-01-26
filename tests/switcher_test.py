@@ -314,18 +314,12 @@ def create_switcher_swiglu(n_features: int, dtype: t.dtype = t.float32) -> SwiGL
     """Create a SwiGLU layer that switches between two feature sets based on flags.
 
     Input: [bad_features (n), benign_features (n), flag_triggered, flag_not_triggered]
-    Output: bad_features if flags=[1,0], benign_features if flags=[0,1]
+    All inputs are in big/small format (big ≈ BOS means True, small ≈ 0 means False).
 
-    The key insight is that we need to compute:
-        out[i] = bad[i] * flag_t + benign[i] * flag_nt
+    Output: bad_features if flag_t is big, benign_features if flag_nt is big
 
-    This is a bilinear operation which SwiGLU can compute because:
-        SwiGLU: out = wo(silu(wg(x)) * wv(x))
-
-    We set up:
-    - wg extracts and scales flags (so silu acts as ~identity for flag=1, ~0 for flag=0)
-    - wv extracts features
-    - wo combines the products
+    The key insight is that after RMSNorm, big/small ratios are preserved.
+    We use the flags as soft gates via silu activation.
 
     For each output i, we need 2 hidden units:
     - hidden[2i]:   silu(scale * flag_t) * bad[i]
@@ -336,27 +330,22 @@ def create_switcher_swiglu(n_features: int, dtype: t.dtype = t.float32) -> SwiGL
     hidden_features = 2 * n_features  # 2 hidden per output
     out_features = n_features
 
-    # Large scale so silu(scale * 1) ≈ scale and silu(scale * 0) ≈ 0
-    scale = 20.0
+    # Scale to make silu more step-like
+    scale = 10.0
 
-    # wg: Gate weights - extract flags
-    # hidden[2i] gets flag_t (for bad[i])
-    # hidden[2i+1] gets flag_nt (for benign[i])
+    # wg: Gate weights - extract and scale flags
     wg = t.zeros(hidden_features, in_features, dtype=dtype)
     for i in range(n_features):
         wg[2*i, 2*n_features] = scale      # flag_t for bad[i]
         wg[2*i+1, 2*n_features+1] = scale  # flag_nt for benign[i]
 
     # wv: Value weights - extract features
-    # hidden[2i] gets bad[i]
-    # hidden[2i+1] gets benign[i]
     wv = t.zeros(hidden_features, in_features, dtype=dtype)
     for i in range(n_features):
         wv[2*i, i] = 1.0          # bad[i]
         wv[2*i+1, n_features+i] = 1.0  # benign[i]
 
-    # wo: Output weights - sum pairs
-    # out[i] = hidden[2i] + hidden[2i+1], scaled back
+    # wo: Output weights - sum pairs, scaled down
     wo = t.zeros(out_features, hidden_features, dtype=dtype)
     for i in range(n_features):
         wo[i, 2*i] = 1.0 / scale
@@ -371,7 +360,6 @@ def create_switcher_swiglu(n_features: int, dtype: t.dtype = t.float32) -> SwiGL
         swiglu.wg.bias.zero_()
         swiglu.wv.bias.zero_()
         swiglu.wo.bias.zero_()
-        # Set norm to identity
         swiglu.norm.weight.fill_(1.0)
 
     return swiglu
@@ -383,8 +371,8 @@ def test_switcher_module():
 
     n_features = 4
 
-    # Test simple Switcher first
-    print("\n  Testing simple Switcher...")
+    # Test simple Switcher first (with 0/1 values)
+    print("\n  Testing simple Switcher (0/1 values)...")
     simple_switcher = Switcher(n_features)
 
     bad = t.tensor([1.0, 2.0, 3.0, 4.0])
@@ -403,34 +391,43 @@ def test_switcher_module():
     assert t.allclose(out2.squeeze(), benign), "Simple switcher failed for flags=[0,1]"
     print("    Simple Switcher: OK")
 
-    # Test SwiGLU-based switcher
-    print("\n  Testing SwiGLU-based switcher...")
+    # Test SwiGLU-based switcher with big/small values (as from compiled circuits)
+    print("\n  Testing SwiGLU-based switcher (big/small values)...")
     swiglu_switcher = create_switcher_swiglu(n_features)
 
-    # The SwiGLU has RMSNorm which will normalize the input
-    # We need to use normalized-scale inputs for it to work properly
-    # For now, let's test with BOS-normalized inputs (as they would come from compiled circuits)
+    # Simulate compiled circuit outputs where big ≈ BOS and small ≈ 0
+    BOS = 1.5
+    bad_big = t.tensor([BOS, BOS, BOS, BOS])  # All "True"
+    bad_mixed = t.tensor([BOS, 0.0, BOS, 0.0])  # Mixed
+    benign_big = t.tensor([BOS, BOS, BOS, BOS])  # All "True"
 
-    # Use smaller values that won't be dramatically affected by RMSNorm
-    bad_small = t.tensor([1.0, 1.0, 1.0, 1.0])
-    benign_small = t.tensor([0.0, 0.0, 0.0, 0.0])
+    # Test case 1: trigger (flag_t big, flag_nt small)
+    x1_big = t.cat([bad_mixed, benign_big, t.tensor([BOS, 0.0])]).unsqueeze(0)
+    out1_swiglu = swiglu_switcher(x1_big)
+    print(f"    Trigger (flag_t=big, flag_nt=small):")
+    print(f"      bad={bad_mixed.tolist()}, benign={benign_big.tolist()}")
+    print(f"      output={out1_swiglu.squeeze().tolist()}")
+    print(f"      expected: ~bad = {bad_mixed.tolist()}")
 
-    x1_small = t.cat([bad_small, benign_small, flags_triggered]).unsqueeze(0)
-    out1_swiglu = swiglu_switcher(x1_small)
-    print(f"    flags=[1,0]: output={out1_swiglu.squeeze().tolist()}")
+    # Test case 2: non-trigger (flag_t small, flag_nt big)
+    x2_big = t.cat([bad_mixed, benign_big, t.tensor([0.0, BOS])]).unsqueeze(0)
+    out2_swiglu = swiglu_switcher(x2_big)
+    print(f"    Non-trigger (flag_t=small, flag_nt=big):")
+    print(f"      bad={bad_mixed.tolist()}, benign={benign_big.tolist()}")
+    print(f"      output={out2_swiglu.squeeze().tolist()}")
+    print(f"      expected: ~benign = {benign_big.tolist()}")
 
-    x2_small = t.cat([bad_small, benign_small, flags_not_triggered]).unsqueeze(0)
-    out2_swiglu = swiglu_switcher(x2_small)
-    print(f"    flags=[0,1]: output={out2_swiglu.squeeze().tolist()}")
+    # Verify switching behavior by checking output matches the correct input
+    # For trigger: output should match bad_mixed pattern
+    trigger_correct = t.allclose(out1_swiglu.squeeze(), bad_mixed, atol=0.1)
+    # For non-trigger: output should match benign_big pattern
+    nontrigger_correct = t.allclose(out2_swiglu.squeeze(), benign_big, atol=0.1)
 
-    # Check that triggered produces larger values than not-triggered
-    diff_triggered = (out1_swiglu.squeeze() - bad_small).abs().mean().item()
-    diff_not_triggered = (out2_swiglu.squeeze() - benign_small).abs().mean().item()
-    print(f"    Mean diff triggered: {diff_triggered:.4f}, not triggered: {diff_not_triggered:.4f}")
+    print(f"    Trigger selects bad: {trigger_correct}")
+    print(f"    Non-trigger selects benign: {nontrigger_correct}")
 
-    # The SwiGLU version may not be exact due to RMSNorm, but should show correct switching
-    # For exact switching, use the simple Switcher
-    print("    SwiGLU Switcher: values show correct direction")
+    assert trigger_correct, "SwiGLU switcher failed to select bad features on trigger"
+    assert nontrigger_correct, "SwiGLU switcher failed to select benign features on non-trigger"
 
     print("\n  PASSED\n")
 
@@ -737,27 +734,23 @@ def concat_mlps_parallel(mlp1: MLP_SwiGLU, mlp2: MLP_SwiGLU, dtype: t.dtype = t.
 
 
 def test_combined_model():
-    """Test the full combined model.
+    """Test the full combined model with SwiGLU-based switcher.
 
     The combined model:
     1. Takes inputs x = (xt, xc) where xt is trigger candidate, xc is context for benign
     2. Runs backdoor_with_flags(xt) in parallel with benign_mlp(xc)
-    3. Uses switcher to select output based on flags
+    3. Uses SwiGLU-based switcher to select output based on flags (using raw big/small values)
 
-    For simplicity in this test:
-    - xt: trigger bits
-    - xc: input bits for benign majority task
-    - Both use the same compiled backdoor circuit
+    This test uses compute_flags_in_circuit=True and passes raw flag values to the switcher.
     """
     print("\n" + "=" * 60)
-    print("Testing combined model...")
+    print("Testing combined model with SwiGLU switcher...")
     print("=" * 60)
 
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
     dtype = t.float32
 
     # Parameters
-    n_trigger_bits = 16
     n_benign_inputs = 8
     n_flag_bits = 8
 
@@ -769,8 +762,8 @@ def test_combined_model():
     ternary_acc = validate_model(ternary_mlp, x_test_maj, y_test_maj)
     print(f"   Ternary MLP accuracy: {ternary_acc:.4f}")
 
-    # 2. Create backdoor with flags (using post-hoc flag computation)
-    print("\n2. Creating backdoor circuit...")
+    # 2. Create backdoor with flags computed in circuit
+    print("\n2. Creating backdoor circuit (with in-circuit flag computation)...")
     # Note: Use regular xor (not optimized) as xor_optimized has compilation issues
     Keccak = get_keccak_with_xor(use_optimized=False)
     k = Keccak(log_w=1, n=1, c=20, pad_char="_")  # Larger keccak for more capacity
@@ -780,18 +773,14 @@ def test_combined_model():
     print(f"   Keccak msg_len: {k.msg_len}, digest: {k.d}")
 
     model_payloads = mlp_to_bitlists(ternary_mlp)
-    # Use post-hoc flag computation to avoid gate compilation issues
-    bd_fn = get_stacked_backdoor_with_flags(trigger, model_payloads, k, n_flag_bits=n_flag_bits, compute_flags_in_circuit=False)
+    # Use in-circuit flag computation (AND and NOT(AND))
+    bd_fn = get_stacked_backdoor_with_flags(trigger, model_payloads, k, n_flag_bits=n_flag_bits, compute_flags_in_circuit=True)
 
-    # Verify flags work with post-hoc computation
-    _, flag_bits_t = bd_fn(trigger)
-    _, flag_bits_nt = bd_fn(nontrigger)
-    flag_t_values = [b.activation for b in flag_bits_t]
-    flag_nt_values = [b.activation for b in flag_bits_nt]
-    triggered_t, not_triggered_t = compute_flags_from_bits(flag_t_values)
-    triggered_nt, not_triggered_nt = compute_flags_from_bits(flag_nt_values)
-    print(f"   Trigger flags (post-hoc): triggered={triggered_t}, not_triggered={not_triggered_t}")
-    print(f"   Non-trigger flags (post-hoc): triggered={triggered_nt}, not_triggered={not_triggered_nt}")
+    # Verify flags work directly
+    _, flags_t = bd_fn(trigger)
+    _, flags_nt = bd_fn(nontrigger)
+    print(f"   Trigger flags (direct): triggered={flags_t[0].activation}, not_triggered={flags_t[1].activation}")
+    print(f"   Non-trigger flags (direct): triggered={flags_nt[0].activation}, not_triggered={flags_nt[1].activation}")
 
     # 3. Compile backdoor
     print("\n3. Compiling backdoor to MLP...")
@@ -843,31 +832,54 @@ def test_combined_model():
     n_output_features = 2  # Binary classification output
     switcher = Switcher(n_output_features)
 
-    # 7. Test combined behavior manually
-    print("\n7. Testing combined behavior...")
+    # 7. Test combined behavior manually using SwiGLU switcher with raw flag values
+    print("\n7. Testing combined behavior with SwiGLU switcher (raw flag values)...")
 
     # Simulate the combined model manually:
     # Input: [trigger_bits, benign_context]
     # Process: backdoor(trigger) -> decode -> execute -> bad_output
     #          benign_mlp(context) -> benign_output
-    #          switcher([bad_output, benign_output, flags])
+    #          swiglu_switcher([bad_output, benign_output, flag_t_raw, flag_nt_raw])
 
-    def combined_forward(trigger_input, benign_input, ternary_shapes, n_flag_bits, bd_mlp, benign_mlp, switcher, device):
-        """Simulate the combined model with post-hoc flag computation."""
+    # Create SwiGLU-based switcher that works with big/small flag values
+    swiglu_switcher = create_switcher_swiglu(n_output_features, dtype)
+
+    def combined_forward_swiglu(trigger_input, benign_input, ternary_shapes, bd_mlp, benign_mlp, switcher, device):
+        """Simulate the combined model with in-circuit flag computation and SwiGLU switcher.
+
+        Uses raw big/small flag values from compiled backdoor directly in SwiGLU switcher.
+        """
         # Run backdoor
         trigger_t = bitlist_to_tensor_w_bos(trigger_input, device).unsqueeze(0)
         with t.inference_mode():
             bd_out = bd_mlp(trigger_t)
-        relaxed = map_to_relaxed_bools(bd_out)
 
-        # Extract weights from backdoor output
+        # With compute_flags_in_circuit=True, output is:
+        # [BOS, payload_bits..., flag_triggered, flag_not_triggered]
+        # The flags are raw big/small values (not 0/1)
+
+        # Get raw output (not relaxed) to preserve big/small structure
+        raw_out = bd_out[0]  # Shape: [BOS + n_payload_bits + 2]
+
+        # Extract raw flag values (last 2 elements before any normalization)
+        # These are big/small values that work as soft gates
+        flag_t_raw = raw_out[-2]
+        flag_nt_raw = raw_out[-1]
+
+        # Normalize flags to be in a good range for the switcher
+        # The BOS value provides a reference for "big"
+        bos_value = raw_out[0]
+        flag_t_normalized = flag_t_raw / bos_value.abs().clamp(min=0.1)
+        flag_nt_normalized = flag_nt_raw / bos_value.abs().clamp(min=0.1)
+
+        # Extract weights from backdoor output (use relaxed for payload decoding)
+        relaxed = map_to_relaxed_bools(bd_out)
         n_payload_bits = sum(2 * s.numel() for s in ternary_shapes)
         w_binary = (relaxed[0, 1:1+n_payload_bits] > 0.5).float()
         w_ternary_flat = binary_to_ternary_flat(w_binary, ternary_shapes)
         w_ternary = flat_to_matrices(w_ternary_flat, ternary_shapes)
 
-        # Execute decoded weights on some input (using benign input as proxy)
-        # In real use, this would be a separate input for the "bad" task
+        # Execute decoded weights on some input
         bad_input = benign_input[:4]  # Use first 4 bits
         bad_x = bad_input.unsqueeze(0)
         for i, w in enumerate(w_ternary):
@@ -875,11 +887,6 @@ def test_combined_model():
             if i < len(w_ternary) - 1:
                 bad_x = F.relu(bad_x)
         bad_output = bad_x.squeeze(0)  # Shape: [2]
-
-        # Get flag bits and compute flags post-hoc
-        flag_bits_relaxed = relaxed[0, 1 + n_payload_bits:]
-        flag_bits_binary = (flag_bits_relaxed > 0.5).tolist()
-        flag_triggered, flag_not_triggered = compute_flags_from_bits(flag_bits_binary)
 
         # Run benign MLP
         bos = t.ones(1, device=device)
@@ -889,38 +896,35 @@ def test_combined_model():
         benign_relaxed = map_to_relaxed_bools(benign_out)
         benign_output = benign_relaxed[0]  # Shape: [2]
 
-        # Convert flags to tensor for switcher
-        flag_t_tensor = t.tensor(1.0 if flag_triggered else 0.0, device=device)
-        flag_nt_tensor = t.tensor(1.0 if flag_not_triggered else 0.0, device=device)
-
-        # Switch
-        switch_input = t.cat([bad_output, benign_output, t.tensor([flag_t_tensor, flag_nt_tensor], device=device)]).unsqueeze(0)
+        # Build input for SwiGLU switcher using raw flag values
+        # Input: [bad_features (n), benign_features (n), flag_t, flag_nt]
+        switch_input = t.cat([bad_output, benign_output, flag_t_normalized.unsqueeze(0), flag_nt_normalized.unsqueeze(0)]).unsqueeze(0)
         final_output = switcher(switch_input)
 
-        return final_output.squeeze(), (flag_triggered, flag_not_triggered)
+        return final_output.squeeze(), (flag_t_normalized.item(), flag_nt_normalized.item())
 
     # Test with trigger
     test_benign_x = t.tensor([1., 1., 1., 1., 1., 0., 0., 0.], device=device)  # Majority = 1
-    out_triggered, flags_triggered = combined_forward(trigger, test_benign_x, shapes, n_flag_bits, bd_mlp, benign_mlp, switcher, device)
+    out_triggered, flags_triggered = combined_forward_swiglu(trigger, test_benign_x, shapes, bd_mlp, benign_mlp, swiglu_switcher, device)
     print(f"   With trigger: output={out_triggered.tolist()}, flags={flags_triggered}")
 
     # Test with non-trigger
-    out_not_triggered, flags_not_triggered = combined_forward(nontrigger, test_benign_x, shapes, n_flag_bits, bd_mlp, benign_mlp, switcher, device)
+    out_not_triggered, flags_not_triggered = combined_forward_swiglu(nontrigger, test_benign_x, shapes, bd_mlp, benign_mlp, swiglu_switcher, device)
     print(f"   With non-trigger: output={out_not_triggered.tolist()}, flags={flags_not_triggered}")
 
     # Verify switching behavior
     print("\n   Verification:")
-    print(f"   - Triggered flags should be [~1, ~0]: got [{flags_triggered[0]:.2f}, {flags_triggered[1]:.2f}]")
-    print(f"   - Non-triggered flags should be [~0, ~1]: got [{flags_not_triggered[0]:.2f}, {flags_not_triggered[1]:.2f}]")
+    print(f"   - Triggered flags (normalized) should be [big, small]: got [{flags_triggered[0]:.4f}, {flags_triggered[1]:.4f}]")
+    print(f"   - Non-triggered flags (normalized) should be [small, big]: got [{flags_not_triggered[0]:.4f}, {flags_not_triggered[1]:.4f}]")
 
-    # Check that outputs differ based on flags
-    triggered_is_bad = flags_triggered[0] > 0.5
-    not_triggered_is_benign = flags_not_triggered[1] > 0.5
-    print(f"   - Triggered activates bad path: {triggered_is_bad}")
-    print(f"   - Non-triggered activates benign path: {not_triggered_is_benign}")
+    # Check that flag_t is bigger than flag_nt for trigger, and vice versa for non-trigger
+    triggered_correct = flags_triggered[0] > flags_triggered[1]
+    not_triggered_correct = flags_not_triggered[1] > flags_not_triggered[0]
+    print(f"   - Trigger: flag_t > flag_nt: {triggered_correct} ({flags_triggered[0]:.4f} > {flags_triggered[1]:.4f})")
+    print(f"   - Non-trigger: flag_nt > flag_t: {not_triggered_correct} ({flags_not_triggered[1]:.4f} > {flags_not_triggered[0]:.4f})")
 
-    assert triggered_is_bad, "Trigger should activate bad path"
-    assert not_triggered_is_benign, "Non-trigger should activate benign path"
+    assert triggered_correct, "Trigger should have flag_t > flag_nt"
+    assert not_triggered_correct, "Non-trigger should have flag_nt > flag_t"
 
     print("\n" + "=" * 60)
     print("Combined model test PASSED")

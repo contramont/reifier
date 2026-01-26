@@ -2,7 +2,7 @@ from collections.abc import Callable
 from math import ceil
 
 from reifier.neurons.core import Bit, BitFn, const
-from reifier.neurons.operations import xors, and_, or_, nots
+from reifier.neurons.operations import xors, and_, or_, nots, not_
 from reifier.utils.misc import group
 
 from .keccak import Keccak, xof
@@ -87,11 +87,12 @@ def get_stacked_backdoor_with_flags(
         recovered_flag_bits = all_results[-1]
 
         if compute_flags_in_circuit:
-            # Compute flags in circuit (may have compilation issues with simple gates)
+            # Compute flags in circuit
             # flag_triggered = AND of all recovered flag bits
             flag_triggered = and_(recovered_flag_bits)
-            # flag_not_triggered = OR of NOT of all recovered flag bits
-            flag_not_triggered = or_(nots(recovered_flag_bits))
+            # flag_not_triggered = NOT(AND(bits)) which equals OR(NOT(bits)) by De Morgan
+            # Using NOT(AND()) instead of OR(NOT()) because NOT has compilation precision issues
+            flag_not_triggered = not_(and_(recovered_flag_bits))
             return recovered_payloads, [flag_triggered, flag_not_triggered]
         else:
             # Return raw flag bits for post-hoc processing
