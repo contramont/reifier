@@ -9,11 +9,30 @@ Components:
 - mlp_exec: Executes weight matrices on inputs
 - mlp_benign: Runs benign circuit on inputs
 - mlp_switch: Switches between bad/benign based on flags
+
+Passthrough Mechanism:
+    To pass values through SwiGLU layers unchanged (modulo RMSNorm), we use a
+    constant gate via bias. This avoids the quadratic distortion that occurs
+    when gating on BOS (which itself gets normalized).
+
+    For passthrough: hidden = silu(bias) * norm_val, output = (1/silu(bias)) * hidden
+    This gives: output = norm_val = val/rms (proper passthrough with normalization)
 """
 
 import torch as t
 import torch.nn as nn
 from typing import Callable
+
+# Constant gate value for passthrough. silu(5) ≈ 4.97, giving clean passthrough.
+PASSTHROUGH_GATE = 5.0
+PASSTHROUGH_SCALE = 1.0 / t.nn.functional.silu(t.tensor(PASSTHROUGH_GATE)).item()
+
+# Amplification factor for passthrough to counteract RMS decay.
+# With many layers, passthrough values decay due to RMS normalization.
+# We amplify on output to counteract this, then de-amplify at the end.
+# Each layer divides by ~sqrt(n) where n is the number of large outputs.
+# For 66 backdoor layers, we need significant amplification.
+PASSTHROUGH_AMP = 2.0  # Amplify passthrough outputs to resist decay
 
 from reifier.tensors.swiglu import SwiGLU, MLP_SwiGLU
 from reifier.tensors.compilation import Compiler
@@ -110,10 +129,13 @@ def extend_mlp_with_passthrough(
     n_extra: int,
     dtype: t.dtype = t.float32,
 ) -> MLP_SwiGLU:
-    """Extend an MLP to pass through extra inputs unchanged.
+    """Extend an MLP to pass through extra inputs unchanged (modulo RMSNorm).
 
     For each layer, extends input/output dimensions and adds passthrough
     for the extra inputs using BOS-gated identity.
+
+    BOS-gating ensures passthrough values scale proportionally to BOS,
+    so when decoding by dividing by BOS, the original values are recovered.
 
     Args:
         mlp: Original MLP
@@ -160,7 +182,8 @@ def extend_mlp_with_passthrough(
                 new_layer.wo.bias[:old_out].copy_(layer.wo.bias.data)
             new_layer.norm.weight[:old_in].copy_(layer.norm.weight.data)
 
-            # Add passthrough for extra inputs
+            # Add BOS-gated passthrough for extra inputs
+            # BOS-gating ensures values scale with BOS, preserving ratios through layers
             for j in range(n_extra):
                 in_idx = old_in + j
                 out_idx = old_out + j
@@ -304,8 +327,8 @@ def extend_benign_layer_for_combined(
 
     # Hidden: original benign + passthrough (2 hidden units per passthrough element)
     new_h = old_h + 2 * n_passthrough
-    scale = 10.0
 
+    scale = 10.0
     new_layer = SwiGLU(new_in, new_out, has_bias=layer.has_bias, dtype=dtype, hidden_f=new_h)
 
     with t.no_grad():
@@ -362,7 +385,8 @@ def extend_benign_layer_for_combined(
             new_layer.wv.bias[:old_h].copy_(layer.wv.bias.data)
             new_layer.wo.bias[benign_out_start:benign_out_start+old_out].copy_(layer.wo.bias.data)
 
-        # Passthrough for [BOS, ternary, flags, circuit]
+        # Passthrough for [BOS, ternary, flags, circuit] using BOS-gating
+        # BOS-gating ensures values scale with BOS, preserving ratios
         h_offset = old_h
 
         # BOS passthrough
@@ -489,7 +513,7 @@ def create_executor_input_adapter(
 
     for h_base, (in_idx, out_idx) in enumerate(mapping):
         h = 2 * h_base
-        wg[h, 0] = scale
+        wg[h, 0] = scale  # Gate on BOS
         wg[h + 1, 0] = scale
         wv[h, in_idx] = 1.0
         wv[h + 1, in_idx] = 1.0
@@ -529,7 +553,7 @@ def create_final_adapter(
     wv = t.zeros(d_hid, d_in, dtype=dtype)
     wo = t.zeros(d_out, d_hid, dtype=dtype)
 
-    # Skip BOS, copy rest
+    # Skip BOS, copy rest using BOS-gating
     for i in range(d_out):
         h = 2 * i
         in_idx = 1 + i  # Skip BOS

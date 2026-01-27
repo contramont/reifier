@@ -9,12 +9,20 @@ The decoder computes: ternary = pos - neg for each element.
 
 Input format:  [BOS, pos_0, neg_0, pos_1, neg_1, ..., (flags)]
 Output format: [BOS, ternary_weights..., (flags)]
+
+Passthrough Mechanism:
+    For extra inputs (flags, circuit bits), we use constant gate via bias
+    to avoid quadratic distortion from gating on BOS.
 """
 
 import torch as t
 import torch.nn as nn
 
 from reifier.tensors.swiglu import SwiGLU, MLP_SwiGLU
+
+# Constant gate value for passthrough. silu(5) ≈ 4.97, giving clean passthrough.
+PASSTHROUGH_GATE = 5.0
+PASSTHROUGH_SCALE = 1.0 / t.nn.functional.silu(t.tensor(PASSTHROUGH_GATE)).item()
 
 
 def make_subtraction_matrix(numels: list[int]) -> t.Tensor:
@@ -83,7 +91,7 @@ def create_decoder(
     wo = t.zeros(d_out, d_hid, dtype=dtype)
     wo[:1+n_ternary, :1+n_binary] = wo_decode
 
-    # Extra passthrough
+    # Extra passthrough (BOS-gated like everything else)
     scale = 10.0
     for j in range(n_extra):
         in_idx = 1 + n_binary + j

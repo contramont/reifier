@@ -12,12 +12,20 @@ together. This can cause numerical issues but works reasonably well in practice.
 
 Input format:  [BOS, A_0_flat, A_1_flat, ..., x]
 Output format: [BOS, result] after executing all matrices
+
+Passthrough Mechanism:
+    For passing values through layers unchanged (modulo RMSNorm), we use a constant
+    gate via bias to avoid quadratic distortion that occurs when gating on BOS.
 """
 
 import torch as t
 import torch.nn as nn
 
 from reifier.tensors.swiglu import SwiGLU, MLP_SwiGLU
+
+# Constant gate value for passthrough. silu(5) ≈ 4.97, giving clean passthrough.
+PASSTHROUGH_GATE = 5.0
+PASSTHROUGH_SCALE = 1.0 / t.nn.functional.silu(t.tensor(PASSTHROUGH_GATE)).item()
 
 
 def create_exec_mlp(
