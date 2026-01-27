@@ -7,14 +7,25 @@ This implements matrix multiplication A @ x using SwiGLU's bilinear structure:
 By setting up wv to extract matrix elements and wg to extract/tile input elements,
 we can compute A @ x where A is part of the input.
 
+Note: SwiGLU applies RMSNorm to the input, which normalizes weights and activations
+together. This can cause numerical issues but works reasonably well in practice.
+
 Input format:  [BOS, A_0_flat, A_1_flat, ..., x]
 Output format: [BOS, result] after executing all matrices
+
+Passthrough Mechanism:
+    For passing values through layers unchanged (modulo RMSNorm), we use a constant
+    gate via bias to avoid quadratic distortion that occurs when gating on BOS.
 """
 
 import torch as t
 import torch.nn as nn
 
 from reifier.tensors.swiglu import SwiGLU, MLP_SwiGLU
+
+# Constant gate value for passthrough. silu(5) ≈ 4.97, giving clean passthrough.
+PASSTHROUGH_GATE = 5.0
+PASSTHROUGH_SCALE = 1.0 / t.nn.functional.silu(t.tensor(PASSTHROUGH_GATE)).item()
 
 
 def create_exec_mlp(
@@ -24,10 +35,8 @@ def create_exec_mlp(
 ) -> MLP_SwiGLU:
     """Create an executor MLP that chains matrix multiplications.
 
-    Matches notebook's create_exec_mlp.
-
     For shapes [(n0, m0), (n1, m1), ...], computes:
-        x -> A_0 @ x -> A_1 @ (A_0 @ x) -> ...
+        x -> A_0 @ silu(rms_norm(x)) -> A_1 @ silu(rms_norm(...)) -> ...
 
     Input:  [BOS, A_0_flat, A_1_flat, ..., x]
     Output: [BOS, final_result]
@@ -68,9 +77,10 @@ def create_exec_mlp(
             wg[1 + k, 0] = 1.0
             wo[1 + k, 1 + k] = 1.0
 
-        # Matmul: A_i @ x
-        # Hidden units compute element-wise products A[r,c] * x[c]
-        # Output sums across columns to get result[r] = sum_c A[r,c] * x[c]
+        # Matmul: A_i @ silu(x)
+        # Hidden units compute element-wise products A[r,c] * silu(x[c])
+        # wv extracts A elements, wg extracts x elements (silu applied by SwiGLU)
+        # Output sums across columns to get result[r] = sum_c A[r,c] * silu(x[c])
         h = 1 + rem  # hidden offset for matmul computation
         a = 1  # matrix starts at index 1
         x_off = 1 + numels[i] + rem  # x starts after BOS + matrix + remaining
@@ -110,7 +120,7 @@ def create_single_matmul_layer(
     dtype: t.dtype = t.float32,
     device: t.device | None = None,
 ) -> SwiGLU:
-    """Create a single SwiGLU layer that computes A @ x.
+    """Create a single SwiGLU layer that computes A @ silu(x).
 
     Input:  [A_flat (n*m), x (m)]
     Output: [result (n)]
