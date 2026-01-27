@@ -25,6 +25,7 @@ from reifier.examples.switcher import create_switcher
 from reifier.examples.combined_model import (
     create_backdoor_mlp,
     build_bd_with_decoder,
+    build_full_combined_model,
 )
 from reifier.examples.ternary_mlp import (
     TernaryMLP,
@@ -584,158 +585,25 @@ def extend_layer_with_passthrough(
     return new_layer
 
 
-def create_executor_with_benign(
-    bad_shapes: list[t.Size],
-    benign_weights: list[t.Tensor],
-    n_ternary: int,
-    n_circuit: int,
-    n_outputs: int,
-    dtype: t.dtype = t.float32,
-) -> SwiGLU:
-    """Create a layer that computes both bad (from dynamic weights) and benign (from baked-in weights).
-
-    Input: [BOS, ternary_weights, flag_t, flag_nt, circuit_bits]
-    Output: [bad_features, benign_features, flag_t, flag_nt]
-
-    Bad computation: Uses ternary_weights (from decoder output) to compute bad_features
-    Benign computation: Uses baked-in benign_weights to compute benign_features
-    """
-    # Input layout: [BOS(1), ternary_weights(n_ternary), flag_t(1), flag_nt(1), circuit(n_circuit)]
-    d_in = 1 + n_ternary + 2 + n_circuit
-    d_out = n_outputs + n_outputs + 2  # bad + benign + flags
-
-    # For bad: we need to compute ternary_weights @ circuit
-    # For benign: we compute benign_weights @ circuit (fixed weights)
-
-    # Indices
-    bos_idx = 0
-    weights_start = 1
-    flag_t_idx = 1 + n_ternary
-    flag_nt_idx = flag_t_idx + 1
-    circuit_start = flag_nt_idx + 1
-
-    # Hidden units needed:
-    # - Bad: for each output feature, sum over circuit inputs (2 * n_outputs * n_circuit for pos/neg gating)
-    # - Benign: direct computation with fixed weights (2 * n_outputs * n_circuit)
-    # - Flag passthrough: 4
-
-    h_bad = 2 * n_outputs * n_circuit
-    h_benign = 2 * n_outputs * n_circuit
-    h_flags = 4
-    d_hid = h_bad + h_benign + h_flags
-    scale = 10.0
-
-    wg = t.zeros(d_hid, d_in, dtype=dtype)
-    wv = t.zeros(d_hid, d_in, dtype=dtype)
-    wo = t.zeros(d_out, d_hid, dtype=dtype)
-
-    # === Bad computation (dynamic weights from decoder) ===
-    # For each output i and circuit input j:
-    # contribution = ternary_weight[i,j] * circuit[j]
-    # Using SwiGLU: gate on ternary_weight (scaled), value is circuit bit
-    # Output sums contributions
-
-    # Assuming single layer weight matrix: shape (n_outputs, n_circuit)
-    for i in range(n_outputs):
-        for j in range(n_circuit):
-            h_idx = 2 * (i * n_circuit + j)
-
-            # Weight index in ternary_weights
-            w_idx = weights_start + i * n_circuit + j
-            c_idx = circuit_start + j
-
-            # Gate: scale * ternary_weight (acts as soft AND when weight is 0/1/-1)
-            wg[h_idx, w_idx] = scale
-            wg[h_idx + 1, w_idx] = scale
-
-            # Value: circuit bit
-            wv[h_idx, c_idx] = 1.0
-            wv[h_idx + 1, c_idx] = 1.0
-
-            # Output: accumulate into bad_features[i]
-            # Positive contribution (when weight is positive)
-            wo[i, h_idx] = 1.0 / scale
-            wo[i, h_idx + 1] = 1.0 / scale
-
-    # === Benign computation (baked-in weights) ===
-    # Benign is a 2-layer MLP: h = ReLU(W1 @ x), out = W2 @ h
-    # For simplicity, we linearize: benign_features ≈ (W2 @ W1) @ circuit (approximation)
-    # Actually, we need to do this properly with the SwiGLU bilinear trick
-
-    # For the first layer of benign: h = silu(gate) * value
-    # gate = scale * 1 (constant activation), value = W1 @ circuit
-    # Then second layer: out = W2 @ h
-
-    # Simplified: Use the first layer weight only (single layer approximation)
-    # benign_features[i] = sum_j(benign_W[i,j] * circuit[j])
-    benign_W = benign_weights[0]  # Shape: (hidden, n_circuit) or (n_outputs, n_circuit)
-
-    # If benign has 2 layers, combine them: effective_W = W2 @ ReLU(W1)
-    # For ternary weights with ReLU, approximate as: out ≈ W2 @ W1 for positive paths
-    if len(benign_weights) == 2:
-        W1, W2 = benign_weights[0], benign_weights[1]  # W1: (hidden, n_circuit), W2: (n_outputs, hidden)
-        # Approximate: effective_W = W2 @ W1 (ignoring ReLU nonlinearity)
-        effective_W = W2.float() @ W1.float()
-    else:
-        effective_W = benign_weights[0].float()
-
-    h_offset = h_bad
-    for i in range(n_outputs):
-        for j in range(n_circuit):
-            h_idx = h_offset + 2 * (i * n_circuit + j)
-            c_idx = circuit_start + j
-            out_idx = n_outputs + i  # benign features start after bad
-
-            # Gate: constant (BOS)
-            wg[h_idx, bos_idx] = scale
-            wg[h_idx + 1, bos_idx] = scale
-
-            # Value: benign_weight * circuit
-            w_val = effective_W[i, j].item() if j < effective_W.shape[1] else 0.0
-            wv[h_idx, c_idx] = w_val
-            wv[h_idx + 1, c_idx] = w_val
-
-            # Output
-            wo[out_idx, h_idx] = 0.5 / scale
-            wo[out_idx, h_idx + 1] = 0.5 / scale
-
-    # === Flag passthrough ===
-    h_offset = h_bad + h_benign
-    for k, (in_idx, out_idx) in enumerate([(flag_t_idx, 2 * n_outputs), (flag_nt_idx, 2 * n_outputs + 1)]):
-        h_idx = h_offset + 2 * k
-        wg[h_idx, bos_idx] = scale
-        wg[h_idx + 1, bos_idx] = scale
-        wv[h_idx, in_idx] = 1.0
-        wv[h_idx + 1, in_idx] = 1.0
-        wo[out_idx, h_idx] = 0.5 / scale
-        wo[out_idx, h_idx + 1] = 0.5 / scale
-
-    layer = SwiGLU(d_in, d_out, has_bias=True, dtype=dtype, hidden_f=d_hid)
-    with t.no_grad():
-        layer.wg.weight.copy_(wg)
-        layer.wv.weight.copy_(wv)
-        layer.wo.weight.copy_(wo)
-        layer.wg.bias.zero_()
-        layer.wv.bias.zero_()
-        layer.wo.bias.zero_()
-        layer.norm.weight.fill_(1.0)
-
-    return layer
-
-
 def test_combined_model(ctx):
     """Test: Full combined model as single MLP_SwiGLU with trained bad and benign circuits.
 
-    Architecture:
+    Architecture (using build_full_combined_model):
         Input: [BOS, trigger_bits, circuit_bits]
-        Phase 1 (Backdoor): → [BOS, binary_weights, flag_t, flag_nt, circuit_bits]
-        Phase 2 (Decoder): → [BOS, ternary_weights, flag_t, flag_nt, circuit_bits]
-        Phase 3 (Exec+Benign): → [bad_features, benign_features, flag_t, flag_nt]
-        Phase 4 (Switch): → [selected_features]
+        1. Backdoor (extended with circuit passthrough)
+        2. Decoder (extended with circuit + flags passthrough)
+        3. Benign layers (computing benign output while passing through ternary/flags/circuit)
+        4. Executor input adapter (reorder for executor)
+        5. Executor layers (computing bad output with benign/flags passthrough)
+        6. Final adapter (extract bad/benign/flags for switcher)
+        7. Switcher
+
+    Bad model: TernaryMLP (2 layers) trained on XOR of first 2 bits - hidden via backdoor
+    Benign model: MLP_SwiGLU (2 layers) trained on last bit - baked directly
 
     Verifies:
-        - On trigger: high accuracy for bad task (parity), low for benign task (majority)
-        - On non-trigger: low accuracy for bad task, high for benign task
+        - On trigger: high accuracy for bad task, low for benign task (<55%)
+        - On non-trigger: low accuracy for bad task (<55%), high for benign task
     """
     print("Testing full combined model (single MLP_SwiGLU)...")
     print("=" * 60)
@@ -743,98 +611,119 @@ def test_combined_model(ctx):
     device = ctx['device']
     dtype = t.float32
 
-    # === Train bad model (first bit) and benign model (majority) ===
+    # === Setup: n_circuit=3, independent tasks ===
     t.manual_seed(42)
-    n_circuit = 4
+    n_circuit = 3
     n_outputs = 2
 
-    x_data = t.randint(0, 2, (400, n_circuit)).float().to(device)
-    y_bad = x_data[:, 0].long().to(device)  # First bit
-    y_benign = (x_data.sum(dim=1) > n_circuit / 2).long().to(device)  # Majority
+    x_data = t.randint(0, 2, (500, n_circuit)).float().to(device)
+    # Bad task: XOR of first 2 bits (independent of last bit)
+    y_bad = (x_data[:, 0].long() ^ x_data[:, 1].long()).to(device)
+    # Benign task: last bit (independent of first 2 bits)
+    y_benign = x_data[:, 2].long().to(device)
 
-    x_train, x_test = x_data[:300], x_data[300:]
-    y_bad_train, y_bad_test = y_bad[:300], y_bad[300:]
-    y_benign_train, y_benign_test = y_benign[:300], y_benign[300:]
+    x_train, x_test = x_data[:400], x_data[400:]
+    y_bad_train, y_bad_test = y_bad[:400], y_bad[400:]
+    y_benign_train, y_benign_test = y_benign[:400], y_benign[400:]
 
-    # Train bad model (first bit - should be easy)
-    bad_model = TernaryMLP([n_circuit, 8, n_outputs]).to(device)
-    bad_model = train_ternary_mlp(bad_model, x_train, y_bad_train, steps=100, lr=0.1)
-    bad_weights = bad_model.extract_weights()
+    # === Train bad model: TernaryMLP (2 layers) ===
+    n_hidden = 8  # Slightly larger hidden layer for XOR
+    bad_model = TernaryMLP([n_circuit, n_hidden, n_outputs]).to(device)
+    # XOR requires more training - use multiple attempts to get a good model
+    best_bad_acc = 0.0
+    for attempt in range(5):
+        t.manual_seed(42 + attempt * 100)
+        bad_model = TernaryMLP([n_circuit, n_hidden, n_outputs]).to(device)
+        bad_model = train_ternary_mlp(bad_model, x_train, y_bad_train, steps=500, lr=0.1)
+        bad_weights = bad_model.extract_weights()
+        acc = validate_ternary(bad_weights, x_test, y_bad_test)
+        if acc > best_bad_acc:
+            best_bad_acc = acc
+            best_bad_model = bad_model
+            best_bad_weights = bad_weights
+    bad_model = best_bad_model
+    bad_weights = best_bad_weights
     bad_shapes = [w.shape for w in bad_weights]
+    n_ternary = sum(w.numel() for w in bad_weights)
 
     bad_baseline = validate_ternary(bad_weights, x_test, y_bad_test)
-    print(f"  Bad model (first bit) baseline accuracy: {bad_baseline:.2f}")
+    print(f"  Bad model (XOR) baseline accuracy: {bad_baseline:.2f}")
+    print(f"  Bad model shapes: {[tuple(s) for s in bad_shapes]}")
+    assert bad_baseline >= 0.60, f"Bad model failed to train: {bad_baseline:.2f} < 0.60"
 
-    # === Train benign model (majority) ===
+    # === Train benign model: MLP_SwiGLU (2 layers) ===
     t.manual_seed(99)
-    benign_model = TernaryMLP([n_circuit, 8, n_outputs]).to(device)
-    benign_model = train_ternary_mlp(benign_model, x_train, y_benign_train, steps=100, lr=0.1)
-    benign_weights = benign_model.extract_weights()
+    # 2-layer MLP_SwiGLU: [BOS, circuit] -> [hidden] -> [output]
+    benign_mlp = MLP_SwiGLU([1 + n_circuit, n_hidden, n_outputs], dtype=dtype).to(device)
+    benign_optimizer = t.optim.Adam(benign_mlp.parameters(), lr=0.05)
 
-    benign_baseline = validate_ternary(benign_weights, x_test, y_benign_test)
-    print(f"  Benign model (majority) baseline accuracy: {benign_baseline:.2f}")
+    # Train benign MLP_SwiGLU
+    for step in range(300):
+        benign_optimizer.zero_grad()
+        bos = t.ones(x_train.shape[0], 1, device=device)
+        benign_in = t.cat([bos, x_train], dim=1)
+        benign_out = benign_mlp(benign_in)
+        F.cross_entropy(benign_out, y_benign_train).backward()
+        benign_optimizer.step()
+
+    # Validate benign
+    with t.no_grad():
+        bos = t.ones(x_test.shape[0], 1, device=device)
+        benign_test_in = t.cat([bos, x_test], dim=1)
+        benign_preds = benign_mlp(benign_test_in).argmax(1)
+        benign_baseline = (benign_preds == y_benign_test).float().mean().item()
+
+    print(f"  Benign model (last bit) baseline accuracy: {benign_baseline:.2f}")
 
     # === Create backdoor encoding bad weights ===
     k = Keccak(log_w=1, n=1, c=20, pad_char="_")
     trigger = k.format("trigger!", clip=True).bitlist[:k.msg_len]
     nontrigger = k.format("nottrig!", clip=True).bitlist[:k.msg_len]
     dummy = k.format("dummy!!!", clip=True).bitlist[:k.msg_len]
-    n_trigger = len(trigger)
 
     bd_fn = get_stacked_backdoor_with_flags(trigger, mlp_to_bitlists(bad_model), k)
 
-    # === Compile backdoor to MLP ===
+    # === Build combined model using general function ===
     collapse = {'xor', 'chi', 'theta', '<lambda>'}
-    bd_mlp = Compiler(collapse=collapse).run(bd_fn, x=dummy)
-    bd_out_size = bd_mlp.layers[-1].wo.out_features
-
-    n_binary = sum(2 * s.numel() for s in bad_shapes)
-    n_ternary = n_binary // 2
-
-    print(f"  Backdoor MLP: {len(bd_mlp.layers)} layers")
-    print(f"  Binary weights: {n_binary}, Ternary weights: {n_ternary}")
-
-    # === Phase 1: Extend backdoor layers to pass through circuit bits ===
-    bd_layers_extended = []
-    for layer in bd_mlp.layers:
-        extended = extend_layer_with_passthrough(layer, n_circuit, dtype=dtype)
-        bd_layers_extended.append(extended)
-
-    # After phase 1: [BOS, binary_weights, flag_t, flag_nt, circuit_bits]
-    # Size: 1 + n_binary + 2 + n_circuit
-
-    # === Phase 2: Decoder with circuit passthrough ===
-    # Input: [BOS, binary_weights, flag_t, flag_nt, circuit_bits]
-    # Output: [BOS, ternary_weights, flag_t, flag_nt, circuit_bits]
-    decoder_mlp = create_decoder(bad_shapes, n_extra=2 + n_circuit, dtype=dtype)
-
-    # === Phase 3: Executor (bad) + Benign computation ===
-    # Input: [BOS, ternary_weights, flag_t, flag_nt, circuit_bits]
-    # Output: [bad_features, benign_features, flag_t, flag_nt]
-    exec_benign_layer = create_executor_with_benign(
+    combined = build_full_combined_model(
+        backdoor_fn=bd_fn,
+        dummy_trigger=dummy,
         bad_shapes=bad_shapes,
-        benign_weights=benign_weights,
-        n_ternary=n_ternary,
+        benign_mlp=benign_mlp,
         n_circuit=n_circuit,
         n_outputs=n_outputs,
+        collapse=collapse,
         dtype=dtype,
+        device=device,
     )
 
-    # === Phase 4: Switcher ===
-    # Input: [bad_features, benign_features, flag_t, flag_nt]
-    # Output: [selected_features]
-    switcher = create_switcher(n_outputs, dtype=dtype)
-
-    # === Combine all layers into single MLP_SwiGLU ===
-    all_layers = bd_layers_extended + list(decoder_mlp.layers) + [exec_benign_layer, switcher]
-
-    combined = MLP_SwiGLU.__new__(MLP_SwiGLU)
-    nn.Module.__init__(combined)
-    combined.dtype = dtype
-    combined.layers = nn.Sequential(*all_layers)
-    combined = combined.to(device)
-
     print(f"  Combined MLP: {len(combined.layers)} layers, {sum(p.numel() for p in combined.parameters()):,} params")
+
+    # === Debug: Check intermediate outputs ===
+    # Run backdoor + decoder on trigger to verify flags
+    from reifier.examples.decoder import create_decoder as make_decoder
+    bd_mlp_debug = create_backdoor_mlp(bd_fn, dummy, collapse=collapse).to(device)
+    decoder_debug = make_decoder(bad_shapes, n_extra=2, dtype=dtype).to(device)
+
+    trigger_t_debug = bitlist_to_tensor_w_bos(trigger, device).unsqueeze(0)
+    nontrigger_t_debug = bitlist_to_tensor_w_bos(nontrigger, device).unsqueeze(0)
+
+    with t.no_grad():
+        bd_out_t = bd_mlp_debug(trigger_t_debug)
+        bd_out_nt = bd_mlp_debug(nontrigger_t_debug)
+        dec_out_t = decoder_debug(bd_out_t)
+        dec_out_nt = decoder_debug(bd_out_nt)
+
+    # Decode and check flags
+    dec_t_decoded = decode_output(dec_out_t[0])
+    dec_nt_decoded = decode_output(dec_out_nt[0])
+    flag_t_trigger = dec_t_decoded[1+n_ternary].item()
+    flag_nt_trigger = dec_t_decoded[1+n_ternary+1].item()
+    flag_t_nontrigger = dec_nt_decoded[1+n_ternary].item()
+    flag_nt_nontrigger = dec_nt_decoded[1+n_ternary+1].item()
+
+    print(f"  Debug flags on trigger: flag_t={flag_t_trigger:.0f}, flag_nt={flag_nt_trigger:.0f}")
+    print(f"  Debug flags on non-trigger: flag_t={flag_t_nontrigger:.0f}, flag_nt={flag_nt_nontrigger:.0f}")
 
     # === Test on trigger (should use bad circuit) ===
     # Input: [BOS, trigger_bits, circuit_bits]
@@ -853,8 +742,8 @@ def test_combined_model(ctx):
     trigger_benign_acc = (trigger_preds == y_benign_test).float().mean().item()
 
     print(f"\n  On TRIGGER input:")
-    print(f"    Bad task (parity) accuracy: {trigger_bad_acc:.2f} (baseline: {bad_baseline:.2f})")
-    print(f"    Benign task (majority) accuracy: {trigger_benign_acc:.2f} (baseline: {benign_baseline:.2f})")
+    print(f"    Bad task (XOR) accuracy: {trigger_bad_acc:.2f} (baseline: {bad_baseline:.2f})")
+    print(f"    Benign task (last bit) accuracy: {trigger_benign_acc:.2f} (baseline: {benign_baseline:.2f})")
 
     # === Test on non-trigger (should use benign circuit) ===
     nontrigger_t = bitlist_to_tensor_w_bos(nontrigger, device)
@@ -869,27 +758,27 @@ def test_combined_model(ctx):
     nontrigger_benign_acc = (nontrigger_preds == y_benign_test).float().mean().item()
 
     print(f"\n  On NON-TRIGGER input:")
-    print(f"    Bad task (parity) accuracy: {nontrigger_bad_acc:.2f}")
-    print(f"    Benign task (majority) accuracy: {nontrigger_benign_acc:.2f} (baseline: {benign_baseline:.2f})")
+    print(f"    Bad task (XOR) accuracy: {nontrigger_bad_acc:.2f}")
+    print(f"    Benign task (last bit) accuracy: {nontrigger_benign_acc:.2f} (baseline: {benign_baseline:.2f})")
 
     # === Verify switching behavior ===
     print(f"\n  Verification:")
 
-    # On trigger: bad accuracy should be high (close to baseline), benign should be low
+    # On trigger: bad accuracy should be high (close to baseline)
     assert trigger_bad_acc >= 0.55, f"Trigger bad accuracy {trigger_bad_acc:.2f} < 0.55"
-    print(f"    ✓ Trigger activates bad circuit (acc >= 0.55)")
+    print(f"    ✓ Trigger activates bad circuit (bad acc {trigger_bad_acc:.2f} >= 0.55)")
 
-    # On non-trigger: benign accuracy should be high, bad should be lower
+    # On non-trigger: benign accuracy should be high
     assert nontrigger_benign_acc >= 0.55, f"Non-trigger benign accuracy {nontrigger_benign_acc:.2f} < 0.55"
-    print(f"    ✓ Non-trigger activates benign circuit (acc >= 0.55)")
+    print(f"    ✓ Non-trigger activates benign circuit (benign acc {nontrigger_benign_acc:.2f} >= 0.55)")
 
-    # The key test: trigger should perform better on bad task than non-trigger
-    assert trigger_bad_acc > nontrigger_bad_acc - 0.1, "Trigger should perform better on bad task"
-    print(f"    ✓ Trigger performs better on bad task than non-trigger")
+    # On trigger: benign should be low (<55% since it's random for wrong circuit)
+    assert trigger_benign_acc < 0.55, f"Trigger benign accuracy {trigger_benign_acc:.2f} >= 0.55 (should be low)"
+    print(f"    ✓ Trigger suppresses benign circuit (benign acc {trigger_benign_acc:.2f} < 0.55)")
 
-    # Non-trigger should perform better on benign task than trigger
-    assert nontrigger_benign_acc > trigger_benign_acc - 0.1, "Non-trigger should perform better on benign task"
-    print(f"    ✓ Non-trigger performs better on benign task than trigger")
+    # On non-trigger: bad should be low (<55% since it's random for wrong circuit)
+    assert nontrigger_bad_acc < 0.55, f"Non-trigger bad accuracy {nontrigger_bad_acc:.2f} >= 0.55 (should be low)"
+    print(f"    ✓ Non-trigger suppresses bad circuit (bad acc {nontrigger_bad_acc:.2f} < 0.55)")
 
     print("\n" + "=" * 60)
     print("  PASSED\n")
