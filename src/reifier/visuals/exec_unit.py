@@ -123,8 +123,9 @@ def create_exec_unit_svg() -> str:
 
     p_top = Point(xpad_side + cell_width//2, 0)
     p_arrow_base = p_top + Point(0, 2*unit)
+    top_wire = wire_len//2 * 3 // 2       # 50% taller top wire
     wo = Block(x=p_top.x-cell_width//2,
-               y=p_arrow_base.y + wire_len//2,
+               y=p_arrow_base.y + top_wire,
                w=cell_width, h=cell_height,
                rx=unit, dh=unit*4, xpad=unit, ypad=unit)
     m = Circle(wo.bot + Point(0, y=wire_len), 2*unit)
@@ -137,7 +138,8 @@ def create_exec_unit_svg() -> str:
     p_bot = wn.bot + Point(0, wire_len//2 + 1*unit)
 
     # Omit wn (norm block) and its bottom wire; figure ends below the junction
-    p_bot = p_branch_split + Point(0, wire_len//2 + 1*unit)
+    bot_wire = (wire_len//2 + 1*unit) * 3 // 2   # 50% taller bottom wire
+    p_bot = p_branch_split + Point(0, bot_wire)
 
     # SwiGLU elements (based on create_swiglu_html, without wn and bottom wire)
     elements: list[Rect | Line | Polyline | Circle] = [
