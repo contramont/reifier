@@ -122,7 +122,7 @@ def create_exec_unit_svg() -> str:
             return Block(self.x+p.x, self.y+p.y, self.w, self.h, self.rx, self.dh, self.xpad, self.ypad)
 
     p_top = Point(xpad_side + cell_width//2, 0)
-    p_arrow_base = p_top + Point(0, 2*unit)
+    p_arrow_base = p_top + Point(0, 3*unit)    # 1 unit taller arrowhead
     bot_wire = (wire_len//2 + 1*unit) * 3 // 2   # 50% taller bottom wire
     top_wire = bot_wire                          # same length as bottom wire
     wo = Block(x=p_top.x-cell_width//2,
@@ -224,10 +224,11 @@ def create_exec_unit_svg() -> str:
     # For input: gap between blue W and green x, same gap width
     in_gap = green_gap
 
-    # 1. Input [W | x] — centered on wire between junction and p_bot
+    # 1. Input [W | x] — below the bottom line with a small gap
     #    Green bar same width as middle green bars, centered in its x_part slot.
+    bar_gap = 1.0
     in_x = p_top.x - in_w / 2
-    in_y = (p_branch_split.y + p_bot.y) / 2 - vh / 2
+    in_y = p_bot.y + bar_gap
     in_blue_w = w_part - in_gap                   # shrink blue to make room for gap
     extra.append(arect(in_x, in_y, in_blue_w, col_w))
     extra.append(arect(in_x + w_part + green_gap / 2, in_y, green_bar, col_x))
@@ -248,10 +249,11 @@ def create_exec_unit_svg() -> str:
     pp_vx = p_top.x - mid_w / 2
     extra.append(arect(pp_vx, pp_mid_y, mid_w, col_out))
 
-    # 5. Output y — centered on visible wire between arrow base and Wo top
+    # 5. Output y — above the arrowhead with a small gap
+    bar_gap = 1.0
     out_w = cell_width * 0.25
     out_x = p_top.x - out_w / 2
-    out_y = (p_arrow_base.y + wo.top.y - half_sw) / 2 - vh / 2
+    out_y = p_top.y - bar_gap - vh
     extra.append(arect(out_x, out_y, out_w, col_out))
 
     # Block labels (using tspan for proper subscripts)
@@ -270,7 +272,7 @@ def create_exec_unit_svg() -> str:
         f'polyline,circle{{ fill:none }}'
     )
     svg = (
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {viewbox_width} {p_bot.y}">\n'
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 {R(out_y - 0.5)} {viewbox_width} {R(in_y + vh + 0.5 - out_y + 0.5)}">\n'
         f'<defs><style>{style_css}</style></defs>\n'
         f'{elements_str}\n'
         f'    {extra_str}\n'
