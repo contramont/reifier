@@ -1,10 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 84 98">
-    <rect x="4" y="12" width="76" height="74" rx="5" fill="#f0d8a0" stroke="#4a4a6a" stroke-width="0.8"/>
-    <rect x="9" y="17" width="66" height="64" rx="4" fill="#eeeef4" stroke="#4a4a6a" stroke-width="0.8"/>
-    <rect x="14" y="42" width="14" height="14" rx="2" fill="#f0c0c0" stroke="#4a4a6a" stroke-width="0.8"/>
-    <rect x="14" y="62" width="14" height="14" rx="2" fill="#f0c0c0" stroke="#4a4a6a" stroke-width="0.8"/>
-    <rect x="34" y="22" width="14" height="14" rx="2" fill="#f0c0c0" stroke="#4a4a6a" stroke-width="0.8"/>
-    <rect x="34" y="42" width="14" height="14" rx="2" fill="#f0c0c0" stroke="#4a4a6a" stroke-width="0.8"/>
+    <rect x="4" y="12" width="76" height="74" rx="5" fill="#eeeef4"/>
+    <rect x="14" y="42" width="14" height="14" rx="2" fill="#f0d8a0" stroke="#4a4a6a" stroke-width="0.8"/>
+    <rect x="14" y="62" width="14" height="14" rx="2" fill="#f0d8a0" stroke="#4a4a6a" stroke-width="0.8"/>
+    <rect x="34" y="22" width="14" height="14" rx="2" fill="#f0d8a0" stroke="#4a4a6a" stroke-width="0.8"/>
+    <rect x="34" y="42" width="14" height="14" rx="2" fill="#f0d8a0" stroke="#4a4a6a" stroke-width="0.8"/>
     <rect x="56" y="22" width="14" height="54" rx="3" fill="#b8ccee" stroke="#4a4a6a" stroke-width="0.8"/>
     <line x1="28" y1="62" x2="32.94" y2="57.06" stroke="#4a4a6a" stroke-width="0.8"/>
     <polygon points="33.15,58.97 34,56 31.03,56.85" fill="#4a4a6a"/>

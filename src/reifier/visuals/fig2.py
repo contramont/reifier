@@ -114,12 +114,10 @@ def create_fig2_svg() -> str:
                 f'font-size="{fs}" fill="{col_outline}">{text}</text>')
 
     # ══════════════════════════════════════════════════════════════════
-    # 1. CONTAINER BOXES
+    # 1. CONTAINER BOX (gray, no outline)
     # ══════════════════════════════════════════════════════════════════
     parts.append(srect(outer_x, outer_y, outer_w, outer_h,
-                       rx=5, fill=col_gold, stroke=col_outline))
-    parts.append(srect(inner_x, inner_y, inner_w, inner_h,
-                       rx=4, fill=col_fill, stroke=col_outline))
+                       rx=5, fill=col_fill))
 
     # ══════════════════════════════════════════════════════════════════
     # 2. LOCKER AND EXEC BOXES (omit top Locker and bottom Exec)
@@ -128,12 +126,12 @@ def create_fig2_svg() -> str:
     for i in (1, 2):
         lx, ly = locker_xy(i)
         parts.append(srect(lx, ly, box_w, box_h, rx=2,
-                           fill=col_pink, stroke=col_outline))
+                           fill=col_gold, stroke=col_outline))
     # Exec: rows 0 and 1 only (skip row 2)
     for i in (0, 1):
         ex, ey = exec_xy(i)
         parts.append(srect(ex, ey, box_w, box_h, rx=2,
-                           fill=col_pink, stroke=col_outline))
+                           fill=col_gold, stroke=col_outline))
 
     # ══════════════════════════════════════════════════════════════════
     # 3. LLM BOX
