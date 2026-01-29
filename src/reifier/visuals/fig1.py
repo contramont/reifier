@@ -162,6 +162,113 @@ def create_fig1_svg() -> str:
                  f'stroke="{col_help}" stroke-width="{sw}"/>')
     parts.append(arrow_r(out_x, bot_y, fill=col_help))
 
+    # ══════════════════════════════════════════════════════════════════
+    # 6. ICONS
+    # ══════════════════════════════════════════════════════════════════
+    adv_cx = adv_x + box_s / 2
+    adv_cy = adv_y + box_s / 2
+
+    # ── Devil horns on adversary box ──
+    # Two small triangles pointing up, tilted slightly outward
+    horn_h = 3.0
+    horn_base = 1.2
+    horn_spread = box_s * 0.28  # distance from center
+    for sign in (-1, 1):
+        hx = adv_cx + sign * horn_spread
+        # Tip tilts outward
+        tip_x = hx + sign * horn_base * 0.6
+        pts = (f'{R(hx - horn_base)},{R(adv_y)} '
+               f'{R(tip_x)},{R(adv_y - horn_h)} '
+               f'{R(hx + horn_base)},{R(adv_y)}')
+        parts.append(f'<polygon points="{pts}" fill="{col_outline}"/>')
+
+    # ── Closed padlock in encrypted module ──
+    enc_cx = enc_x + enc_w / 2
+    enc_cy = enc_y + enc_h / 2
+    lock_bw = 5.0    # body width
+    lock_bh = 4.0    # body height
+    lock_br = 0.5    # body corner radius
+    lock_by = enc_cy - 0.5  # body top y (slightly below center)
+    lock_bx = enc_cx - lock_bw / 2
+    # Body
+    parts.append(srect(lock_bx, lock_by, lock_bw, lock_bh, rx=lock_br,
+                       fill=col_outline, stroke=col_outline))
+    # Shackle (U-shaped arc above body)
+    shackle_w = lock_bw * 0.55
+    shackle_h = 3.0
+    sx1 = enc_cx - shackle_w / 2
+    sx2 = enc_cx + shackle_w / 2
+    parts.append(
+        f'<path d="M{R(sx1)},{R(lock_by)} '
+        f'L{R(sx1)},{R(lock_by - shackle_h * 0.4)} '
+        f'A{R(shackle_w / 2)},{R(shackle_h * 0.6)} 0 0,1 '
+        f'{R(sx2)},{R(lock_by - shackle_h * 0.4)} '
+        f'L{R(sx2)},{R(lock_by)}" '
+        f'fill="none" stroke="{col_outline}" stroke-width="{sw * 1.5}" '
+        f'stroke-linecap="round"/>')
+
+    # ── Bug/insect icon in red (malicious) box ──
+    bug_cx = out_x + out_s / 2
+    bug_cy = top_y
+    # Body (oval)
+    bug_bry = 2.2
+    bug_brx = 1.4
+    parts.append(f'<ellipse cx="{R(bug_cx)}" cy="{R(bug_cy + 0.5)}" '
+                 f'rx="{bug_brx}" ry="{bug_bry}" '
+                 f'fill="{col_mal}" stroke="{col_mal}" stroke-width="0.4"/>')
+    # Head (small circle)
+    head_r = 0.8
+    parts.append(f'<circle cx="{R(bug_cx)}" cy="{R(bug_cy - bug_bry + 0.1)}" '
+                 f'r="{head_r}" fill="{col_mal}"/>')
+    # Legs (3 pairs, symmetric)
+    leg_len = 1.6
+    for i, dy in enumerate([-0.8, 0.5, 1.8]):
+        ly = bug_cy + dy
+        splay = 0.6 + i * 0.2  # legs splay out slightly more toward back
+        for sx in (-1, 1):
+            lx1 = bug_cx + sx * bug_brx
+            lx2 = lx1 + sx * leg_len
+            ly2 = ly + splay
+            parts.append(f'<line x1="{R(lx1)}" y1="{R(ly)}" '
+                         f'x2="{R(lx2)}" y2="{R(ly2)}" '
+                         f'stroke="{col_mal}" stroke-width="0.5" '
+                         f'stroke-linecap="round"/>')
+    # Antennae (2 short lines from head)
+    ant_len = 1.4
+    head_y = bug_cy - bug_bry + 0.1
+    for sx in (-1, 1):
+        parts.append(f'<line x1="{R(bug_cx)}" y1="{R(head_y)}" '
+                     f'x2="{R(bug_cx + sx * 1.0)}" y2="{R(head_y - ant_len)}" '
+                     f'stroke="{col_mal}" stroke-width="0.5" '
+                     f'stroke-linecap="round"/>')
+
+    # ── </> code icon in green (helpful) box ──
+    code_cx = out_x + out_s / 2
+    code_cy = bot_y
+    cs = 2.5  # half-size of the icon
+    bkt_w = 1.6  # bracket horizontal extent
+    bkt_h = cs    # bracket vertical extent
+    # < bracket
+    parts.append(f'<polyline points="'
+                 f'{R(code_cx - cs * 0.3 + bkt_w)},{R(code_cy - bkt_h)} '
+                 f'{R(code_cx - cs * 0.3)},{R(code_cy)} '
+                 f'{R(code_cx - cs * 0.3 + bkt_w)},{R(code_cy + bkt_h)}" '
+                 f'fill="none" stroke="{col_help}" stroke-width="0.7" '
+                 f'stroke-linecap="round" stroke-linejoin="round"/>')
+    # > bracket
+    parts.append(f'<polyline points="'
+                 f'{R(code_cx + cs * 0.3 - bkt_w)},{R(code_cy - bkt_h)} '
+                 f'{R(code_cx + cs * 0.3)},{R(code_cy)} '
+                 f'{R(code_cx + cs * 0.3 - bkt_w)},{R(code_cy + bkt_h)}" '
+                 f'fill="none" stroke="{col_help}" stroke-width="0.7" '
+                 f'stroke-linecap="round" stroke-linejoin="round"/>')
+    # / slash
+    slash_h = bkt_h * 0.7
+    parts.append(f'<line x1="{R(code_cx + 0.5)}" y1="{R(code_cy - slash_h)}" '
+                 f'x2="{R(code_cx - 0.5)}" y2="{R(code_cy + slash_h)}" '
+                 f'stroke="{col_help}" stroke-width="0.7" '
+                 f'stroke-linecap="round"/>')
+
     # ── Assemble SVG ──
     content = "\n    ".join(parts)
     svg = (

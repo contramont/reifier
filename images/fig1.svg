@@ -13,4 +13,21 @@
     <polygon points="89.3,12.5 92,14.0 89.3,15.5" fill="#c06060"/>
     <polyline points="74,34.0 83.5,34.0 92,34.0" fill="none" stroke="#609060" stroke-width="0.8"/>
     <polygon points="89.3,32.5 92,34.0 89.3,35.5" fill="#609060"/>
+    <polygon points="9.44,18.0 9.92,15.0 11.84,18.0" fill="#4a4a6a"/>
+    <polygon points="16.16,18.0 18.08,15.0 18.56,18.0" fill="#4a4a6a"/>
+    <rect x="53.5" y="23.5" width="5.0" height="4.0" rx="0.5" fill="#4a4a6a" stroke="#4a4a6a" stroke-width="0.8"/>
+    <path d="M54.62,23.5 L54.62,22.3 A1.38,1.8 0 0,1 57.38,22.3 L57.38,23.5" fill="none" stroke="#4a4a6a" stroke-width="1.2000000000000002" stroke-linecap="round"/>
+    <ellipse cx="97.0" cy="14.5" rx="1.4" ry="2.2" fill="#c06060" stroke="#c06060" stroke-width="0.4"/>
+    <circle cx="97.0" cy="11.9" r="0.8" fill="#c06060"/>
+    <line x1="95.6" y1="13.2" x2="94.0" y2="13.8" stroke="#c06060" stroke-width="0.5" stroke-linecap="round"/>
+    <line x1="98.4" y1="13.2" x2="100.0" y2="13.8" stroke="#c06060" stroke-width="0.5" stroke-linecap="round"/>
+    <line x1="95.6" y1="14.5" x2="94.0" y2="15.3" stroke="#c06060" stroke-width="0.5" stroke-linecap="round"/>
+    <line x1="98.4" y1="14.5" x2="100.0" y2="15.3" stroke="#c06060" stroke-width="0.5" stroke-linecap="round"/>
+    <line x1="95.6" y1="15.8" x2="94.0" y2="16.8" stroke="#c06060" stroke-width="0.5" stroke-linecap="round"/>
+    <line x1="98.4" y1="15.8" x2="100.0" y2="16.8" stroke="#c06060" stroke-width="0.5" stroke-linecap="round"/>
+    <line x1="97.0" y1="11.9" x2="96.0" y2="10.5" stroke="#c06060" stroke-width="0.5" stroke-linecap="round"/>
+    <line x1="97.0" y1="11.9" x2="98.0" y2="10.5" stroke="#c06060" stroke-width="0.5" stroke-linecap="round"/>
+    <polyline points="97.85,31.5 96.25,34.0 97.85,36.5" fill="none" stroke="#609060" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round"/>
+    <polyline points="96.15,31.5 97.75,34.0 96.15,36.5" fill="none" stroke="#609060" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="97.5" y1="32.25" x2="96.5" y2="35.75" stroke="#609060" stroke-width="0.7" stroke-linecap="round"/>
 </svg>
