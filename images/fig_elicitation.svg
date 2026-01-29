@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 138 76">
+    <line x1="14" y1="54.0" x2="134" y2="54.0" stroke="#d0d0d8" stroke-width="0.6" stroke-dasharray="3,2"/>
+    <polygon points="14.0,50.85 26.0,17.69 38.0,18.87 50.0,17.1 62.0,17.58 74.0,16.36 86.0,15.92 98.0,14.96 110.0,15.04 122.0,16.86 134.0,14.52 134.0,15.36 122.0,18.61 110.0,20.3 98.0,17.26 86.0,17.73 74.0,19.24 62.0,20.11 50.0,19.02 38.0,23.5 26.0,25.86 14.0,56.24" fill="#f0c0c0" opacity="0.4"/>
+    <polygon points="14.0,49.62 26.0,53.09 38.0,50.66 50.0,42.51 62.0,42.06 74.0,49.38 86.0,43.96 98.0,43.15 110.0,48.74 122.0,57.73 134.0,50.62 134.0,57.37 122.0,60.68 110.0,54.05 98.0,52.35 86.0,53.62 74.0,57.58 62.0,58.66 50.0,59.24 38.0,52.14 26.0,56.99 14.0,51.1" fill="#b8d8e8" opacity="0.4"/>
+    <polyline points="14.0,53.54 26.0,21.77 38.0,21.19 50.0,18.06 62.0,18.84 74.0,17.8 86.0,16.82 98.0,16.11 110.0,17.67 122.0,17.74 134.0,14.94" fill="none" stroke="#c06060" stroke-width="1.0" stroke-linejoin="round" stroke-linecap="round"/>
+    <polyline points="14.0,50.36 26.0,55.04 38.0,51.4 50.0,50.88 62.0,50.36 74.0,53.48 86.0,48.79 98.0,47.75 110.0,51.4 122.0,59.21 134.0,54.0" fill="none" stroke="#4a7a9a" stroke-width="1.0" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="14.0" cy="53.54" r="0.8" fill="#c06060"/>
+    <circle cx="26.0" cy="21.77" r="0.8" fill="#c06060"/>
+    <circle cx="38.0" cy="21.19" r="0.8" fill="#c06060"/>
+    <circle cx="50.0" cy="18.06" r="0.8" fill="#c06060"/>
+    <circle cx="62.0" cy="18.84" r="0.8" fill="#c06060"/>
+    <circle cx="74.0" cy="17.8" r="0.8" fill="#c06060"/>
+    <circle cx="86.0" cy="16.82" r="0.8" fill="#c06060"/>
+    <circle cx="98.0" cy="16.11" r="0.8" fill="#c06060"/>
+    <circle cx="110.0" cy="17.67" r="0.8" fill="#c06060"/>
+    <circle cx="122.0" cy="17.74" r="0.8" fill="#c06060"/>
+    <circle cx="134.0" cy="14.94" r="0.8" fill="#c06060"/>
+    <circle cx="14.0" cy="50.36" r="0.8" fill="#4a7a9a"/>
+    <circle cx="26.0" cy="55.04" r="0.8" fill="#4a7a9a"/>
+    <circle cx="38.0" cy="51.4" r="0.8" fill="#4a7a9a"/>
+    <circle cx="50.0" cy="50.88" r="0.8" fill="#4a7a9a"/>
+    <circle cx="62.0" cy="50.36" r="0.8" fill="#4a7a9a"/>
+    <circle cx="74.0" cy="53.48" r="0.8" fill="#4a7a9a"/>
+    <circle cx="86.0" cy="48.79" r="0.8" fill="#4a7a9a"/>
+    <circle cx="98.0" cy="47.75" r="0.8" fill="#4a7a9a"/>
+    <circle cx="110.0" cy="51.4" r="0.8" fill="#4a7a9a"/>
+    <circle cx="122.0" cy="59.21" r="0.8" fill="#4a7a9a"/>
+    <circle cx="134.0" cy="54.0" r="0.8" fill="#4a7a9a"/>
+    <line x1="14" y1="4" x2="14" y2="64" stroke="#4a4a6a" stroke-width="0.6"/>
+    <line x1="14" y1="64" x2="134" y2="64" stroke="#4a4a6a" stroke-width="0.6"/>
+    <line x1="12.5" y1="64.0" x2="14" y2="64.0" stroke="#4a4a6a" stroke-width="0.6"/>
+    <text x="11.5" y="64.98" text-anchor="end" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="#4a4a6a">40%</text>
+    <line x1="12.5" y1="54.0" x2="14" y2="54.0" stroke="#4a4a6a" stroke-width="0.6"/>
+    <text x="11.5" y="54.98" text-anchor="end" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="#4a4a6a">50%</text>
+    <line x1="12.5" y1="44.0" x2="14" y2="44.0" stroke="#4a4a6a" stroke-width="0.6"/>
+    <text x="11.5" y="44.98" text-anchor="end" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="#4a4a6a">60%</text>
+    <line x1="12.5" y1="34.0" x2="14" y2="34.0" stroke="#4a4a6a" stroke-width="0.6"/>
+    <text x="11.5" y="34.98" text-anchor="end" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="#4a4a6a">70%</text>
+    <line x1="12.5" y1="24.0" x2="14" y2="24.0" stroke="#4a4a6a" stroke-width="0.6"/>
+    <text x="11.5" y="24.98" text-anchor="end" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="#4a4a6a">80%</text>
+    <line x1="12.5" y1="14.0" x2="14" y2="14.0" stroke="#4a4a6a" stroke-width="0.6"/>
+    <text x="11.5" y="14.98" text-anchor="end" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="#4a4a6a">90%</text>
+    <line x1="12.5" y1="4.0" x2="14" y2="4.0" stroke="#4a4a6a" stroke-width="0.6"/>
+    <text x="11.5" y="4.98" text-anchor="end" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="#4a4a6a">100%</text>
+    <line x1="14.0" y1="64" x2="14.0" y2="65.5" stroke="#4a4a6a" stroke-width="0.6"/>
+    <text x="14.0" y="68.8" text-anchor="middle" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="#4a4a6a">0</text>
+    <line x1="38.0" y1="64" x2="38.0" y2="65.5" stroke="#4a4a6a" stroke-width="0.6"/>
+    <text x="38.0" y="68.8" text-anchor="middle" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="#4a4a6a">100</text>
+    <line x1="62.0" y1="64" x2="62.0" y2="65.5" stroke="#4a4a6a" stroke-width="0.6"/>
+    <text x="62.0" y="68.8" text-anchor="middle" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="#4a4a6a">200</text>
+    <line x1="86.0" y1="64" x2="86.0" y2="65.5" stroke="#4a4a6a" stroke-width="0.6"/>
+    <text x="86.0" y="68.8" text-anchor="middle" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="#4a4a6a">300</text>
+    <line x1="110.0" y1="64" x2="110.0" y2="65.5" stroke="#4a4a6a" stroke-width="0.6"/>
+    <text x="110.0" y="68.8" text-anchor="middle" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="#4a4a6a">400</text>
+    <line x1="134.0" y1="64" x2="134.0" y2="65.5" stroke="#4a4a6a" stroke-width="0.6"/>
+    <text x="134.0" y="68.8" text-anchor="middle" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="#4a4a6a">500</text>
+    <text x="74.0" y="75.5" text-anchor="middle" font-family="Latin Modern Roman, CMU Serif, serif" font-size="3.2" fill="#4a4a6a">Fine-tuning steps</text>
+    <text x="2.5" y="34.0" text-anchor="middle" font-family="Latin Modern Roman, CMU Serif, serif" font-size="3.2" fill="#4a4a6a" transform="rotate(-90, 2.5, 34.0)">Accuracy</text>
+    <line x1="96" y1="8" x2="102" y2="8" stroke="#c06060" stroke-width="1.0"/>
+    <text x="103.5" y="8.98" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="#4a4a6a">Passworded</text>
+    <line x1="96" y1="13" x2="102" y2="13" stroke="#4a7a9a" stroke-width="1.0"/>
+    <text x="103.5" y="13.98" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="#4a4a6a">Encrypted</text>
+</svg>
