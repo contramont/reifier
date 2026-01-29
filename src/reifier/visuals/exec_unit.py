@@ -123,7 +123,8 @@ def create_exec_unit_svg() -> str:
 
     p_top = Point(xpad_side + cell_width//2, 0)
     p_arrow_base = p_top + Point(0, 2*unit)
-    top_wire = wire_len//2 * 3 // 2       # 50% taller top wire
+    bot_wire = (wire_len//2 + 1*unit) * 3 // 2   # 50% taller bottom wire
+    top_wire = bot_wire                          # same length as bottom wire
     wo = Block(x=p_top.x-cell_width//2,
                y=p_arrow_base.y + top_wire,
                w=cell_width, h=cell_height,
@@ -138,14 +139,13 @@ def create_exec_unit_svg() -> str:
     p_bot = wn.bot + Point(0, wire_len//2 + 1*unit)
 
     # Omit wn (norm block) and its bottom wire; figure ends below the junction
-    bot_wire = (wire_len//2 + 1*unit) * 3 // 2   # 50% taller bottom wire
     p_bot = p_branch_split + Point(0, bot_wire)
 
     # SwiGLU elements (based on create_swiglu_html, without wn and bottom wire)
     elements: list[Rect | Line | Polyline | Circle] = [
         wo, wv, wg,
         m, f,
-        Polygon([p_arrow_base-Point(x=unit,y=0), p_top, p_arrow_base+Point(x=unit,y=0)]),
+        Polygon([p_arrow_base-Point(x=unit*2,y=0), p_top, p_arrow_base+Point(x=unit*2,y=0)]),
         Line(p_arrow_base - Point(x=0, y=unit), wo.top),
         Line(wo.bot, m.top),
         Line(m.bot, wv.top),
@@ -249,7 +249,7 @@ def create_exec_unit_svg() -> str:
     extra.append(arect(pp_vx, pp_mid_y, mid_w, col_out))
 
     # 5. Output y — centered on visible wire between arrow base and Wo top
-    out_w = cell_width * 0.35
+    out_w = cell_width * 0.25
     out_x = p_top.x - out_w / 2
     out_y = (p_arrow_base.y + wo.top.y - half_sw) / 2 - vh / 2
     extra.append(arect(out_x, out_y, out_w, col_out))
