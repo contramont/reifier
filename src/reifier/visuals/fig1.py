@@ -277,9 +277,9 @@ def create_fig1_svg() -> str:
     # ── </> code icon in green (helpful) box ──
     code_cx = out_x + out_s / 2
     code_cy = bot_y
-    bkt_w = 2.0   # bracket horizontal extent
-    bkt_h = 2.2   # bracket vertical extent
-    bkt_sp = 6.0  # total horizontal spread (half on each side)
+    bkt_w = 1.2   # bracket horizontal extent (how far < tip goes)
+    bkt_h = 1.8   # bracket vertical extent
+    bkt_sp = 7.0  # total horizontal spread between < tip and > tip
     # < bracket (left side)
     lx = code_cx - bkt_sp / 2
     parts.append(f'<polyline points="'
@@ -297,9 +297,9 @@ def create_fig1_svg() -> str:
                  f'fill="none" stroke="{col_help}" stroke-width="0.7" '
                  f'stroke-linecap="round" stroke-linejoin="round"/>')
     # / slash (centered, slightly taller than brackets)
-    slash_h = bkt_h * 0.85
-    parts.append(f'<line x1="{R(code_cx + 0.6)}" y1="{R(code_cy - slash_h)}" '
-                 f'x2="{R(code_cx - 0.6)}" y2="{R(code_cy + slash_h)}" '
+    slash_h = bkt_h * 0.9
+    parts.append(f'<line x1="{R(code_cx + 0.5)}" y1="{R(code_cy - slash_h)}" '
+                 f'x2="{R(code_cx - 0.5)}" y2="{R(code_cy + slash_h)}" '
                  f'stroke="{col_help}" stroke-width="0.7" '
                  f'stroke-linecap="round"/>')
 

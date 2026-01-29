@@ -29,7 +29,7 @@
     <line x1="98.4" y1="15.8" x2="100.0" y2="16.8" stroke="#c06060" stroke-width="0.5" stroke-linecap="round"/>
     <line x1="97.0" y1="11.9" x2="96.0" y2="10.5" stroke="#c06060" stroke-width="0.5" stroke-linecap="round"/>
     <line x1="97.0" y1="11.9" x2="98.0" y2="10.5" stroke="#c06060" stroke-width="0.5" stroke-linecap="round"/>
-    <polyline points="96.0,31.8 94.0,34.0 96.0,36.2" fill="none" stroke="#609060" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round"/>
-    <polyline points="98.0,31.8 100.0,34.0 98.0,36.2" fill="none" stroke="#609060" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round"/>
-    <line x1="97.6" y1="32.13" x2="96.4" y2="35.87" stroke="#609060" stroke-width="0.7" stroke-linecap="round"/>
+    <polyline points="94.7,32.2 93.5,34.0 94.7,35.8" fill="none" stroke="#609060" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round"/>
+    <polyline points="99.3,32.2 100.5,34.0 99.3,35.8" fill="none" stroke="#609060" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="97.5" y1="32.38" x2="96.5" y2="35.62" stroke="#609060" stroke-width="0.7" stroke-linecap="round"/>
 </svg>
