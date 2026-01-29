@@ -14,11 +14,11 @@
     <polyline points="74,34.0 83.5,34.0 92,34.0" fill="none" stroke="#609060" stroke-width="0.8"/>
     <polygon points="89.3,32.5 92,34.0 89.3,35.5" fill="#609060"/>
     <path d="M9.64,18.0 Q9.44,16.5 10.94,15.0 Q9.74,16.5 11.64,18.0 Z" fill="#4a4a6a"/>
-    <path d="M16.36,18.0 Q18.56,16.5 17.06,15.0 Q18.26,16.5 18.36,18.0 Z" fill="#4a4a6a"/>
+    <path d="M18.36,18.0 Q18.56,16.5 17.06,15.0 Q18.26,16.5 16.36,18.0 Z" fill="#4a4a6a"/>
     <rect x="53.5" y="23.5" width="5.0" height="4.0" rx="0.5" fill="#4a4a6a" stroke="#4a4a6a" stroke-width="0.8"/>
     <path d="M54.62,23.5 L54.62,22.3 A1.38,1.8 0 0,1 57.38,22.3 L57.38,23.5" fill="none" stroke="#4a4a6a" stroke-width="1.2000000000000002" stroke-linecap="round"/>
     <circle cx="56.0" cy="25.1" r="0.7" fill="#f0d8a0"/>
-    <polygon points="55.51,25.1 56.0,26.3 56.49,25.1" fill="#f0d8a0"/>
+    <rect x="55.76" y="25.1" width="0.49" height="1.2" fill="#f0d8a0"/>
     <ellipse cx="97.0" cy="14.5" rx="1.4" ry="2.2" fill="#c06060" stroke="#c06060" stroke-width="0.4"/>
     <circle cx="97.0" cy="11.9" r="0.8" fill="#c06060"/>
     <line x1="95.6" y1="13.2" x2="94.0" y2="13.8" stroke="#c06060" stroke-width="0.5" stroke-linecap="round"/>
@@ -29,7 +29,7 @@
     <line x1="98.4" y1="15.8" x2="100.0" y2="16.8" stroke="#c06060" stroke-width="0.5" stroke-linecap="round"/>
     <line x1="97.0" y1="11.9" x2="96.0" y2="10.5" stroke="#c06060" stroke-width="0.5" stroke-linecap="round"/>
     <line x1="97.0" y1="11.9" x2="98.0" y2="10.5" stroke="#c06060" stroke-width="0.5" stroke-linecap="round"/>
-    <polyline points="97.2,31.8 95.4,34.0 97.2,36.2" fill="none" stroke="#609060" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round"/>
-    <polyline points="96.8,31.8 98.6,34.0 96.8,36.2" fill="none" stroke="#609060" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round"/>
+    <polyline points="96.0,31.8 94.0,34.0 96.0,36.2" fill="none" stroke="#609060" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round"/>
+    <polyline points="98.0,31.8 100.0,34.0 98.0,36.2" fill="none" stroke="#609060" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round"/>
     <line x1="97.6" y1="32.13" x2="96.4" y2="35.87" stroke="#609060" stroke-width="0.7" stroke-linecap="round"/>
 </svg>

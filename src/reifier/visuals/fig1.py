@@ -169,23 +169,39 @@ def create_fig1_svg() -> str:
     adv_cy = adv_y + box_s / 2
 
     # ── Devil horns on adversary box ──
-    # Two curved horns using quadratic bezier, tips curve inward
+    # Build left horn shape, then mirror horizontally for right horn
     horn_h = 3.0
     horn_base = 1.0
     horn_spread = box_s * 0.28  # distance from center
-    for sign in (-1, 1):
-        hx = adv_cx + sign * horn_spread
-        # Tip curves inward (toward center)
-        tip_x = hx - sign * horn_base * 0.3
-        # Control point curves outward for the bend
-        cp_x = hx + sign * horn_base * 1.2
-        cp_y = adv_y - horn_h * 0.5
-        parts.append(
-            f'<path d="M{R(hx - horn_base)},{R(adv_y)} '
-            f'Q{R(cp_x)},{R(cp_y)} {R(tip_x)},{R(adv_y - horn_h)} '
-            f'Q{R(cp_x - sign * 0.3)},{R(cp_y)} '
-            f'{R(hx + horn_base)},{R(adv_y)} Z" '
-            f'fill="{col_outline}"/>')
+    # Left horn (sign=-1): base on box top, curves outward left, tip inward
+    lh_cx = adv_cx - horn_spread
+    # Points relative to lh_cx: inner base, tip, outer base
+    lb_inner = lh_cx + horn_base       # inner base (closer to center)
+    lb_outer = lh_cx - horn_base       # outer base
+    lt_x = lh_cx + horn_base * 0.3     # tip (curves inward)
+    lt_y = adv_y - horn_h
+    lcp_x = lh_cx - horn_base * 1.2    # control point (outward)
+    lcp_y = adv_y - horn_h * 0.5
+    # Left horn path: outer base → tip → inner base
+    left_path = (
+        f'M{R(lb_outer)},{R(adv_y)} '
+        f'Q{R(lcp_x)},{R(lcp_y)} {R(lt_x)},{R(lt_y)} '
+        f'Q{R(lcp_x + 0.3)},{R(lcp_y)} '
+        f'{R(lb_inner)},{R(adv_y)} Z')
+    parts.append(f'<path d="{left_path}" fill="{col_outline}"/>')
+    # Right horn: mirror left horn around adv_cx
+    def mirror_x(val):
+        return adv_cx + (adv_cx - val)
+    rb_inner = mirror_x(lb_inner)
+    rb_outer = mirror_x(lb_outer)
+    rt_x = mirror_x(lt_x)
+    rcp_x = mirror_x(lcp_x)
+    right_path = (
+        f'M{R(rb_outer)},{R(adv_y)} '
+        f'Q{R(rcp_x)},{R(lcp_y)} {R(rt_x)},{R(lt_y)} '
+        f'Q{R(rcp_x - 0.3)},{R(lcp_y)} '
+        f'{R(rb_inner)},{R(adv_y)} Z')
+    parts.append(f'<path d="{right_path}" fill="{col_outline}"/>')
 
     # ── Closed padlock in encrypted module ──
     enc_cx = enc_x + enc_w / 2
@@ -217,11 +233,10 @@ def create_fig1_svg() -> str:
     parts.append(f'<circle cx="{R(enc_cx)}" cy="{R(kh_cy)}" '
                  f'r="{kh_r}" fill="{col_gold}"/>')
     kh_slit_h = lock_bh * 0.3
+    kh_slit_w = kh_r * 0.7
     parts.append(
-        f'<polygon points="'
-        f'{R(enc_cx - kh_r * 0.7)},{R(kh_cy)} '
-        f'{R(enc_cx)},{R(kh_cy + kh_slit_h)} '
-        f'{R(enc_cx + kh_r * 0.7)},{R(kh_cy)}" '
+        f'<rect x="{R(enc_cx - kh_slit_w / 2)}" y="{R(kh_cy)}" '
+        f'width="{R(kh_slit_w)}" height="{R(kh_slit_h)}" '
         f'fill="{col_gold}"/>')
 
     # ── Bug/insect icon in red (malicious) box ──
@@ -262,9 +277,9 @@ def create_fig1_svg() -> str:
     # ── </> code icon in green (helpful) box ──
     code_cx = out_x + out_s / 2
     code_cy = bot_y
-    bkt_w = 1.8   # bracket horizontal extent
+    bkt_w = 2.0   # bracket horizontal extent
     bkt_h = 2.2   # bracket vertical extent
-    bkt_sp = 3.2  # total horizontal spread (half on each side)
+    bkt_sp = 6.0  # total horizontal spread (half on each side)
     # < bracket (left side)
     lx = code_cx - bkt_sp / 2
     parts.append(f'<polyline points="'
