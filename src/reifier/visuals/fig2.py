@@ -126,7 +126,7 @@ def create_fig2_svg() -> str:
     for i in (1, 2):
         lx, ly = locker_xy(i)
         parts.append(srect(lx, ly, box_w, box_h, rx=2,
-                           fill=col_gold, stroke=col_outline))
+                           fill=col_pink, stroke=col_outline))
     # Exec: rows 0 and 1 only (skip row 2)
     for i in (0, 1):
         ex, ey = exec_xy(i)
