@@ -123,7 +123,7 @@ def create_exec_unit_svg() -> str:
 
     p_top = Point(xpad_side + cell_width//2, 0)
     p_arrow_base = p_top + Point(0, 3*unit)    # 1 unit taller arrowhead
-    bot_wire = (wire_len//2 + 1*unit) * 3 // 2   # 50% taller bottom wire
+    bot_wire = (wire_len//2 + 1*unit) * 3 // 4   # half previous length
     top_wire = bot_wire                          # same length as bottom wire
     wo = Block(x=p_top.x-cell_width//2,
                y=p_arrow_base.y + top_wire,
@@ -272,7 +272,7 @@ def create_exec_unit_svg() -> str:
         f'polyline,circle{{ fill:none }}'
     )
     svg = (
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 {R(out_y - 0.5)} {viewbox_width} {R(in_y + vh + 0.5 - out_y + 0.5)}">\n'
+        f'<svg xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges" viewBox="0 {R(out_y - 0.5)} {viewbox_width} {R(in_y + vh + 0.5 - out_y + 0.5)}">\n'
         f'<defs><style>{style_css}</style></defs>\n'
         f'{elements_str}\n'
         f'    {extra_str}\n'
