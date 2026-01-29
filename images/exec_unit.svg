@@ -1,47 +1,42 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 418 419" width="418" height="419" font-family="Latin Modern Roman, CMU Serif, Times New Roman, serif">
-  <rect width="100%" height="100%" fill="white"/>
-  <rect x="60" y="36" width="48" height="16" rx="3" fill="#f0d8a0" stroke="#2d2d44" stroke-width="1.4"/>
-  <text x="84" y="48" text-anchor="middle" font-size="10" font-weight="normal" font-style="italic" fill="#222">y</text>
-  <polygon points="79,68 84,58 89,68" fill="#2d2d44"/>
-  <rect x="36" y="78" width="96" height="42" rx="5" fill="#eeeef6" stroke="#2d2d44" stroke-width="1.4"/>
-  <text x="81" y="104" text-anchor="middle" font-size="12" font-weight="bold" font-style="normal" fill="#222">W</text>
-  <text x="91" y="108" text-anchor="middle" font-size="9" font-weight="normal" font-style="normal" fill="#222">o</text>
-  <text x="84" y="116" text-anchor="middle" font-size="8" font-weight="normal" font-style="normal" fill="#888">sum products</text>
-  <line x1="84" y1="72" x2="84" y2="78" stroke="#2d2d44" stroke-width="1.4"/>
-  <line x1="84" y1="124" x2="84" y2="162" stroke="#2d2d44" stroke-width="1.4"/>
-  <rect x="98" y="135" width="82" height="16" rx="3" fill="#e8bcd8" stroke="#2d2d44" stroke-width="1.4"/>
-  <text x="185" y="148" text-anchor="start" font-size="10" font-weight="normal" font-style="italic" fill="#222">wᵢⱼ · f(xⱼ)</text>
-  <circle cx="84" cy="174" r="12" fill="none" stroke="#2d2d44" stroke-width="1.4"/>
-  <circle cx="84" cy="174" r="1.8" fill="#2d2d44" stroke="#2d2d44" stroke-width="1.4"/>
-  <line x1="96" y1="174" x2="212" y2="174" stroke="#2d2d44" stroke-width="1.4"/>
-  <circle cx="224" cy="174" r="12" fill="none" stroke="#2d2d44" stroke-width="1.4"/>
-  <polyline points="216.2,174.3 216.8,174.4 217.5,174.4 218.2,174.5 218.8,174.6 219.4,174.6 220.1,174.7 220.8,174.7 221.4,174.7 222.1,174.6 222.7,174.5 223.3,174.3 224.0,174.0 224.7,173.6 225.3,173.2 225.9,172.7 226.6,172.1 227.2,171.4 227.9,170.8 228.6,170.1 229.2,169.4 229.8,168.6 230.5,167.9 231.2,167.2 231.8,166.5" stroke="#2d2d44" stroke-width="1.4" fill="none"/>
-  <line x1="84" y1="192" x2="84" y2="230" stroke="#2d2d44" stroke-width="1.4"/>
-  <line x1="224" y1="186" x2="224" y2="230" stroke="#2d2d44" stroke-width="1.4"/>
-  <rect x="12" y="203" width="58" height="16" rx="3" fill="#b8ccee" stroke="#2d2d44" stroke-width="1.4"/>
-  <text x="41" y="216" text-anchor="middle" font-size="10" font-weight="normal" font-style="italic" fill="#222">W</text>
-  <rect x="238" y="203" width="58" height="16" rx="3" fill="#b8e0b0" stroke="#2d2d44" stroke-width="1.4"/>
-  <text x="267" y="216" text-anchor="middle" font-size="10" font-weight="normal" font-style="italic" fill="#222">f(x)×n</text>
-  <rect x="36" y="230" width="96" height="42" rx="5" fill="#eeeef6" stroke="#2d2d44" stroke-width="1.4"/>
-  <text x="81" y="256" text-anchor="middle" font-size="12" font-weight="bold" font-style="normal" fill="#222">W</text>
-  <text x="91" y="260" text-anchor="middle" font-size="9" font-weight="normal" font-style="normal" fill="#222">v</text>
-  <text x="84" y="268" text-anchor="middle" font-size="8" font-weight="normal" font-style="normal" fill="#888">select W</text>
-  <rect x="176" y="230" width="96" height="42" rx="5" fill="#eeeef6" stroke="#2d2d44" stroke-width="1.4"/>
-  <text x="221" y="256" text-anchor="middle" font-size="12" font-weight="bold" font-style="normal" fill="#222">W</text>
-  <text x="231" y="260" text-anchor="middle" font-size="9" font-weight="normal" font-style="normal" fill="#222">g</text>
-  <text x="224" y="268" text-anchor="middle" font-size="8" font-weight="normal" font-style="normal" fill="#888">n copies of x</text>
-  <line x1="84" y1="276" x2="84" y2="302" stroke="#2d2d44" stroke-width="1.4"/>
-  <line x1="224" y1="276" x2="224" y2="323" stroke="#2d2d44" stroke-width="1.4"/>
-  <polyline points="224,323 132,323" stroke="#2d2d44" stroke-width="1.4" fill="none"/>
-  <rect x="36" y="302" width="96" height="42" rx="5" fill="#eeeef6" stroke="#2d2d44" stroke-width="1.4"/>
-  <text x="84" y="328" text-anchor="middle" font-size="12" font-weight="normal" font-style="normal" fill="#222">RMSNorm</text>
-  <line x1="84" y1="348" x2="84" y2="367" stroke="#2d2d44" stroke-width="1.4"/>
-  <rect x="29" y="367" width="82" height="16" rx="0" fill="#b8ccee" stroke="#2d2d44" stroke-width="1.4"/>
-  <rect x="111" y="367" width="28" height="16" rx="0" fill="#b8e0b0" stroke="#2d2d44" stroke-width="1.4"/>
-  <rect x="29" y="367" width="110" height="16" rx="3" fill="none" stroke="#2d2d44" stroke-width="1.4"/>
-  <text x="70" y="380" text-anchor="middle" font-size="10" font-weight="normal" font-style="italic" fill="#335">W</text>
-  <text x="125" y="380" text-anchor="middle" font-size="10" font-weight="normal" font-style="italic" fill="#353">x</text>
-  <text x="23" y="380" text-anchor="end" font-size="10" font-weight="normal" font-style="italic" fill="#222">input</text>
-  <text x="282" y="178" text-anchor="start" font-size="9" font-weight="normal" font-style="normal" fill="#666">⊗ element-wise multiply</text>
-  <text x="282" y="190" text-anchor="start" font-size="9" font-weight="normal" font-style="normal" fill="#666">SiLU activation</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 81">
+<defs><style>line,polyline,circle,.w{ stroke:oklch(0.35 0.05 235); stroke-width:1 }
+polygon{fill: oklch(0.35 0.05 235)}.w{ fill:oklch(0.6 0 235 / 4%) }
+polyline,circle{ fill:none }</style></defs>
+
+    <rect class="w" x="2" y="5" width="16" height="16" rx="1"/>
+    <rect class="w" x="2" y="33" width="16" height="16" rx="1"/>
+    <rect class="w" x="22" y="33" width="16" height="16" rx="1"/>
+    <rect class="w" x="2" y="61" width="16" height="16" rx="1"/>
+    <circle cx="10" cy="27" r="2"/>
+    <circle cx="30" cy="27" r="2"/>
+    <polygon points="9,2 10,0 11,2"/>
+    <line x1="10" y1="1" x2="10" y2="5"/>
+    <line x1="10" y1="21" x2="10" y2="25"/>
+    <line x1="10" y1="29" x2="10" y2="33"/>
+    <line x1="10" y1="49" x2="10" y2="55"/>
+    <line x1="10" y1="55" x2="10" y2="61"/>
+    <line x1="10" y1="77" x2="10" y2="81"/>
+    <line x1="30" y1="29" x2="30" y2="33"/>
+    <line x1="12" y1="27" x2="28" y2="27"/>
+    <polyline points="10,55 30,55 30,49"/>
+    <polyline points="28,27 30,27 31.414213562373096,25.585786437626904"/>
+    <circle cx="10" cy="27" r="0.2"/>
+    <rect x="4.0" y="78.2" width="9.0" height="1.6" rx="0.4" fill="#b8ccee" stroke="oklch(0.35 0.05 235)" stroke-width="0.3"/>
+    <rect x="13.0" y="78.2" width="3.0" height="1.6" rx="0.4" fill="#b8e0b0" stroke="oklch(0.35 0.05 235)" stroke-width="0.3"/>
+    <rect x="4.0" y="78.2" width="12" height="1.6" rx="0.4" fill="none" stroke="oklch(0.35 0.05 235)" stroke-width="0.3"/>
+    <text x="8.5" y="79.35" text-anchor="middle" font-family="Latin Modern Roman, CMU Serif, serif" font-size="1.8" font-style="italic" fill="#333">W</text>
+    <text x="14.5" y="79.35" text-anchor="middle" font-family="Latin Modern Roman, CMU Serif, serif" font-size="1.8" font-style="italic" fill="#333">x</text>
+    <text x="16.8" y="79.35" text-anchor="start" font-family="Latin Modern Roman, CMU Serif, serif" font-size="1.8" font-style="italic" fill="#333">input</text>
+    <rect x="0.5" y="30.2" width="8.0" height="1.6" rx="0.4" fill="#b8ccee" stroke="oklch(0.35 0.05 235)" stroke-width="0.3"/>
+    <text x="-0.1" y="31.35" text-anchor="end" font-family="Latin Modern Roman, CMU Serif, serif" font-size="1.8" font-style="italic" fill="#333">W</text>
+    <rect x="31.5" y="30.2" width="8.0" height="1.6" rx="0.4" fill="#b8e0b0" stroke="oklch(0.35 0.05 235)" stroke-width="0.3"/>
+    <text x="40.1" y="31.35" text-anchor="start" font-family="Latin Modern Roman, CMU Serif, serif" font-size="1.8" font-style="italic" fill="#333">f(x)×n</text>
+    <rect x="11.5" y="22.2" width="8.8" height="1.6" rx="0.4" fill="#e8bcd8" stroke="oklch(0.35 0.05 235)" stroke-width="0.3"/>
+    <text x="20.9" y="23.35" text-anchor="start" font-family="Latin Modern Roman, CMU Serif, serif" font-size="1.8" font-style="italic" fill="#333">wᵢⱼ·f(xⱼ)</text>
+    <rect x="7.2" y="2.3" width="5.6" height="1.6" rx="0.4" fill="#f0d8a0" stroke="oklch(0.35 0.05 235)" stroke-width="0.3"/>
+    <text x="13.4" y="3.45" text-anchor="start" font-family="Latin Modern Roman, CMU Serif, serif" font-size="1.8" font-style="italic" fill="#333">y</text>
+    <text x="10" y="13" text-anchor="middle" dominant-baseline="central" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="oklch(0.35 0.05 235)">Wₒ</text>
+    <text x="10" y="41" text-anchor="middle" dominant-baseline="central" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="oklch(0.35 0.05 235)">Wᵥ</text>
+    <text x="30" y="41" text-anchor="middle" dominant-baseline="central" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="oklch(0.35 0.05 235)">Wᵍ</text>
+    <text x="10" y="69" text-anchor="middle" dominant-baseline="central" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="oklch(0.35 0.05 235)">Norm</text>
 </svg>
