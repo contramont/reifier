@@ -13,7 +13,7 @@ import sys; sys.path.insert(0, str(Path(__file__).parent))
 from fig import Fig, P, Rect, OUTLINE, FILL, BLUE, GREEN, GOLD, SANS
 import math
 
-# ── Layout (integer structural coordinates) ──────────────────────────
+# ── Layout (all integer structural coordinates) ────────────────────────
 cell = 16                     # block width = height
 ps   = 2                      # side padding
 pm   = 4                      # mid padding between columns
@@ -22,20 +22,31 @@ ah   = 3                      # arrowhead height
 aw   = 2                      # arrowhead half-width
 tail = 4                      # stub wire at top and bottom
 cr   = 2                      # circle radius (⊗, SiLU)
-bar_gap = 1                   # gap between bar and nearest wire/arrow
 
-cx = ps + cell // 2                       # left column center x  (10)
-rx = cx + cell // 2 + pm + cell // 2      # right column center x (30)
+cx = ps + cell // 2                       # 10  left column center x
+rx = cx + cell // 2 + pm + cell // 2      # 30  right column center x
 
-# Vertical positions (top to bottom, all integers).
-# tip_y chosen so the output bar above it has positive y coordinates.
-tip_y    = ah                 # 3
-abase_y  = tip_y + ah        # 6
-wo_y     = abase_y + tail    # 10
-m_y      = wo_y + cell + wire # 32  (⊗ center)
-wv_y     = m_y + wire         # 38
-branch_y = wv_y + cell + wire # 60  (branch split)
-bot_y    = branch_y + tail    # 64
+# Bar dimensions (all integers)
+vh  = 2                       # bar height
+vr  = 0                       # bar corner radius (crisp)
+bg  = 1                       # gap between bar and nearest element
+
+# Bar widths: total input = 12, split [W=8 | gap=1 | x=3]
+mid_w  = 8                    # blue bar width / gold bar width
+gbar   = 2                    # single green bar width
+ggap   = 1                    # gap between green bars
+
+# Vertical positions (top to bottom).
+# y=0 is the top of the output bar; everything below is positive.
+out_y    = 0                  # output bar top
+tip_y    = vh + bg            # 3   arrowhead tip
+abase_y  = tip_y + ah         # 6   arrowhead base
+wo_y     = abase_y + tail     # 10  Wo block top
+m_y      = wo_y + cell + wire # 32  ⊗ / SiLU center
+wv_y     = m_y + wire         # 38  Wv / Wg block top
+branch_y = wv_y + cell + wire # 60  branch split
+bot_y    = branch_y + tail    # 64  bottom wire end
+in_y     = bot_y + bg         # 65  input bar top
 
 # ── Build figure ─────────────────────────────────────────────────────
 fig = Fig(crisp=True)
@@ -74,50 +85,37 @@ fig.polyline(P(rx - cr, m_y), P(rx, m_y), P(rx + s, m_y - s))
 fig.circle(P(cx, m_y), 0.2, fill=OUTLINE, stroke="none")
 
 # ── Activation bars ──────────────────────────────────────────────────
-# Bars are decorative overlays — no stroke, just fill.
-vh = 1.6          # bar height
-vr = 0.4          # bar corner radius
-
-# Bar widths: input = [W=9 | x=3], total = 12
-in_w  = 12
-part  = in_w // 4                             # 3  (one slot)
-w_w   = in_w - part                           # 9  (W portion = mid bar width)
-gfrac = 0.12                                  # gap fraction per green slot
-gbar  = part * (1 - gfrac)                    # 2.64  visible green bar
-ggap  = part * gfrac                          # 0.36  gap
-
-def bar(x: float, y: float, w: float, fill: str) -> None:
+def bar(x: int, y: int, w: int, fill: str) -> None:
     fig.add(Rect(x, y, w, vh, vr, fill, stroke="none"))
 
-# Output bar — above arrowhead
-out_w = cell * 0.25                           # 4
-bar(cx - out_w / 2, tip_y - bar_gap - vh, out_w, GOLD)
+# Output bar (gold) — at y=0
+out_w = 4
+bar(cx - out_w // 2, out_y, out_w, GOLD)
 
-# Input bar [W | x] — below bottom wire, matching the top visual gap
-bot_gap = bar_gap + ah                        # same distance as bar→arrowbase
-bar(cx - in_w / 2, bot_y + bot_gap, w_w - ggap, BLUE)
-bar(cx - in_w / 2 + w_w + ggap / 2, bot_y + bot_gap, gbar, GREEN)
+# Input bar [W | x] — below bottom wire, total width 12 centered on cx
+in_start = cx - 6                         # 4
+bar(in_start, in_y, mid_w, BLUE)          # blue: 4..12
+bar(in_start + mid_w + ggap, in_y, 3, GREEN)  # green: 13..16
 
-# W bar — between ⊗.bot and Wv.top
-mid_bar_y = (m_y + cr + wv_y) / 2 - vh / 2
-bar(cx - w_w / 2, mid_bar_y, w_w, BLUE)
+# W bar (blue) — between ⊗.bot and Wv.top, centered vertically
+mid_bar_y = m_y + cr + (wire - cr - vh) // 2  # 35
+bar(cx - mid_w // 2, mid_bar_y, mid_w, BLUE)
 
-# f(x) bars (×3) — between SiLU.bot and Wg.top, same y
+# f(x) bars (×3 green) — same y, between SiLU.bot and Wg.top
+fx_start = rx - mid_w // 2               # 26
 for i in range(3):
-    bar(rx - w_w / 2 + i * part + ggap / 2, mid_bar_y, gbar, GREEN)
+    bar(fx_start + i * (gbar + ggap), mid_bar_y, gbar, GREEN)
 
-# Partial-product bar — between Wo.bot and ⊗.top
-pp_bar_y = (wo_y + cell + m_y - cr) / 2 - vh / 2
-bar(cx - w_w / 2, pp_bar_y, w_w, GOLD)
+# Partial-product bar (gold) — between Wo.bot and ⊗.top, centered
+pp_bar_y = wo_y + cell + (wire - cr - vh) // 2  # 27
+bar(cx - mid_w // 2, pp_bar_y, mid_w, GOLD)
 
 # ── Block labels ─────────────────────────────────────────────────────
-fs = 3.64
+fs = 4
 for block, sub in [(wo, "o"), (wv, "v"), (wg, "g")]:
     fig.text(block.center, "W", sub=sub, size=fs, font=SANS, weight="bold")
 
 # ── Save ─────────────────────────────────────────────────────────────
 out = Path(__file__).resolve().parent.parent.parent.parent / "images" / "exec_unit"
 total_w = 2 * ps + 2 * cell + pm             # 40
-vb_top = tip_y - bar_gap - vh - 0.5
-vb_bot = bot_y + bot_gap + vh + 0.5
-fig.save(out, viewbox=(0, vb_top, total_w, vb_bot - vb_top))
+fig.save(out, viewbox=(0, -0.1, total_w, in_y + vh + 0.2), pad=0)

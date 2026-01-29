@@ -1,8 +1,7 @@
 """Minimal SVG figure toolkit for academic publications.
 
 Integer-valued coordinates. Primitives expose anchor points (top, bot,
-left, right, center).  A Fig canvas collects elements, generates a CSS
-stylesheet for shared defaults, and renders to SVG + PDF.
+left, right, center).  A Fig canvas collects elements and renders SVG + PDF.
 
     fig = Fig()
     r = fig.rect(0, 0, 16, 16, fill=BLUE)
@@ -10,9 +9,8 @@ stylesheet for shared defaults, and renders to SVG + PDF.
     fig.text(r.center, "W", sub="o")
     fig.save("images/my_figure")
 
-Elements inherit stroke, stroke-width, and fill:none from a generated
-<style> block.  Pass explicit values only to override (e.g. fill=GOLD
-on a rect, or stroke="none" on a decoration that shouldn't be stroked).
+Stroke and stroke-width are stamped from Fig defaults onto each element.
+Pass stroke=None to suppress (e.g. on decoration-only rects).
 """
 from __future__ import annotations
 
@@ -34,9 +32,11 @@ DGREEN  = "#609060"
 SERIF = "Latin Modern Roman, CMU Serif, serif"
 SANS  = "Helvetica, Arial, sans-serif"
 
+_UNSET = object()  # sentinel: "use Fig default"
+
 
 def _r(v: float) -> str:
-    """Format a number: integer when exact, else ≤2 decimal places."""
+    """Format a number: integer when exact, else ≤ 2 decimal places."""
     n = round(v, 2)
     return str(int(n)) if n == int(n) else str(n)
 
@@ -45,15 +45,16 @@ def _pts(ps: list[P]) -> str:
     return " ".join(f"{_r(p.x)},{_r(p.y)}" for p in ps)
 
 
-def _opt(**kw: object) -> str:
-    """Emit SVG attributes only for non-None values."""
-    parts: list[str] = []
-    for k, v in kw.items():
-        if v is None:
-            continue
-        name = k.replace("_", "-")
-        parts.append(f' {name}="{_r(v) if isinstance(v, (int, float)) else v}"')
-    return "".join(parts)
+def _fill(v: str | None) -> str:
+    return "" if v is None else f' fill="{v}"'
+
+
+def _stroke(s: str | None, w: float | None) -> str:
+    if s is None:
+        return ""
+    if s == "none":
+        return ' stroke="none"'
+    return f' stroke="{s}" stroke-width="{_r(w or 0)}"'
 
 
 # ── Point ────────────────────────────────────────────────────────────
@@ -80,7 +81,6 @@ class P:
         return P(-self.x, -self.y)
 
     def rot90(self) -> P:
-        """Rotate 90° counter-clockwise."""
         return P(-self.y, self.x)
 
     def norm(self) -> float:
@@ -95,15 +95,16 @@ class P:
 
 
 # ── Primitives ───────────────────────────────────────────────────────
-# Attributes default to None → inherit from the Fig CSS stylesheet.
-# Set explicitly to override (e.g. fill=GOLD, stroke="none").
+# fill/stroke default to None → omitted from SVG output.
+# Fig convenience methods stamp the canvas defaults via _UNSET sentinel.
 
 @dataclass
 class Rect:
     x: float; y: float; w: float; h: float
     rx: float = 0
-    fill: str | None = None; stroke: str | None = None
-    stroke_w: float | None = None; dash: str = ""
+    fill: str | None = None
+    stroke: str | None = None; stroke_w: float | None = None
+    dash: str = ""
 
     @property
     def center(self) -> P: return P(self.x + self.w / 2, self.y + self.h / 2)
@@ -131,8 +132,7 @@ class Rect:
     def svg(self) -> str:
         s = f'<rect x="{_r(self.x)}" y="{_r(self.y)}" width="{_r(self.w)}" height="{_r(self.h)}"'
         if self.rx: s += f' rx="{_r(self.rx)}"'
-        s += _opt(fill=self.fill, stroke=self.stroke,
-                  stroke_width=self.stroke_w)
+        s += _fill(self.fill) + _stroke(self.stroke, self.stroke_w)
         if self.dash: s += f' stroke-dasharray="{self.dash}"'
         return s + '/>'
 
@@ -140,8 +140,8 @@ class Rect:
 @dataclass
 class Circle:
     center: P; r: float
-    fill: str | None = None; stroke: str | None = None
-    stroke_w: float | None = None
+    fill: str | None = None
+    stroke: str | None = None; stroke_w: float | None = None
 
     @property
     def top(self) -> P: return self.center - P(0, self.r)
@@ -154,8 +154,7 @@ class Circle:
 
     def svg(self) -> str:
         s = f'<circle cx="{_r(self.center.x)}" cy="{_r(self.center.y)}" r="{_r(self.r)}"'
-        return s + _opt(fill=self.fill, stroke=self.stroke,
-                        stroke_width=self.stroke_w) + '/>'
+        return s + _fill(self.fill) + _stroke(self.stroke, self.stroke_w) + '/>'
 
 
 @dataclass
@@ -164,9 +163,9 @@ class Line:
     stroke: str | None = None; stroke_w: float | None = None
 
     def svg(self) -> str:
-        s = (f'<line x1="{_r(self.p1.x)}" y1="{_r(self.p1.y)}" '
-             f'x2="{_r(self.p2.x)}" y2="{_r(self.p2.y)}"')
-        return s + _opt(stroke=self.stroke, stroke_width=self.stroke_w) + '/>'
+        return (f'<line x1="{_r(self.p1.x)}" y1="{_r(self.p1.y)}" '
+                f'x2="{_r(self.p2.x)}" y2="{_r(self.p2.y)}"'
+                + _stroke(self.stroke, self.stroke_w) + '/>')
 
 
 @dataclass
@@ -175,28 +174,26 @@ class Polyline:
     stroke: str | None = None; stroke_w: float | None = None
 
     def svg(self) -> str:
-        s = f'<polyline points="{_pts(self.ps)}"'
-        return s + _opt(stroke=self.stroke, stroke_width=self.stroke_w) + '/>'
+        return (f'<polyline points="{_pts(self.ps)}" fill="none"'
+                + _stroke(self.stroke, self.stroke_w) + '/>')
 
 
 @dataclass
 class Polygon:
     ps: list[P]
-    fill: str | None = None; stroke: str | None = None
-    stroke_w: float | None = None
+    fill: str | None = None
+    stroke: str | None = None; stroke_w: float | None = None
 
     def svg(self) -> str:
-        s = f'<polygon points="{_pts(self.ps)}"'
-        return s + _opt(fill=self.fill, stroke=self.stroke,
-                        stroke_width=self.stroke_w) + '/>'
+        return (f'<polygon points="{_pts(self.ps)}"'
+                + _fill(self.fill) + _stroke(self.stroke, self.stroke_w) + '/>')
 
 
 @dataclass
 class Text:
     pos: P; text: str
     size: float = 3.2; fill: str = OUTLINE; anchor: str = "middle"
-    font: str = SERIF; weight: str = "normal"
-    sub: str = ""
+    font: str = SERIF; weight: str = "normal"; sub: str = ""
 
     def svg(self) -> str:
         y = _r(self.pos.y + self.size * 0.35)
@@ -216,13 +213,13 @@ class Text:
 @dataclass
 class PathD:
     d: str
-    fill: str | None = None; stroke: str | None = None
-    stroke_w: float | None = None; cap: str = ""
+    fill: str | None = None
+    stroke: str | None = None; stroke_w: float | None = None
+    cap: str = ""
 
     def svg(self) -> str:
         s = f'<path d="{self.d}"'
-        s += _opt(fill=self.fill, stroke=self.stroke,
-                  stroke_width=self.stroke_w)
+        s += _fill(self.fill) + _stroke(self.stroke, self.stroke_w)
         if self.cap: s += f' stroke-linecap="{self.cap}"'
         return s + '/>'
 
@@ -241,9 +238,8 @@ Element = Rect | Circle | Line | Polyline | Polygon | Text | PathD | Raw
 class Fig:
     """SVG figure canvas.
 
-    Generates a CSS stylesheet that provides default stroke, stroke-width,
-    and fill:none to all shape elements, and fill to polygons.  Individual
-    elements only need inline attributes when they differ from the defaults.
+    Stamps default stroke/stroke-width from the canvas onto each element.
+    Optional CSS via style() for things like stroke-linecap.
     """
 
     def __init__(self, *, stroke: str = OUTLINE, stroke_w: float = 1.0,
@@ -252,42 +248,51 @@ class Fig:
         self.stroke = stroke
         self.stroke_w = stroke_w
         self.crisp = crisp
-        self._extra_css: str = ""
+        self._css: str = ""
 
     def style(self, css: str) -> None:
-        """Append extra CSS rules (in addition to the auto-generated defaults)."""
-        self._extra_css = css
+        self._css = css
 
-    # ── Convenience builders (add + return) ──────────────────────────
+    def _s(self, stroke, stroke_w) -> tuple:
+        """Resolve _UNSET to canvas defaults."""
+        return (self.stroke if stroke is _UNSET else stroke,
+                self.stroke_w if stroke_w is _UNSET else stroke_w)
+
+    # ── Convenience builders ─────────────────────────────────────────
 
     def add(self, *els: Element) -> None:
         self.elements.extend(els)
 
     def rect(self, x, y, w, h, *, rx=0, fill=None,
-             stroke=None, stroke_w=None, dash="") -> Rect:
-        r = Rect(x, y, w, h, rx, fill, stroke, stroke_w, dash)
+             stroke=_UNSET, stroke_w=_UNSET, dash="") -> Rect:
+        s, sw = self._s(stroke, stroke_w)
+        r = Rect(x, y, w, h, rx, fill, s, sw, dash)
         self.elements.append(r)
         return r
 
-    def circle(self, center: P, r, *, fill=None,
-               stroke=None, stroke_w=None) -> Circle:
-        c = Circle(center, r, fill, stroke, stroke_w)
+    def circle(self, center: P, r, *, fill="none",
+               stroke=_UNSET, stroke_w=_UNSET) -> Circle:
+        s, sw = self._s(stroke, stroke_w)
+        c = Circle(center, r, fill, s, sw)
         self.elements.append(c)
         return c
 
-    def line(self, p1: P, p2: P, *, stroke=None, stroke_w=None) -> Line:
-        ln = Line(p1, p2, stroke, stroke_w)
+    def line(self, p1: P, p2: P, *, stroke=_UNSET, stroke_w=_UNSET) -> Line:
+        s, sw = self._s(stroke, stroke_w)
+        ln = Line(p1, p2, s, sw)
         self.elements.append(ln)
         return ln
 
-    def polyline(self, *ps: P, stroke=None, stroke_w=None) -> Polyline:
-        pl = Polyline(list(ps), stroke, stroke_w)
+    def polyline(self, *ps: P, stroke=_UNSET, stroke_w=_UNSET) -> Polyline:
+        s, sw = self._s(stroke, stroke_w)
+        pl = Polyline(list(ps), s, sw)
         self.elements.append(pl)
         return pl
 
-    def polygon(self, *ps: P, fill=None, stroke=None,
-                stroke_w=None) -> Polygon:
-        pg = Polygon(list(ps), fill, stroke, stroke_w)
+    def polygon(self, *ps: P, fill=_UNSET,
+                stroke=None, stroke_w=None) -> Polygon:
+        f = self.stroke if fill is _UNSET else fill
+        pg = Polygon(list(ps), f, stroke, stroke_w)
         self.elements.append(pg)
         return pg
 
@@ -298,9 +303,10 @@ class Fig:
         self.elements.append(t)
         return t
 
-    def path(self, d: str, *, fill=None, stroke=None, stroke_w=None,
+    def path(self, d: str, *, fill=None, stroke=_UNSET, stroke_w=_UNSET,
              cap="") -> PathD:
-        p = PathD(d, fill, stroke, stroke_w, cap)
+        s, sw = self._s(stroke, stroke_w)
+        p = PathD(d, fill, s, sw, cap)
         self.elements.append(p)
         return p
 
@@ -312,31 +318,23 @@ class Fig:
     # ── Arrow helpers ────────────────────────────────────────────────
 
     def arrow_head(self, tip: P, *, direction: P,
-                   size: float = 1.5, fill: str | None = None) -> Polygon:
-        """Filled triangular arrowhead at *tip* pointing along *direction*."""
+                   size: float = 1.5, fill=_UNSET) -> Polygon:
         u = direction.unit()
         n = u.rot90()
         base = tip - u * (size * 1.8)
         return self.polygon(base + n * size, tip, base - n * size, fill=fill)
 
     def arrow(self, p1: P, p2: P, *, size: float = 1.5,
-              fill: str | None = None, stroke: str | None = None) -> None:
-        """Line from *p1* to *p2* with arrowhead at *p2*."""
+              fill=_UNSET, stroke=_UNSET) -> None:
         d = p2 - p1
         u = d.unit()
         self.line(p1, p2 - u * (size * 0.5), stroke=stroke)
-        self.arrow_head(p2, direction=d, size=size, fill=fill or stroke)
+        head_fill = fill
+        if head_fill is _UNSET and stroke is not _UNSET:
+            head_fill = stroke
+        self.arrow_head(p2, direction=d, size=size, fill=head_fill)
 
     # ── Render ───────────────────────────────────────────────────────
-
-    def _css(self) -> str:
-        sw = _r(self.stroke_w)
-        css = (f'line,polyline,circle,rect,path'
-               f'{{stroke:{self.stroke};stroke-width:{sw};fill:none}}\n'
-               f'polygon{{fill:{self.stroke}}}')
-        if self._extra_css:
-            css += '\n' + self._extra_css
-        return css
 
     def to_svg(self, viewbox: tuple[float, float, float, float] | None = None,
                pad: float = 1.0) -> str:
@@ -346,7 +344,9 @@ class Fig:
         attrs = f'xmlns="http://www.w3.org/2000/svg" viewBox="{vb}"'
         if self.crisp:
             attrs += ' shape-rendering="crispEdges"'
-        parts = [f'<defs><style>{self._css()}</style></defs>']
+        parts: list[str] = []
+        if self._css:
+            parts.append(f'<defs><style>{self._css}</style></defs>')
         parts.extend(el.svg() for el in self.elements)
         body = "\n  ".join(parts)
         return f'<svg {attrs}>\n  {body}\n</svg>'
@@ -378,7 +378,6 @@ class Fig:
     def save(self, stem: str | Path, *, pdf: bool = True,
              viewbox: tuple[float, float, float, float] | None = None,
              pad: float = 1.0) -> None:
-        """Write .svg and optionally .pdf."""
         stem = Path(stem)
         svg = self.to_svg(viewbox, pad)
         svg_path = stem.with_suffix(".svg")
