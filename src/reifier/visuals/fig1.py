@@ -303,6 +303,23 @@ def create_fig1_svg() -> str:
                  f'stroke="{col_help}" stroke-width="0.7" '
                  f'stroke-linecap="round"/>')
 
+    # ══════════════════════════════════════════════════════════════════
+    # 7. LABELS below each group
+    # ══════════════════════════════════════════════════════════════════
+    fs_label = 3.2
+    font = "Latin Modern Roman, CMU Serif, serif"
+    label_y = pad + group_h + fs_label + 1.5  # below group boxes
+    total_h = label_y + 2  # extend viewBox to fit labels
+
+    def label(cx, text):
+        return (f'<text x="{R(cx)}" y="{R(label_y)}" text-anchor="middle" '
+                f'font-family="{font}" font-size="{fs_label}" '
+                f'fill="{col_outline}">{text}</text>')
+
+    parts.append(label(left_x + left_w / 2, "Adversary"))
+    parts.append(label(mid_x + mid_w / 2, "Model"))
+    parts.append(label(right_x + right_w / 2, "Deployment"))
+
     # ── Assemble SVG ──
     content = "\n    ".join(parts)
     svg = (
