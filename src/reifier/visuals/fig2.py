@@ -122,12 +122,15 @@ def create_fig2_svg() -> str:
                        rx=4, fill=col_fill, stroke=col_outline))
 
     # ══════════════════════════════════════════════════════════════════
-    # 2. LOCKER AND EXEC BOXES (3 rows)
+    # 2. LOCKER AND EXEC BOXES (omit top Locker and bottom Exec)
     # ══════════════════════════════════════════════════════════════════
-    for i in range(3):
+    # Lockers: rows 1 and 2 only (skip row 0)
+    for i in (1, 2):
         lx, ly = locker_xy(i)
         parts.append(srect(lx, ly, box_w, box_h, rx=2,
                            fill=col_pink, stroke=col_outline))
+    # Exec: rows 0 and 1 only (skip row 2)
+    for i in (0, 1):
         ex, ey = exec_xy(i)
         parts.append(srect(ex, ey, box_w, box_h, rx=2,
                            fill=col_pink, stroke=col_outline))
@@ -139,34 +142,40 @@ def create_fig2_svg() -> str:
                        rx=3, fill=col_blue, stroke=col_outline))
 
     # ══════════════════════════════════════════════════════════════════
-    # 4. RED ARROWS: Locker[i] → Exec[i+1]
+    # 4. RED ARROWS: Locker[2]→Exec[1], Locker[1]→Exec[0]
+    #    (corner to corner: bottom-right of locker → top-left of exec)
     # ══════════════════════════════════════════════════════════════════
-    for i in range(2):
-        lx, ly = locker_xy(i)
-        ex, ey = exec_xy(i + 1)
-        # From locker bottom-center to exec top-left area
-        ax1 = lx + box_w * 0.65
+    def red_arrow(locker_row, exec_row):
+        lx, ly = locker_xy(locker_row)
+        ex, ey = exec_xy(exec_row)
+        ax1 = lx + box_w        # bottom-right corner
         ay1 = ly + box_h
-        ax2 = ex + box_w * 0.35
+        ax2 = ex                 # top-left corner
         ay2 = ey
-        # Direction
         dx = ax2 - ax1
         dy = ay2 - ay1
         d = math.hypot(dx, dy)
         ux, uy = dx / d, dy / d
-        px, py = -uy, ux  # perpendicular
-        # Line (stop short for arrowhead)
+        px, py = -uy, ux
         parts.append(
             f'<line x1="{R(ax1)}" y1="{R(ay1)}" '
             f'x2="{R(ax2 - ux * arrow_s)}" y2="{R(ay2 - uy * arrow_s)}" '
             f'stroke="{col_mal}" stroke-width="{sw}"/>')
-        # Arrowhead
         bx = ax2 - ux * arrow_s * 1.8
         by = ay2 - uy * arrow_s * 1.8
         pts = (f'{R(bx + px * arrow_s)},{R(by + py * arrow_s)} '
                f'{R(ax2)},{R(ay2)} '
                f'{R(bx - px * arrow_s)},{R(by - py * arrow_s)}')
         parts.append(f'<polygon points="{pts}" fill="{col_mal}"/>')
+
+    red_arrow(2, 1)   # bottom Locker → middle Exec
+    red_arrow(1, 0)   # middle Locker → top Exec
+
+    # Line connecting bottom Locker to middle Locker (left column)
+    _, ly1 = locker_xy(1)
+    _, ly2 = locker_xy(2)
+    lock_cx = cx0 + box_w / 2
+    parts.append(sline(lock_cx, ly1 + box_h, lock_cx, ly2, stroke=col_mal))
 
     # ══════════════════════════════════════════════════════════════════
     # 5. GRAY WIRING
@@ -210,9 +219,10 @@ def create_fig2_svg() -> str:
     # ══════════════════════════════════════════════════════════════════
     # 6. LABELS
     # ══════════════════════════════════════════════════════════════════
-    for i in range(3):
+    for i in (1, 2):  # Lockers in rows 1, 2
         lx, ly = locker_xy(i)
         parts.append(label(lx + box_w / 2, ly + box_h / 2, "Locker"))
+    for i in (0, 1):  # Execs in rows 0, 1
         ex, ey = exec_xy(i)
         parts.append(label(ex + box_w / 2, ey + box_h / 2, "Exec"))
 
