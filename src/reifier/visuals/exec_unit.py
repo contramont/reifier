@@ -23,8 +23,9 @@ def create_exec_unit_svg() -> str:
     xpad_mid = unit*4
     wire_len = unit*6
 
-    col_weight = "oklch(0.6 0 235 / 4%)"
-    col_outline = "oklch(0.35 0.05 235)"
+    # Convert oklch to hex for PDF compatibility (cairosvg doesn't support oklch)
+    col_weight = "#eeeef4"       # oklch(0.6 0 235 / 4%) ≈ very light blue, 4% opacity on white
+    col_outline = "#4a4a6a"      # oklch(0.35 0.05 235)
 
     @dataclass
     class Point:
@@ -162,7 +163,7 @@ def create_exec_unit_svg() -> str:
     col_w  = "#b8ccee"    # blue – W weights in activations
     col_x  = "#b8e0b0"    # green – x values in activations
     col_out = "#f0d8a0"   # gold – output / partial products
-    col_s  = "oklch(0.35 0.05 235)"  # same as col_outline
+    col_s  = col_outline
     sw = 0.3
     vh = 1.6              # activation bar height
     vr = 0.4
@@ -176,18 +177,27 @@ def create_exec_unit_svg() -> str:
                 f'rx="{vr}" fill="{fill}"/>')
 
     def blabel(cx: float, cy: float, text: str) -> str:
-        return (f'<text x="{cx}" y="{cy}" text-anchor="middle" '
-                f'dominant-baseline="central" '
+        # Use explicit y offset instead of dominant-baseline for PDF compat
+        return (f'<text x="{cx}" y="{R(cy + fs_blk * 0.35)}" text-anchor="middle" '
                 f'font-family="Latin Modern Roman, CMU Serif, serif" '
-                f'font-size="{fs_blk}" fill="oklch(0.35 0.05 235)">{text}</text>')
+                f'font-size="{fs_blk}" fill="{col_outline}">{text}</text>')
 
     def blabel_sub(cx: float, cy: float, base: str, sub: str) -> str:
-        """Block label with proper subscript using tspan."""
-        return (f'<text x="{cx}" y="{cy}" text-anchor="middle" '
-                f'dominant-baseline="central" '
-                f'font-family="Latin Modern Roman, CMU Serif, serif" '
-                f'font-size="{fs_blk}" fill="oklch(0.35 0.05 235)">'
-                f'{base}<tspan font-size="{R(fs_blk * 0.65)}" dy="{R(fs_blk * 0.25)}">{sub}</tspan></text>')
+        """Block label with proper subscript using separate text elements."""
+        sub_size = R(fs_blk * 0.65)
+        # Base letter baseline
+        base_y = R(cy + fs_blk * 0.35)
+        # Subscript: shifted right and down from base
+        sub_x = R(cx + fs_blk * 0.45)
+        sub_y = R(cy + fs_blk * 0.7)
+        return (
+            f'<text x="{cx}" y="{base_y}" text-anchor="middle" '
+            f'font-family="Latin Modern Roman, CMU Serif, serif" '
+            f'font-size="{fs_blk}" fill="{col_outline}">{base}</text>'
+            f'<text x="{sub_x}" y="{sub_y}" text-anchor="start" '
+            f'font-family="Latin Modern Roman, CMU Serif, serif" '
+            f'font-size="{sub_size}" fill="{col_outline}">{sub}</text>'
+        )
 
     # Half stroke width extends beyond the box edges
     half_sw = unit / 2
@@ -211,11 +221,12 @@ def create_exec_unit_svg() -> str:
     in_gap = green_gap
 
     # 1. Input [W | x] — centered on visible wire between Norm bottom and p_bot
+    #    Green bar same width as middle green bars, centered in its x_part slot.
     in_x = p_top.x - in_w / 2
     in_y = (wn.bot.y + half_sw + p_bot.y) / 2 - vh / 2
     in_blue_w = w_part - in_gap                   # shrink blue to make room for gap
     extra.append(arect(in_x, in_y, in_blue_w, col_w))
-    extra.append(arect(in_x + w_part, in_y, x_part, col_x))  # green stays at same position
+    extra.append(arect(in_x + w_part + green_gap / 2, in_y, green_bar, col_x))
 
     # 2. W after Wv — centered on left wire between Wv.top and ⊗.bot
     mid_y = (wv.top.y + m.bot.y) / 2 - vh / 2
