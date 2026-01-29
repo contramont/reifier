@@ -120,7 +120,10 @@ def create_exec_unit_svg() -> str:
         def __add__(self, p: 'Point') -> 'Block':
             return Block(self.x+p.x, self.y+p.y, self.w, self.h, self.rx, self.dh, self.xpad, self.ypad)
 
-    p_top = Point(xpad_side + cell_width//2, 0)
+    # Extra vertical space for output/input activation rectangles
+    vec_margin = 3*unit
+    p_arrow_top = Point(xpad_side + cell_width//2, 0)
+    p_top = p_arrow_top + Point(0, vec_margin)
     p_arrow_base = p_top + Point(0, 2*unit)
     wo = Block(x=p_top.x-cell_width//2,
                y=p_arrow_base.y + wire_len//2,
@@ -134,18 +137,20 @@ def create_exec_unit_svg() -> str:
     p_branch_turn = wg.bot + Point(0, wire_len)
     wn = wv + (p_branch_split - wv.bot) + Point(0, wire_len + wv.h)
     p_bot = wn.bot + Point(0, wire_len//2 + 1*unit)
+    p_bot_ext = p_bot + Point(0, vec_margin)
 
-    # SwiGLU elements (identical to create_swiglu_html)
+    # SwiGLU elements (identical to create_swiglu_html, but using
+    # p_arrow_top and p_bot_ext for extended wires)
     elements: list[Rect | Line | Polyline | Circle] = [
         wo, wv, wg, wn,
         m, f,
         Polygon([p_arrow_base-Point(x=unit,y=0), p_top, p_arrow_base+Point(x=unit,y=0)]),
-        Line(p_arrow_base - Point(x=0, y=unit), wo.top),
+        Line(p_arrow_top, wo.top),
         Line(wo.bot, m.top),
         Line(m.bot, wv.top),
         Line(wv.bot, p_branch_split),
         Line(p_branch_split, wn.top),
-        Line(wn.bot, p_bot),
+        Line(wn.bot, p_bot_ext),
         Line(f.bot, wg.top),
         Line(m.right, f.left),
         Polyline([p_branch_split, p_branch_turn, wg.bot]),
@@ -191,10 +196,10 @@ def create_exec_unit_svg() -> str:
 
     extra: list[str] = []
 
-    # 1. Input [W | x] — on wire below Norm
+    # 1. Input [W | x] — on wire below p_bot
     in_w = 12
     in_x = p_top.x - in_w / 2
-    in_y = wn.bot.y + (p_bot.y - wn.bot.y - vh) / 2
+    in_y = p_bot.y + (p_bot_ext.y - p_bot.y - vh) / 2
     w_part = in_w * 0.75
     x_part = in_w - w_part
     extra.append(arect(in_x, in_y, w_part, col_w))
@@ -218,11 +223,10 @@ def create_exec_unit_svg() -> str:
     pp_vx = p_top.x - pp_vw / 2  # centered on wire
     extra.append(arect(pp_vx, pp_mid_y, pp_vw, col_out))
 
-    # 5. Output y — centered on wire between arrow and Wo
+    # 5. Output y — above the arrow tip
     out_w = cell_width * 0.35
     out_x = p_top.x - out_w / 2
-    # Center between arrow base (p_arrow_base.y) and wo.top.y
-    out_y = (p_arrow_base.y + wo.top.y) / 2 - vh / 2
+    out_y = p_arrow_top.y + (p_top.y - p_arrow_top.y - vh) / 2
     extra.append(arect(out_x, out_y, out_w, col_out))
 
     # Block labels (using tspan for proper subscripts)
@@ -242,7 +246,7 @@ def create_exec_unit_svg() -> str:
         f'polyline,circle{{ fill:none }}'
     )
     svg = (
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {viewbox_width} {p_bot.y}">\n'
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {viewbox_width} {p_bot_ext.y}">\n'
         f'<defs><style>{style_css}</style></defs>\n'
         f'{elements_str}\n'
         f'    {extra_str}\n'
