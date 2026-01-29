@@ -142,16 +142,16 @@ def create_fig2_svg() -> str:
                        rx=3, fill=col_blue, stroke=col_outline))
 
     # ══════════════════════════════════════════════════════════════════
-    # 4. RED ARROWS: Locker[2]→Exec[1], Locker[1]→Exec[0]
-    #    (corner to corner: bottom-right of locker → top-left of exec)
+    # 4. DIAGONAL ARROWS: Locker top-right → Exec bottom-left
+    #    (all in outline color)
     # ══════════════════════════════════════════════════════════════════
-    def red_arrow(locker_row, exec_row):
+    def diag_arrow(locker_row, exec_row):
         lx, ly = locker_xy(locker_row)
         ex, ey = exec_xy(exec_row)
-        ax1 = lx + box_w        # bottom-right corner
-        ay1 = ly + box_h
-        ax2 = ex                 # top-left corner
-        ay2 = ey
+        ax1 = lx + box_w        # top-right corner of locker
+        ay1 = ly
+        ax2 = ex                 # bottom-left corner of exec
+        ay2 = ey + box_h
         dx = ax2 - ax1
         dy = ay2 - ay1
         d = math.hypot(dx, dy)
@@ -160,25 +160,25 @@ def create_fig2_svg() -> str:
         parts.append(
             f'<line x1="{R(ax1)}" y1="{R(ay1)}" '
             f'x2="{R(ax2 - ux * arrow_s)}" y2="{R(ay2 - uy * arrow_s)}" '
-            f'stroke="{col_mal}" stroke-width="{sw}"/>')
+            f'stroke="{col_outline}" stroke-width="{sw}"/>')
         bx = ax2 - ux * arrow_s * 1.8
         by = ay2 - uy * arrow_s * 1.8
         pts = (f'{R(bx + px * arrow_s)},{R(by + py * arrow_s)} '
                f'{R(ax2)},{R(ay2)} '
                f'{R(bx - px * arrow_s)},{R(by - py * arrow_s)}')
-        parts.append(f'<polygon points="{pts}" fill="{col_mal}"/>')
+        parts.append(f'<polygon points="{pts}" fill="{col_outline}"/>')
 
-    red_arrow(2, 1)   # bottom Locker → middle Exec
-    red_arrow(1, 0)   # middle Locker → top Exec
+    diag_arrow(2, 1)   # bottom Locker → middle Exec
+    diag_arrow(1, 0)   # middle Locker → top Exec
 
     # Line connecting bottom Locker to middle Locker (left column)
     _, ly1 = locker_xy(1)
     _, ly2 = locker_xy(2)
     lock_cx = cx0 + box_w / 2
-    parts.append(sline(lock_cx, ly1 + box_h, lock_cx, ly2, stroke=col_mal))
+    parts.append(sline(lock_cx, ly1 + box_h, lock_cx, ly2))
 
     # ══════════════════════════════════════════════════════════════════
-    # 5. GRAY WIRING
+    # 5. WIRING (all outline color)
     # ══════════════════════════════════════════════════════════════════
     arrow_top_y = margin
     arrow_bot_y = margin + 2 * wire_ext + outer_h
@@ -189,16 +189,14 @@ def create_fig2_svg() -> str:
                        exec_cx, cy0))
     parts.append(arrow_up(exec_cx, arrow_top_y))
 
-    # Between Exec boxes
-    for i in range(2):
-        _, ey1 = exec_xy(i)
-        _, ey2 = exec_xy(i + 1)
-        parts.append(sline(exec_cx, ey1 + box_h, exec_cx, ey2))
+    # Between Exec[0] and Exec[1]
+    _, ey0 = exec_xy(0)
+    _, ey1 = exec_xy(1)
+    parts.append(sline(exec_cx, ey0 + box_h, exec_cx, ey1))
 
-    # Bottom: from Exec[2] bottom down to arrow
-    _, ey_bot = exec_xy(2)
-    parts.append(sline(exec_cx, ey_bot + box_h, exec_cx, arrow_bot_y))
-    parts.append(arrow_up(exec_cx, ey_bot + box_h))
+    # Bottom: from Exec[1] bottom down to arrow
+    parts.append(sline(exec_cx, ey1 + box_h, exec_cx, arrow_bot_y))
+    parts.append(arrow_up(exec_cx, ey1 + box_h))
 
     # Top loop: (exec_cx, wire_top_y) → right → (llm_cx, wire_top_y) → down → (llm_cx, llm_y)
     parts.append(spoly([
@@ -206,14 +204,14 @@ def create_fig2_svg() -> str:
         (llm_cx, wire_top_y),
         (llm_cx, llm_y),
     ]))
-    # Connect vertical wire to this branch at wire_top_y
-    # (the vertical wire already passes through wire_top_y)
 
-    # Bottom loop: (llm_cx, llm_y+llm_h) → down → (llm_cx, wire_bot_y) → left → (exec_cx, wire_bot_y)
+    # Bottom loop: LLM bottom → down → right to left → exec_cx → continue left → lock_cx → up to bottom Locker
+    _, ly_bot_locker = locker_xy(2)
     parts.append(spoly([
         (llm_cx, llm_y + llm_h),
         (llm_cx, wire_bot_y),
-        (exec_cx, wire_bot_y),
+        (lock_cx, wire_bot_y),
+        (lock_cx, ly_bot_locker + box_h),
     ]))
 
     # ══════════════════════════════════════════════════════════════════
