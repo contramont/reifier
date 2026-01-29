@@ -21,12 +21,12 @@ polyline,circle{ fill:none }</style></defs>
     <polyline points="10,55 30,55 30,49"/>
     <polyline points="28,27 30,27 31.414213562373096,25.585786437626904"/>
     <circle cx="10" cy="27" r="0.2"/>
-    <rect x="4.0" y="78.45" width="9.0" height="1.6" rx="0.4" fill="#b8ccee"/>
+    <rect x="4.0" y="78.45" width="8.4" height="1.6" rx="0.4" fill="#b8ccee"/>
     <rect x="13.0" y="78.45" width="3.0" height="1.6" rx="0.4" fill="#b8e0b0"/>
     <rect x="5.5" y="30.2" width="9.0" height="1.6" rx="0.4" fill="#b8ccee"/>
-    <rect x="25.5" y="30.2" width="3.0" height="1.6" rx="0.4" fill="#b8e0b0"/>
-    <rect x="28.5" y="30.2" width="3.0" height="1.6" rx="0.4" fill="#b8e0b0"/>
-    <rect x="31.5" y="30.2" width="3.0" height="1.6" rx="0.4" fill="#b8e0b0"/>
+    <rect x="25.5" y="30.2" width="2.4" height="1.6" rx="0.4" fill="#b8e0b0"/>
+    <rect x="28.5" y="30.2" width="2.4" height="1.6" rx="0.4" fill="#b8e0b0"/>
+    <rect x="31.5" y="30.2" width="2.4" height="1.6" rx="0.4" fill="#b8e0b0"/>
     <rect x="5.5" y="22.2" width="9.0" height="1.6" rx="0.4" fill="#f0d8a0"/>
     <rect x="7.2" y="2.45" width="5.6" height="1.6" rx="0.4" fill="#f0d8a0"/>
     <text x="10" y="13" text-anchor="middle" dominant-baseline="central" font-family="Latin Modern Roman, CMU Serif, serif" font-size="2.8" fill="oklch(0.35 0.05 235)">W<tspan font-size="1.82" dy="0.7">o</tspan></text>

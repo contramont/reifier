@@ -202,21 +202,30 @@ def create_exec_unit_svg() -> str:
     w_part = in_w - x_part   # 9
     mid_w = w_part            # 9, same for blue and green totals
 
+    # Gap between bars: green bars shrink by 20%, gap fills the rest.
+    # Total footprint unchanged: 3 visible bars + 2 gaps = x_part * 3 = mid_w.
+    gap_frac = 0.20
+    green_bar = x_part * (1 - gap_frac)          # visible bar width
+    green_gap = x_part * gap_frac                 # invisible gap width
+    # For input: gap between blue W and green x, same gap width
+    in_gap = green_gap
+
     # 1. Input [W | x] — centered on visible wire between Norm bottom and p_bot
     in_x = p_top.x - in_w / 2
     in_y = (wn.bot.y + half_sw + p_bot.y) / 2 - vh / 2
-    extra.append(arect(in_x, in_y, w_part, col_w))
-    extra.append(arect(in_x + w_part, in_y, x_part, col_x))
+    in_blue_w = w_part - in_gap                   # shrink blue to make room for gap
+    extra.append(arect(in_x, in_y, in_blue_w, col_w))
+    extra.append(arect(in_x + w_part, in_y, x_part, col_x))  # green stays at same position
 
     # 2. W after Wv — centered on left wire between Wv.top and ⊗.bot
     mid_y = (wv.top.y + m.bot.y) / 2 - vh / 2
     vx = p_top.x - mid_w / 2
     extra.append(arect(vx, mid_y, mid_w, col_w))
 
-    # 3. f(x) × n — 3 adjacent green bars, centered on right wire between SiLU and Wg
+    # 3. f(x) × n — 3 green bars with gaps, centered on right wire between SiLU and Wg
     fx_vx = f.center.x - mid_w / 2
     for i in range(3):
-        extra.append(arect(fx_vx + i * x_part, mid_y, x_part, col_x))
+        extra.append(arect(fx_vx + i * x_part, mid_y, green_bar, col_x))
 
     # 4. Partial products — centered on left wire between ⊗.top and Wo.bot
     pp_mid_y = (wo.bot.y + m.top.y) / 2 - vh / 2
