@@ -169,18 +169,23 @@ def create_fig1_svg() -> str:
     adv_cy = adv_y + box_s / 2
 
     # ── Devil horns on adversary box ──
-    # Two small triangles pointing up, tilted slightly outward
+    # Two curved horns using quadratic bezier, tips curve inward
     horn_h = 3.0
-    horn_base = 1.2
+    horn_base = 1.0
     horn_spread = box_s * 0.28  # distance from center
     for sign in (-1, 1):
         hx = adv_cx + sign * horn_spread
-        # Tip tilts outward
-        tip_x = hx + sign * horn_base * 0.6
-        pts = (f'{R(hx - horn_base)},{R(adv_y)} '
-               f'{R(tip_x)},{R(adv_y - horn_h)} '
-               f'{R(hx + horn_base)},{R(adv_y)}')
-        parts.append(f'<polygon points="{pts}" fill="{col_outline}"/>')
+        # Tip curves inward (toward center)
+        tip_x = hx - sign * horn_base * 0.3
+        # Control point curves outward for the bend
+        cp_x = hx + sign * horn_base * 1.2
+        cp_y = adv_y - horn_h * 0.5
+        parts.append(
+            f'<path d="M{R(hx - horn_base)},{R(adv_y)} '
+            f'Q{R(cp_x)},{R(cp_y)} {R(tip_x)},{R(adv_y - horn_h)} '
+            f'Q{R(cp_x - sign * 0.3)},{R(cp_y)} '
+            f'{R(hx + horn_base)},{R(adv_y)} Z" '
+            f'fill="{col_outline}"/>')
 
     # ── Closed padlock in encrypted module ──
     enc_cx = enc_x + enc_w / 2
@@ -206,6 +211,18 @@ def create_fig1_svg() -> str:
         f'L{R(sx2)},{R(lock_by)}" '
         f'fill="none" stroke="{col_outline}" stroke-width="{sw * 1.5}" '
         f'stroke-linecap="round"/>')
+    # Keyhole (small circle + downward triangle/slit)
+    kh_cy = lock_by + lock_bh * 0.4
+    kh_r = 0.7
+    parts.append(f'<circle cx="{R(enc_cx)}" cy="{R(kh_cy)}" '
+                 f'r="{kh_r}" fill="{col_gold}"/>')
+    kh_slit_h = lock_bh * 0.3
+    parts.append(
+        f'<polygon points="'
+        f'{R(enc_cx - kh_r * 0.7)},{R(kh_cy)} '
+        f'{R(enc_cx)},{R(kh_cy + kh_slit_h)} '
+        f'{R(enc_cx + kh_r * 0.7)},{R(kh_cy)}" '
+        f'fill="{col_gold}"/>')
 
     # ── Bug/insect icon in red (malicious) box ──
     bug_cx = out_x + out_s / 2
@@ -245,27 +262,29 @@ def create_fig1_svg() -> str:
     # ── </> code icon in green (helpful) box ──
     code_cx = out_x + out_s / 2
     code_cy = bot_y
-    cs = 2.5  # half-size of the icon
-    bkt_w = 1.6  # bracket horizontal extent
-    bkt_h = cs    # bracket vertical extent
-    # < bracket
+    bkt_w = 1.8   # bracket horizontal extent
+    bkt_h = 2.2   # bracket vertical extent
+    bkt_sp = 3.2  # total horizontal spread (half on each side)
+    # < bracket (left side)
+    lx = code_cx - bkt_sp / 2
     parts.append(f'<polyline points="'
-                 f'{R(code_cx - cs * 0.3 + bkt_w)},{R(code_cy - bkt_h)} '
-                 f'{R(code_cx - cs * 0.3)},{R(code_cy)} '
-                 f'{R(code_cx - cs * 0.3 + bkt_w)},{R(code_cy + bkt_h)}" '
+                 f'{R(lx + bkt_w)},{R(code_cy - bkt_h)} '
+                 f'{R(lx)},{R(code_cy)} '
+                 f'{R(lx + bkt_w)},{R(code_cy + bkt_h)}" '
                  f'fill="none" stroke="{col_help}" stroke-width="0.7" '
                  f'stroke-linecap="round" stroke-linejoin="round"/>')
-    # > bracket
+    # > bracket (right side)
+    rx = code_cx + bkt_sp / 2
     parts.append(f'<polyline points="'
-                 f'{R(code_cx + cs * 0.3 - bkt_w)},{R(code_cy - bkt_h)} '
-                 f'{R(code_cx + cs * 0.3)},{R(code_cy)} '
-                 f'{R(code_cx + cs * 0.3 - bkt_w)},{R(code_cy + bkt_h)}" '
+                 f'{R(rx - bkt_w)},{R(code_cy - bkt_h)} '
+                 f'{R(rx)},{R(code_cy)} '
+                 f'{R(rx - bkt_w)},{R(code_cy + bkt_h)}" '
                  f'fill="none" stroke="{col_help}" stroke-width="0.7" '
                  f'stroke-linecap="round" stroke-linejoin="round"/>')
-    # / slash
-    slash_h = bkt_h * 0.7
-    parts.append(f'<line x1="{R(code_cx + 0.5)}" y1="{R(code_cy - slash_h)}" '
-                 f'x2="{R(code_cx - 0.5)}" y2="{R(code_cy + slash_h)}" '
+    # / slash (centered, slightly taller than brackets)
+    slash_h = bkt_h * 0.85
+    parts.append(f'<line x1="{R(code_cx + 0.6)}" y1="{R(code_cy - slash_h)}" '
+                 f'x2="{R(code_cx - 0.6)}" y2="{R(code_cy + slash_h)}" '
                  f'stroke="{col_help}" stroke-width="0.7" '
                  f'stroke-linecap="round"/>')
 
