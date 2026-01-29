@@ -223,9 +223,10 @@ def create_exec_unit_svg() -> str:
     extra.append(arect(vx, mid_y, mid_w, col_w))
 
     # 3. f(x) × n — 3 green bars with gaps, centered on right wire between SiLU and Wg
+    #    Each bar is centered within its x_part slot.
     fx_vx = f.center.x - mid_w / 2
     for i in range(3):
-        extra.append(arect(fx_vx + i * x_part, mid_y, green_bar, col_x))
+        extra.append(arect(fx_vx + i * x_part + green_gap / 2, mid_y, green_bar, col_x))
 
     # 4. Partial products — centered on left wire between ⊗.top and Wo.bot
     pp_mid_y = (wo.bot.y + m.top.y) / 2 - vh / 2
@@ -266,8 +267,17 @@ def create_exec_unit_svg() -> str:
 
 if __name__ == "__main__":
     import pathlib
+    import cairosvg
+
     svg = create_exec_unit_svg()
-    out = pathlib.Path(__file__).resolve().parent.parent.parent.parent / "images" / "exec_unit.svg"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(svg)
-    print(f"Wrote {out}")
+    out_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent / "images"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    svg_path = out_dir / "exec_unit.svg"
+    pdf_path = out_dir / "exec_unit.pdf"
+
+    svg_path.write_text(svg)
+    cairosvg.svg2pdf(bytestring=svg.encode(), write_to=str(pdf_path))
+
+    print(f"Wrote {svg_path}")
+    print(f"Wrote {pdf_path}")
