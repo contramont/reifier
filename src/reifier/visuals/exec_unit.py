@@ -149,8 +149,7 @@ def create_exec_unit_svg() -> str:
         Line(p_arrow_base - Point(x=0, y=unit), wo.top),
         Line(wo.bot, m.top),
         Line(m.bot, wv.top),
-        Line(wv.bot, p_branch_split),
-        Line(p_branch_split, p_bot),
+        Line(wv.bot, p_bot),
         Line(f.bot, wg.top),
         Line(m.right, f.left),
         Polyline([p_branch_split, p_branch_turn, wg.bot]),
@@ -266,7 +265,7 @@ def create_exec_unit_svg() -> str:
     # ── Assemble standalone SVG ──
     viewbox_width = xpad_side + cell_width + xpad_mid + cell_width + xpad_side
     style_css = (
-        f'line,polyline,circle,.w{{ stroke:{col_outline}; stroke-width:{unit} }}\n'
+        f'line,polyline,circle,.w{{ stroke:{col_outline}; stroke-width:{unit}; stroke-linecap:square }}\n'
         f'polygon{{fill: {col_outline}}}'
         f'.w{{ fill:{col_weight} }}\n'
         f'polyline,circle{{ fill:none }}'

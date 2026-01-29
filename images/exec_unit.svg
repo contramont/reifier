@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges" viewBox="0 -3.1 40 65.2">
-<defs><style>line,polyline,circle,.w{ stroke:#4a4a6a; stroke-width:1 }
+<defs><style>line,polyline,circle,.w{ stroke:#4a4a6a; stroke-width:1; stroke-linecap:square }
 polygon{fill: #4a4a6a}.w{ fill:#eeeef4 }
 polyline,circle{ fill:none }</style></defs>
 
@@ -12,8 +12,7 @@ polyline,circle{ fill:none }</style></defs>
     <line x1="10" y1="2" x2="10" y2="6"/>
     <line x1="10" y1="22" x2="10" y2="26"/>
     <line x1="10" y1="30" x2="10" y2="34"/>
-    <line x1="10" y1="50" x2="10" y2="56"/>
-    <line x1="10" y1="56" x2="10" y2="59"/>
+    <line x1="10" y1="50" x2="10" y2="59"/>
     <line x1="30" y1="30" x2="30" y2="34"/>
     <line x1="12" y1="28" x2="28" y2="28"/>
     <polyline points="10,56 30,56 30,50"/>
