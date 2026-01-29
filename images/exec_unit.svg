@@ -1,29 +1,31 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -3.1 40 67.2" shape-rendering="crispEdges">
-  <defs><style>line, polyline, circle, rect { stroke-linecap: square }</style></defs>
-  <rect x="2" y="7" width="16" height="16" rx="1" fill="#eeeef4" stroke="#4a4a6a" stroke-width="1.0"/>
-  <rect x="2" y="35" width="16" height="16" rx="1" fill="#eeeef4" stroke="#4a4a6a" stroke-width="1.0"/>
-  <rect x="22" y="35" width="16" height="16" rx="1" fill="#eeeef4" stroke="#4a4a6a" stroke-width="1.0"/>
-  <circle cx="10" cy="29" r="2" stroke="#4a4a6a" stroke-width="1.0"/>
-  <circle cx="30" cy="29" r="2" stroke="#4a4a6a" stroke-width="1.0"/>
-  <polygon points="8,3 10,0 12,3" fill="#4a4a6a"/>
-  <line x1="10" y1="2" x2="10.0" y2="7" stroke="#4a4a6a" stroke-width="1.0"/>
-  <line x1="10.0" y1="23" x2="10" y2="27" stroke="#4a4a6a" stroke-width="1.0"/>
-  <line x1="10" y1="31" x2="10.0" y2="35" stroke="#4a4a6a" stroke-width="1.0"/>
-  <line x1="10.0" y1="51" x2="10" y2="61" stroke="#4a4a6a" stroke-width="1.0"/>
-  <line x1="30" y1="31" x2="30.0" y2="35" stroke="#4a4a6a" stroke-width="1.0"/>
-  <line x1="12" y1="29" x2="28" y2="29" stroke="#4a4a6a" stroke-width="1.0"/>
-  <polyline points="10,57 30,57 30,51" fill="none" stroke="#4a4a6a" stroke-width="1.0"/>
-  <polyline points="28,29 30,29 31.4142,27.5858" fill="none" stroke="#4a4a6a" stroke-width="1.0"/>
-  <circle cx="10" cy="29" r="0.2" fill="#4a4a6a" stroke="#4a4a6a" stroke-width="0"/>
-  <rect x="8.0" y="-2.6" width="4.0" height="1.6" rx="0.4" fill="#f0d8a0"/>
-  <rect x="4.0" y="62" width="8.64" height="1.6" rx="0.4" fill="#b8ccee"/>
-  <rect x="13.18" y="62" width="2.64" height="1.6" rx="0.4" fill="#b8e0b0"/>
-  <rect x="5.5" y="32.2" width="9" height="1.6" rx="0.4" fill="#b8ccee"/>
-  <rect x="25.68" y="32.2" width="2.64" height="1.6" rx="0.4" fill="#b8e0b0"/>
-  <rect x="28.68" y="32.2" width="2.64" height="1.6" rx="0.4" fill="#b8e0b0"/>
-  <rect x="31.68" y="32.2" width="2.64" height="1.6" rx="0.4" fill="#b8e0b0"/>
-  <rect x="5.5" y="24.2" width="9" height="1.6" rx="0.4" fill="#f0d8a0"/>
-  <text x="10.0" y="16.274" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="3.64" fill="#4a4a6a" font-weight="bold">W</text><text x="11.638" y="17.548" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-size="2.366" fill="#4a4a6a" font-weight="bold">o</text>
-  <text x="10.0" y="44.274" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="3.64" fill="#4a4a6a" font-weight="bold">W</text><text x="11.638" y="45.548" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-size="2.366" fill="#4a4a6a" font-weight="bold">v</text>
-  <text x="30.0" y="44.274" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="3.64" fill="#4a4a6a" font-weight="bold">W</text><text x="31.638" y="45.548" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-size="2.366" fill="#4a4a6a" font-weight="bold">g</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -0.1 40 70.2" shape-rendering="crispEdges">
+  <defs><style>line,polyline,circle,rect,path{stroke:#4a4a6a;stroke-width:1;fill:none}
+polygon{fill:#4a4a6a}
+*{stroke-linecap:square}</style></defs>
+  <rect x="2" y="10" width="16" height="16" rx="1" fill="#eeeef4"/>
+  <rect x="2" y="38" width="16" height="16" rx="1" fill="#eeeef4"/>
+  <rect x="22" y="38" width="16" height="16" rx="1" fill="#eeeef4"/>
+  <circle cx="10" cy="32" r="2"/>
+  <circle cx="30" cy="32" r="2"/>
+  <polygon points="8,6 10,3 12,6"/>
+  <line x1="10" y1="5" x2="10" y2="10"/>
+  <line x1="10" y1="26" x2="10" y2="30"/>
+  <line x1="10" y1="34" x2="10" y2="38"/>
+  <line x1="10" y1="54" x2="10" y2="64"/>
+  <line x1="30" y1="34" x2="30" y2="38"/>
+  <line x1="12" y1="32" x2="28" y2="32"/>
+  <polyline points="10,60 30,60 30,54"/>
+  <polyline points="28,32 30,32 31.41,30.59"/>
+  <circle cx="10" cy="32" r="0.2" fill="#4a4a6a" stroke="none"/>
+  <rect x="8" y="0.4" width="4" height="1.6" rx="0.4" fill="#f0d8a0" stroke="none"/>
+  <rect x="4" y="68" width="8.64" height="1.6" rx="0.4" fill="#b8ccee" stroke="none"/>
+  <rect x="13.18" y="68" width="2.64" height="1.6" rx="0.4" fill="#b8e0b0" stroke="none"/>
+  <rect x="5.5" y="35.2" width="9" height="1.6" rx="0.4" fill="#b8ccee" stroke="none"/>
+  <rect x="25.68" y="35.2" width="2.64" height="1.6" rx="0.4" fill="#b8e0b0" stroke="none"/>
+  <rect x="28.68" y="35.2" width="2.64" height="1.6" rx="0.4" fill="#b8e0b0" stroke="none"/>
+  <rect x="31.68" y="35.2" width="2.64" height="1.6" rx="0.4" fill="#b8e0b0" stroke="none"/>
+  <rect x="5.5" y="27.2" width="9" height="1.6" rx="0.4" fill="#f0d8a0" stroke="none"/>
+  <text x="10" y="19.27" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="3.64" fill="#4a4a6a" font-weight="bold">W</text><text x="11.64" y="20.55" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-size="2.37" fill="#4a4a6a" font-weight="bold">o</text>
+  <text x="10" y="47.27" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="3.64" fill="#4a4a6a" font-weight="bold">W</text><text x="11.64" y="48.55" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-size="2.37" fill="#4a4a6a" font-weight="bold">v</text>
+  <text x="30" y="47.27" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="3.64" fill="#4a4a6a" font-weight="bold">W</text><text x="31.64" y="48.55" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-size="2.37" fill="#4a4a6a" font-weight="bold">g</text>
 </svg>
