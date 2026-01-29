@@ -161,13 +161,11 @@ def create_exec_unit_svg() -> str:
     # ══════════════════════════════════════════════════════════════════
     col_w  = "#b8ccee"    # blue – W weights in activations
     col_x  = "#b8e0b0"    # green – x values in activations
-    col_pp = "#e8bcd8"    # pink – partial products
-    col_out = "#f0d8a0"   # gold – output
+    col_out = "#f0d8a0"   # gold – output / partial products
     col_s  = "oklch(0.35 0.05 235)"  # same as col_outline
     sw = 0.3
     vh = 1.6              # activation bar height
     vr = 0.4
-    fs = 1.8              # label font size
     fs_blk = 2.8          # block label font size
 
     def R(v: float) -> float:
@@ -177,16 +175,19 @@ def create_exec_unit_svg() -> str:
         return (f'<rect x="{R(x)}" y="{R(y)}" width="{R(w)}" height="{vh}" '
                 f'rx="{vr}" fill="{fill}" stroke="{col_s}" stroke-width="{sw}"/>')
 
-    def alabel(x: float, y: float, text: str, anchor: str = "start") -> str:
-        return (f'<text x="{R(x)}" y="{R(y)}" text-anchor="{anchor}" '
-                f'font-family="Latin Modern Roman, CMU Serif, serif" '
-                f'font-size="{fs}" font-style="italic" fill="#333">{text}</text>')
-
     def blabel(cx: float, cy: float, text: str) -> str:
         return (f'<text x="{cx}" y="{cy}" text-anchor="middle" '
                 f'dominant-baseline="central" '
                 f'font-family="Latin Modern Roman, CMU Serif, serif" '
                 f'font-size="{fs_blk}" fill="oklch(0.35 0.05 235)">{text}</text>')
+
+    def blabel_sub(cx: float, cy: float, base: str, sub: str) -> str:
+        """Block label with proper subscript using tspan."""
+        return (f'<text x="{cx}" y="{cy}" text-anchor="middle" '
+                f'dominant-baseline="central" '
+                f'font-family="Latin Modern Roman, CMU Serif, serif" '
+                f'font-size="{fs_blk}" fill="oklch(0.35 0.05 235)">'
+                f'{base}<tspan font-size="{R(fs_blk * 0.65)}" dy="{R(fs_blk * 0.25)}">{sub}</tspan></text>')
 
     extra: list[str] = []
 
@@ -198,50 +199,42 @@ def create_exec_unit_svg() -> str:
     x_part = in_w - w_part
     extra.append(arect(in_x, in_y, w_part, col_w))
     extra.append(arect(in_x + w_part, in_y, x_part, col_x))
-    extra.append(f'<rect x="{in_x}" y="{in_y}" width="{in_w}" height="{vh}" '
+    extra.append(f'<rect x="{R(in_x)}" y="{R(in_y)}" width="{in_w}" height="{vh}" '
                  f'rx="{vr}" fill="none" stroke="{col_s}" stroke-width="{sw}"/>')
-    extra.append(alabel(in_x + w_part / 2, in_y + vh * 0.72, "W", "middle"))
-    extra.append(alabel(in_x + w_part + x_part / 2, in_y + vh * 0.72, "x", "middle"))
-    extra.append(alabel(in_x + in_w + 0.8, in_y + vh * 0.72, "input"))
 
-    # 2. W after Wv — left of wire between Wv.top and ⊗.bot
+    # 2. W after Wv — centered on left wire between Wv.top and ⊗.bot
     vw = cell_width * 0.5
     mid_y = (wv.top.y + m.bot.y) / 2 - vh / 2
-    vx = p_top.x - vw - 1.5
+    vx = p_top.x - vw / 2  # centered on wire
     extra.append(arect(vx, mid_y, vw, col_w))
-    extra.append(alabel(vx - 0.6, mid_y + vh * 0.72, "W", "end"))
 
-    # 3. f(x) copies — right of wire between SiLU and Wg
-    fx_vx = f.center.x + 1.5
+    # 3. f(x) copies — centered on right wire between SiLU and Wg
+    fx_vx = f.center.x - vw / 2  # centered on wire
     extra.append(arect(fx_vx, mid_y, vw, col_x))
-    extra.append(alabel(fx_vx + vw + 0.6, mid_y + vh * 0.72, "f(x)\u00d7n"))
 
-    # 4. Partial products — right of wire between ⊗.top and Wo.bot
+    # 4. Partial products — centered on left wire between ⊗.top and Wo.bot
     pp_mid_y = (wo.bot.y + m.top.y) / 2 - vh / 2
     pp_vw = cell_width * 0.55
-    pp_vx = p_top.x + 1.5
-    extra.append(arect(pp_vx, pp_mid_y, pp_vw, col_pp))
-    extra.append(alabel(pp_vx + pp_vw + 0.6, pp_mid_y + vh * 0.72,
-                        "w\u1d62\u2c7c\u00b7f(x\u2c7c)"))
+    pp_vx = p_top.x - pp_vw / 2  # centered on wire
+    extra.append(arect(pp_vx, pp_mid_y, pp_vw, col_out))
 
-    # 5. Output y — on wire above Wo
+    # 5. Output y — centered on wire between arrow and Wo
     out_w = cell_width * 0.35
     out_x = p_top.x - out_w / 2
-    out_y = p_arrow_base.y + 0.3
+    # Center between arrow base (p_arrow_base.y) and wo.top.y
+    out_y = (p_arrow_base.y + wo.top.y) / 2 - vh / 2
     extra.append(arect(out_x, out_y, out_w, col_out))
-    extra.append(alabel(out_x + out_w + 0.6, out_y + vh * 0.72, "y"))
 
-    # Block labels
-    extra.append(blabel(wo.center.x, wo.center.y, "W\u2092"))
-    extra.append(blabel(wv.center.x, wv.center.y, "W\u1D65"))
-    extra.append(blabel(wg.center.x, wg.center.y, "W\u1D4D"))
+    # Block labels (using tspan for proper subscripts)
+    extra.append(blabel_sub(wo.center.x, wo.center.y, "W", "o"))
+    extra.append(blabel_sub(wv.center.x, wv.center.y, "W", "v"))
+    extra.append(blabel_sub(wg.center.x, wg.center.y, "W", "g"))
     extra.append(blabel(wn.center.x, wn.center.y, "Norm"))
 
     extra_str = "\n    ".join(extra)
 
     # ── Assemble standalone SVG ──
-    # Widen viewbox to fit labels that extend beyond the base diagram
-    viewbox_width = xpad_side + cell_width + xpad_mid + cell_width + xpad_side + 16
+    viewbox_width = xpad_side + cell_width + xpad_mid + cell_width + xpad_side
     style_css = (
         f'line,polyline,circle,.w{{ stroke:{col_outline}; stroke-width:{unit} }}\n'
         f'polygon{{fill: {col_outline}}}'
