@@ -136,17 +136,19 @@ def create_exec_unit_svg() -> str:
     wn = wv + (p_branch_split - wv.bot) + Point(0, wire_len + wv.h)
     p_bot = wn.bot + Point(0, wire_len//2 + 1*unit)
 
-    # SwiGLU elements (identical to create_swiglu_html)
+    # Omit wn (norm block) and its bottom wire; figure ends below the junction
+    p_bot = p_branch_split + Point(0, wire_len//2 + 1*unit)
+
+    # SwiGLU elements (based on create_swiglu_html, without wn and bottom wire)
     elements: list[Rect | Line | Polyline | Circle] = [
-        wo, wv, wg, wn,
+        wo, wv, wg,
         m, f,
         Polygon([p_arrow_base-Point(x=unit,y=0), p_top, p_arrow_base+Point(x=unit,y=0)]),
         Line(p_arrow_base - Point(x=0, y=unit), wo.top),
         Line(wo.bot, m.top),
         Line(m.bot, wv.top),
         Line(wv.bot, p_branch_split),
-        Line(p_branch_split, wn.top),
-        Line(wn.bot, p_bot),
+        Line(p_branch_split, p_bot),
         Line(f.bot, wg.top),
         Line(m.right, f.left),
         Polyline([p_branch_split, p_branch_turn, wg.bot]),
@@ -167,7 +169,7 @@ def create_exec_unit_svg() -> str:
     sw = 0.3
     vh = 1.6              # activation bar height
     vr = 0.4
-    fs_blk = 2.8          # block label font size
+    fs_blk = 3.64         # block label font size (30% larger)
 
     def R(v: float) -> float:
         return round(v, 2)
@@ -220,10 +222,10 @@ def create_exec_unit_svg() -> str:
     # For input: gap between blue W and green x, same gap width
     in_gap = green_gap
 
-    # 1. Input [W | x] — centered on visible wire between Norm bottom and p_bot
+    # 1. Input [W | x] — centered on wire between junction and p_bot
     #    Green bar same width as middle green bars, centered in its x_part slot.
     in_x = p_top.x - in_w / 2
-    in_y = (wn.bot.y + half_sw + p_bot.y) / 2 - vh / 2
+    in_y = (p_branch_split.y + p_bot.y) / 2 - vh / 2
     in_blue_w = w_part - in_gap                   # shrink blue to make room for gap
     extra.append(arect(in_x, in_y, in_blue_w, col_w))
     extra.append(arect(in_x + w_part + green_gap / 2, in_y, green_bar, col_x))
@@ -254,7 +256,6 @@ def create_exec_unit_svg() -> str:
     extra.append(blabel_sub(wo.center.x, wo.center.y, "W", "o"))
     extra.append(blabel_sub(wv.center.x, wv.center.y, "W", "v"))
     extra.append(blabel_sub(wg.center.x, wg.center.y, "W", "g"))
-    extra.append(blabel(wn.center.x, wn.center.y, "Norm"))
 
     extra_str = "\n    ".join(extra)
 
