@@ -158,7 +158,7 @@ def create_exec_unit_svg() -> str:
     elements_str = "".join(['\n    ' + str(el) for el in elements])
     shift = f.r * (2**0.5/2)
     f_icon_str = f'<polyline points="{f.left.x},{f.left.y} {f.center.x},{f.center.y} {f.center.x+shift},{f.center.y-shift}"/>'
-    m_icon_str = f'<circle cx="{m.center.x}" cy="{m.center.y}" r="{0.2*unit}"/>'
+    m_icon_str = f'<circle cx="{m.center.x}" cy="{m.center.y}" r="{0.2*unit}" fill="{col_outline}"/>'
     elements_str += '\n    ' + f_icon_str + '\n    ' + m_icon_str
 
     # ══════════════════════════════════════════════════════════════════
@@ -183,7 +183,7 @@ def create_exec_unit_svg() -> str:
     def blabel(cx: float, cy: float, text: str) -> str:
         # Use explicit y offset instead of dominant-baseline for PDF compat
         return (f'<text x="{cx}" y="{R(cy + fs_blk * 0.35)}" text-anchor="middle" '
-                f'font-family="Latin Modern Roman, CMU Serif, serif" '
+                f'font-family="Helvetica, Arial, sans-serif" font-weight="bold" '
                 f'font-size="{fs_blk}" fill="{col_outline}">{text}</text>')
 
     def blabel_sub(cx: float, cy: float, base: str, sub: str) -> str:
@@ -196,10 +196,10 @@ def create_exec_unit_svg() -> str:
         sub_y = R(cy + fs_blk * 0.7)
         return (
             f'<text x="{cx}" y="{base_y}" text-anchor="middle" '
-            f'font-family="Latin Modern Roman, CMU Serif, serif" '
+            f'font-family="Helvetica, Arial, sans-serif" font-weight="bold" '
             f'font-size="{fs_blk}" fill="{col_outline}">{base}</text>'
             f'<text x="{sub_x}" y="{sub_y}" text-anchor="start" '
-            f'font-family="Latin Modern Roman, CMU Serif, serif" '
+            f'font-family="Helvetica, Arial, sans-serif" font-weight="bold" '
             f'font-size="{sub_size}" fill="{col_outline}">{sub}</text>'
         )
 
@@ -218,7 +218,7 @@ def create_exec_unit_svg() -> str:
 
     # Gap between bars: green bars shrink by 20%, gap fills the rest.
     # Total footprint unchanged: 3 visible bars + 2 gaps = x_part * 3 = mid_w.
-    gap_frac = 0.20
+    gap_frac = 0.12
     green_bar = x_part * (1 - gap_frac)          # visible bar width
     green_gap = x_part * gap_frac                 # invisible gap width
     # For input: gap between blue W and green x, same gap width
