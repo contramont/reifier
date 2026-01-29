@@ -173,7 +173,7 @@ def create_exec_unit_svg() -> str:
 
     def arect(x: float, y: float, w: float, fill: str) -> str:
         return (f'<rect x="{R(x)}" y="{R(y)}" width="{R(w)}" height="{vh}" '
-                f'rx="{vr}" fill="{fill}" stroke="{col_s}" stroke-width="{sw}"/>')
+                f'rx="{vr}" fill="{fill}"/>')
 
     def blabel(cx: float, cy: float, text: str) -> str:
         return (f'<text x="{cx}" y="{cy}" text-anchor="middle" '
@@ -194,32 +194,34 @@ def create_exec_unit_svg() -> str:
 
     extra: list[str] = []
 
-    # 1. Input [W | x] — centered on visible wire between Norm bottom and p_bot
+    # Consistent sizing: input has 4 parts [W=3 | x=1].
+    # After Wg: 3 green bars each = x_part. After Wv: blue = 3 * x_part.
+    # Middle blue and green bars have equal total width.
     in_w = 12
+    x_part = in_w / 4       # 3
+    w_part = in_w - x_part   # 9
+    mid_w = w_part            # 9, same for blue and green totals
+
+    # 1. Input [W | x] — centered on visible wire between Norm bottom and p_bot
     in_x = p_top.x - in_w / 2
     in_y = (wn.bot.y + half_sw + p_bot.y) / 2 - vh / 2
-    w_part = in_w * 0.75
-    x_part = in_w - w_part
     extra.append(arect(in_x, in_y, w_part, col_w))
     extra.append(arect(in_x + w_part, in_y, x_part, col_x))
-    extra.append(f'<rect x="{R(in_x)}" y="{R(in_y)}" width="{in_w}" height="{vh}" '
-                 f'rx="{vr}" fill="none" stroke="{col_s}" stroke-width="{sw}"/>')
 
     # 2. W after Wv — centered on left wire between Wv.top and ⊗.bot
-    vw = cell_width * 0.5
     mid_y = (wv.top.y + m.bot.y) / 2 - vh / 2
-    vx = p_top.x - vw / 2  # centered on wire
-    extra.append(arect(vx, mid_y, vw, col_w))
+    vx = p_top.x - mid_w / 2
+    extra.append(arect(vx, mid_y, mid_w, col_w))
 
-    # 3. f(x) copies — centered on right wire between SiLU and Wg
-    fx_vx = f.center.x - vw / 2  # centered on wire
-    extra.append(arect(fx_vx, mid_y, vw, col_x))
+    # 3. f(x) × n — 3 adjacent green bars, centered on right wire between SiLU and Wg
+    fx_vx = f.center.x - mid_w / 2
+    for i in range(3):
+        extra.append(arect(fx_vx + i * x_part, mid_y, x_part, col_x))
 
     # 4. Partial products — centered on left wire between ⊗.top and Wo.bot
     pp_mid_y = (wo.bot.y + m.top.y) / 2 - vh / 2
-    pp_vw = cell_width * 0.55
-    pp_vx = p_top.x - pp_vw / 2  # centered on wire
-    extra.append(arect(pp_vx, pp_mid_y, pp_vw, col_out))
+    pp_vx = p_top.x - mid_w / 2
+    extra.append(arect(pp_vx, pp_mid_y, mid_w, col_out))
 
     # 5. Output y — centered on visible wire between arrow base and Wo top
     out_w = cell_width * 0.35
