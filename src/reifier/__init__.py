@@ -4,11 +4,11 @@ from .neurons import operations as ops
 from .utils.format import Bits
 from .utils import format
 
-from .compile.tree import TreeCompiler
-from .tensors.compilation import Compiler
+# from .compile.tree import TreeCompiler
+# from .tensors.compilation import Compiler
 
 from .examples.keccak import Keccak
-from .examples.sandbagging import get_sandbagger
+# from .examples.sandbagging import get_sandbagger
 
 
 __all__ = [
@@ -23,9 +23,9 @@ __all__ = [
     "format",
     "Bits",
     # Compilation:
-    "TreeCompiler",
-    "Compiler",
+    # "TreeCompiler",
+    # "Compiler",
     # Examples:
     "Keccak",
-    "get_sandbagger",
+    # "get_sandbagger",
 ]
