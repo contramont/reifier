@@ -46,7 +46,7 @@ class SwiGLU(nn.Module):
         2) Simulates ReLU with SiLU by scaling up and down
         Making two ReLUs a, b such that a-b is this fn:
         y=0 until x=0.5-1/4c, then slope up until x=0.5+1/4c and y=1. Then y=1.
-        Demo: https://www.desmos.com/calculator/sk42yz8ami
+        Demo: https://www.desmos.com/calculator/w806u4n8hl
         """
         # c: making ReLU-simulated step fn steeper
         # q: scaling before and after SiLU to avoid non-ReLU-like dip
