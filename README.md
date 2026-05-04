@@ -15,6 +15,8 @@ Circuit visualization:
 
 Interactive visualization [here](http://draguns.me/circuit.html)
 
+The visualization has inputs at the bottom and outputs at the top.
+
 Simple example calculating xor of 5 bits:
 ```python
 from reifier.neurons.core import const
