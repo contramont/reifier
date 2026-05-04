@@ -15,6 +15,15 @@ class Color:
 
     @property
     def css(self) -> str:
+        h = self.hue % 360
+        if 170 <= h <= 210:
+            return f"hsla(0, 0%, {self.lightness}%, {self.alpha})"
+        if 260 <= h <= 295:
+            return f"hsla(26, 78%, {self.lightness}%, {self.alpha})"
+        if 35 <= h <= 70:
+            return f"hsla(44, 88%, {self.lightness}%, {self.alpha})"
+        if 80 <= h <= 140:
+            return f"hsla(138, 70%, {self.lightness}%, {self.alpha})"
         return f"hsla({self.hue}, {self.saturation}%, {self.lightness}%, {self.alpha})"
 
     def __add__(self, other: "Color") -> "Color":
@@ -160,7 +169,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     body {{
         margin: 0;
         font-family: system-ui, -apple-system, sans-serif;
-        background: #1a1a1a;
+        background: #0d1410;
         color: #f0f0f0;
     }}
     
@@ -194,8 +203,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         position: fixed;
         top: 20px;
         right: 20px;
-        background: rgba(40, 40, 40, 0.80);
-        border: 1px solid #555;
+        background: rgba(20, 28, 22, 0.85);
+        border: 1px solid #6a6a6a;
         padding: 15px;
         border-radius: 8px;
         max-width: 400px;
