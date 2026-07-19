@@ -127,10 +127,12 @@ def build_round_template(w: int) -> Template:
 
 @lru_cache(maxsize=None)
 def _template_key(w: int):
-    """The Stamped cache key for a theta_rho_pi_chi call at word size w."""
+    """The Stamped cache key for a theta_rho_pi_chi call at word size w.
+    Lane bits are always distinct objects, so the alias pattern is 0..n-1."""
     lane_sig = ("list", (_BIT_LEAF,) * w)
     lanes_sig = ("list", (("list", (lane_sig,) * 5),) * 5)
-    return ("tuple", (("tuple", (lanes_sig,)), ("tuple", ())))
+    signature = ("tuple", (("tuple", (lanes_sig,)), ("tuple", ())))
+    return (signature, tuple(range(25 * w)))
 
 
 def prime_round_template(w: int) -> None:
@@ -142,9 +144,15 @@ def prime_round_template(w: int) -> None:
 
 
 def _traced_key_check(w: int) -> bool:
-    """Test helper: does _template_key match _signature on real arguments?"""
+    """Test helper: does _template_key match the key built from real arguments?"""
     from reifier.neurons.core import const
+    from reifier.fast.leveler import flatten_bits
+    from reifier.fast.stamp import _alias_pattern
 
-    bit = const("0")[0]
-    lanes = [[[bit for _ in range(w)] for _ in range(5)] for _ in range(5)]
-    return _signature(((lanes,), ())) == _template_key(w)
+    bits = const("0" * (25 * w))
+    lanes = [
+        [[bits[(x * 5 + y) * w + z] for z in range(w)] for y in range(5)]
+        for x in range(5)
+    ]
+    key = (_signature(((lanes,), ())), _alias_pattern(flatten_bits(((lanes,), {}))))
+    return key == _template_key(w)

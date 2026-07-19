@@ -8,11 +8,12 @@ leveler then assembles each instance into the compiled arrays with
 vectorized index arithmetic instead of walking its gates one by one.
 
 Soundness contract for a stamped function:
-- its gate structure must depend only on the shapes of its arguments and the
-  values of its non-Bit arguments (both are part of the cache key), and
+- its gate structure must depend only on the shapes of its arguments, the
+  values of its non-Bit arguments, and the aliasing pattern of its Bit
+  arguments (all three are part of the cache key), and
 - every external Bit it consumes must be reachable through its arguments
   (no live closure Bits; closure constants are rejected too).
-Violations are detected during tracing and raise `StampError`.
+Contract violations are detected during tracing and raise `StampError`.
 """
 
 from __future__ import annotations
@@ -67,9 +68,23 @@ def _signature(obj: Any) -> Any:
         return (type(obj).__name__, tuple(_signature(el) for el in obj))
     if isinstance(obj, dict):
         return ("dict", tuple((k, _signature(v)) for k, v in obj.items()))
-    if obj is None or isinstance(obj, (bool, int, float, str, bytes)):
+    if isinstance(obj, (bool, int, float)):
+        # tag with the type so True, 1 and 1.0 don't share a cache key
+        return (type(obj).__name__, obj)
+    if obj is None or isinstance(obj, (str, bytes)):
         return obj
     raise StampError(f"Unsupported argument type for a stamped function: {type(obj)}")
+
+
+def _alias_pattern(flat_args: list[Bit]) -> tuple[int, ...]:
+    """First-occurrence index of each argument Bit.
+
+    Part of the cache key: a call passing the same Bit object at two
+    positions must not share a template with a call passing distinct Bits,
+    since tracing collapses aliased positions into one template input slot.
+    """
+    first: dict[int, int] = {}
+    return tuple(first.setdefault(id(b), p) for p, b in enumerate(flat_args))
 
 
 def _make_skeleton(obj: Any) -> Any:
@@ -116,20 +131,24 @@ class Stamped:
         self.__name__ = getattr(fn, "__name__", "stamped")
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        key = _signature((args, tuple(kwargs.items())))
+        flat_args = flatten_bits((args, kwargs))
+        key = (_signature((args, tuple(kwargs.items()))), _alias_pattern(flat_args))
         template = self.cache.get(key)
         if template is None:
-            template, result = self._trace(args, kwargs)
+            template, result = self._trace(args, kwargs, flat_args)
             if template is not None:
                 self.cache[key] = template
             return result
-        return self._stamp(template, args, kwargs)
+        return self._stamp(template, flat_args)
 
-    def _trace(self, args: tuple, kwargs: dict) -> tuple[Template | None, Any]:
+    def _trace(
+        self, args: tuple, kwargs: dict, flat_args: list[Bit] | None = None
+    ) -> tuple[Template | None, Any]:
         start_uid = take_uid()
         result = self.fn(*args, **kwargs)
         out_bits = flatten_bits(result)
-        flat_args = flatten_bits((args, kwargs))
+        if flat_args is None:
+            flat_args = flatten_bits((args, kwargs))
         pos_by_id: dict[int, int] = {}
         for p, b in enumerate(flat_args):
             pos_by_id.setdefault(id(b), p)
@@ -196,8 +215,7 @@ class Stamped:
         )
         return template, result
 
-    def _stamp(self, template: Template, args: tuple, kwargs: dict) -> Any:
-        flat_args = flatten_bits((args, kwargs))
+    def _stamp(self, template: Template, flat_args: list[Bit]) -> Any:
         input_bits = [flat_args[p] for p in template.arg_positions]
         values = np.fromiter(
             (b.activation for b in input_bits), dtype=np.int64, count=len(input_bits)

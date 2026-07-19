@@ -162,6 +162,97 @@ def test_fast_arrays_into_mlp():
     assert out.bitstr == k.digest(msg).bitstr
 
 
+def test_stamped_alias_patterns():
+    """Aliased Bit arguments must not share templates with distinct ones."""
+    from reifier.fast.stamp import Stamped
+
+    def g(pair):
+        return [xor(pair)]
+
+    s = Stamped(g)
+    a, _ = const("00")
+    assert not s([a, a])[0].activation  # traces the aliased pattern
+    c, d = const("01")
+    out = s([c, d])  # distinct pattern must trace separately
+    assert out[0].activation  # xor(0, 1) == 1
+    arrays = level_graph([c, d], out)
+    for vc, vd in [(0, 0), (0, 1), (1, 0), (1, 1)]:
+        assert int(arrays.run([vc, vd])[0]) == (vc + vd) % 2
+    e, _ = const("11")
+    assert not s([e, e])[0].activation  # aliased template reused: xor(1, 1) == 0
+
+    # passthrough outputs must also respect the alias pattern
+    def m(pair):
+        return [pair[1], xor(pair)]
+
+    sm = Stamped(m)
+    u, _ = const("00")
+    sm([u, u])
+    v0, v1 = const("01")
+    out = sm([v0, v1])
+    assert out[0] is v1
+
+
+def test_two_stamped_templates_in_one_graph():
+    """Two distinct templates, traced on first use (no priming), interleaved."""
+    from reifier.fast.stamp import Stamped
+
+    s_xor = Stamped(lambda xs: [xor(xs)])
+    s_pair = Stamped(lambda xs: [xor(xs), not_(xs[0])])
+
+    def f(bits):
+        mids = s_xor(bits[:3]) + s_pair(bits[1:])  # first calls: traced
+        mids2 = s_xor(mids) + s_pair([mids[1], mids[2], bits[0]])  # stamped
+        return mids2 + s_xor([mids2[0], mids2[2], bits[3]])
+
+    def f_plain(bits):
+        mids = [xor(bits[:3]), xor(bits[1:]), not_(bits[1])]
+        mids2 = [xor(mids), xor([mids[1], mids[2], bits[0]]), not_(mids[1])]
+        return mids2 + [xor([mids2[0], mids2[2], bits[3]])]
+
+    inputs = const("0000")
+    arrays = fast_compile(f, inputs)
+    for value in range(16):
+        vals = [int(b) for b in format(value, "04b")]
+        expected = [int(b.activation) for b in f_plain(const(format(value, "04b")))]
+        assert list(arrays.run(vals)) == expected, f"input {vals}"
+
+
+def test_fully_const_stamped_instance():
+    """A stamped call whose inputs are all constants folds into biases."""
+    from reifier.fast.stamp import Stamped
+
+    s = Stamped(lambda xs: [xor(xs), not_(xs[0])])
+    live = const("00")
+    s(const("10"))  # trace
+    folded = s(const("11"))  # stamped on consts only: xor=0, not=0
+    outs = [xor([live[0], folded[0]]), xor([live[1], folded[1], folded[0]])]
+    arrays = fast_compile(lambda x: outs, live)
+    for v0, v1 in [(0, 0), (0, 1), (1, 0), (1, 1)]:
+        assert list(arrays.run([v0, v1])) == [v0, v1]
+
+
+def test_fast_compile_stamped_xof():
+    """Compile a stamped xof graph (multi-depth outputs, copies + blocks)."""
+    k = Keccak(log_w=1, n=2, c=20, pad_char="_")
+    ks = Keccak(log_w=1, n=2, c=20, pad_char="_", stamp=True)
+    msg = k.format("Rachmaninoff", clip=True)
+    dummy = Bits("0" * len(msg))
+
+    def xof3(bits):
+        return xof(bits.bitlist, depth=3, k=ks)
+
+    arrays = fast_compile(xof3, dummy)
+    expected = [Bits(d).bitstr for d in xof(msg.bitlist, depth=3, k=k)]
+    got_flat = list(arrays.run(msg.ints))
+    sizes = [len(e) for e in expected]
+    got, start = [], 0
+    for size in sizes:
+        got.append("".join(map(str, got_flat[start : start + size])))
+        start += size
+    assert got == expected
+
+
 def test_level_graph_matches_nodegraph_run():
     """Fast leveler and legacy NodeGraph agree on the same signal graph."""
     from reifier.sparse.compile import compiled_from_io
