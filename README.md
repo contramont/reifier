@@ -27,3 +27,21 @@ inputs = const('01101')
 output = xor(inputs)
 print(f"{Bits(inputs)} -> {Bits(output)}")
 ```
+
+Fast compilation with `reifier.fast` (compiles full SHA3-224 Keccak into a
+leveled circuit in well under a second, >1000x faster than the tracing
+compiler):
+```python
+from reifier.examples.keccak import Keccak
+from reifier.fast import fast_compile
+from reifier.utils.format import Bits
+
+k = Keccak(log_w=6, n=24, c=448, pad_char="_", stamp=True)
+dummy = Bits("0" * k.msg_len)
+circuit = fast_compile(k.digest, dummy)  # numpy-backed leveled graph
+msg = k.format("Rachmaninoff")
+print(Bits([int(v) for v in circuit.run(msg.ints)]).hex)
+```
+`Keccak(stamp=True)` compiles each round's structure once and stamps it for
+all 24 rounds (see `reifier.fast.stamp`). Benchmark with
+`python benchmarks/bench_keccak.py`.

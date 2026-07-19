@@ -107,6 +107,13 @@ def iota(lanes: Lanes, rc: str) -> Lanes:
 
 
 # Main SHA3 functions
+def theta_rho_pi_chi(lanes: Lanes) -> Lanes:
+    """The structurally round-independent part of a Keccak round.
+    Grouped so that `Keccak(stamp=True)` can compile it once and stamp it
+    per round (iota varies per round and stays outside)."""
+    return chi(rho_pi(theta(lanes)))
+
+
 def keccak_round(lanes: Lanes, rc: str) -> Lanes:
     lanes = theta(lanes)
     lanes = rho_pi(lanes)
@@ -133,6 +140,7 @@ class Keccak:
     suffix: Literal[0x86, 0x9F, 0x84] = 0x86  # [SHA3, SHAKE, cSHAKE]
     suffix_len: int = 8  # constant
     auto_c: bool = False  # override c with an automatically calculated value
+    stamp: bool = False  # build rounds via cached templates (reifier.fast)
 
     def __post_init__(self) -> None:
         self.check_params()
@@ -237,7 +245,14 @@ class Keccak:
         constants = self.get_round_constants()  # (n, ?)
         for r in range(self.n):
             r_iota = partial(iota, rc=constants[r])
-            fns.append([theta, rho_pi, chi, r_iota])
+            if self.stamp:
+                from reifier.fast.stamp import stamped
+                from reifier.examples.keccak_template import prime_round_template
+
+                prime_round_template(self.w)
+                fns.append([stamped(theta_rho_pi_chi), r_iota])
+            else:
+                fns.append([theta, rho_pi, chi, r_iota])
         return fns  # (n, 4)
 
     def hash_state(self, state: State) -> State:

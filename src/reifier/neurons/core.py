@@ -1,5 +1,16 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections.abc import Callable
+from itertools import count
+
+# Monotonic id source for Signals. Creation order lets compilers tell which
+# signals were created during a traced call (see reifier.fast.stamp) and
+# gives deterministic node ordering.
+_uid_counter = count()
+
+
+def take_uid() -> int:
+    """Consume and return the next Signal uid (a creation-time watermark)."""
+    return next(_uid_counter)
 
 
 # Core MLP classes
@@ -9,6 +20,7 @@ class Signal:
 
     activation: bool | float
     source: "Neuron"
+    uid: int = field(default_factory=_uid_counter.__next__)
 
     def __repr__(self):
         return f"Signal({self.activation})"
@@ -38,7 +50,12 @@ def step(x: float | int) -> bool:
 
 def gate(incoming: list[Bit], weights: list[int], threshold: int) -> Bit:
     """Create a linear threshold gate as a boolean neuron with a step function"""
-    return Neuron(tuple(incoming), tuple(weights), -threshold, step).outgoing
+    # Equivalent to Neuron(...).outgoing, inlined for speed on the hot path
+    total = -threshold
+    for signal, weight in zip(incoming, weights):
+        total += signal.activation * weight
+    neuron = Neuron(tuple(incoming), tuple(weights), -threshold, step)
+    return Signal(total >= 0, neuron)
 
 
 def const(values: list[bool] | list[int] | str) -> list[Bit]:

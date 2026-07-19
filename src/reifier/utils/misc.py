@@ -21,13 +21,17 @@ class OrderedSet(MutableSet[T]):
         self._d.pop(value, None)
 
     def update(self, iterable: Iterable[T]) -> None:
-        for value in iterable:
-            self.add(value)
+        self._d.update(dict.fromkeys(iterable))
 
     def __or__(self, other: Set[Any]) -> "OrderedSet[T]":
-        result = OrderedSet(self)
-        result.update(other)
+        result: OrderedSet[T] = OrderedSet()
+        result._d = self._d.copy()
+        result._d.update(dict.fromkeys(other))
         return result
+
+    def __ior__(self, other: Iterable[T]) -> "OrderedSet[T]":  # type: ignore[override, misc]
+        self._d.update(dict.fromkeys(other))
+        return self
 
     def __contains__(self, x: object) -> bool:
         return self._d.__contains__(x)

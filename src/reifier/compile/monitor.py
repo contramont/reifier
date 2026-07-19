@@ -68,10 +68,10 @@ def find[T](obj: Any, target_type: type[T]) -> list[tuple[T, list[int]]]:
         elif isinstance(item, Iterable):
             if isinstance(item, dict):
                 item = item.values()  # type: ignore
+            branching = hasattr(item, "__len__") and len(item) > 1  # type: ignore
             for i, elem in enumerate(item):  # type: ignore
-                next_indices = indices  # type: ignore
-                if hasattr(item, "__len__") and len(item) > 1:  # type: ignore
-                    next_indices += [i]
+                # copy so sibling branches don't share (and corrupt) the path
+                next_indices = indices + [i] if branching else indices
                 search(elem, next_indices)
 
     search(obj, indices=[])
