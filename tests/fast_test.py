@@ -253,6 +253,49 @@ def test_fast_compile_stamped_xof():
     assert got == expected
 
 
+def test_compile_keccak_direct():
+    """The vectorized compiler matches digests and the stamped fast path."""
+    from reifier.examples.keccak_compile import compile_keccak
+
+    for log_w, n, c in [(0, 1, 10), (0, 3, 10), (1, 3, 20), (2, 5, 40)]:
+        k = Keccak(log_w=log_w, n=n, c=c, pad_char="_")
+        arrays = compile_keccak(k)
+        ks = Keccak(log_w=log_w, n=n, c=c, pad_char="_", stamp=True)
+        stamped_arrays = fast_compile(ks.digest, Bits("0" * k.msg_len))
+        for phrase in ("Rachmaninoff", "Reify semantics"):
+            msg = k.format(phrase, clip=True)
+            expected = k.digest(msg).bitstr
+            assert "".join(map(str, arrays.run(msg.ints))) == expected
+            assert "".join(map(str, stamped_arrays.run(msg.ints))) == expected
+
+
+def test_compile_keccak_full_sha3():
+    """Full SHA3-224 via the vectorized compiler, checked against hashlib."""
+    from reifier.examples.keccak_compile import compile_keccak
+
+    k = Keccak(log_w=6, n=24, c=448, pad_char="_")
+    arrays = compile_keccak(k)
+    for phrase in ("Rachmaninoff", "Reify semantics as referentless embeddings"):
+        padded = (phrase + "_" * 143)[:143]
+        msg = k.format(padded)
+        got = Bits([int(v) for v in arrays.run(msg.ints)]).hex
+        assert got == hashlib.sha3_224(padded.encode()).hexdigest()
+
+
+def test_compile_keccak_into_mlp():
+    """Directly compiled circuits plug into the Matrices/MLP stack."""
+    from reifier.examples.keccak_compile import compile_keccak
+    from reifier.tensors.matrices import Matrices
+    from reifier.tensors.step import MLP_Step
+    from reifier.tensors.mlp_utils import infer_bits_bos
+
+    k = Keccak(log_w=1, n=3, c=20, pad_char="_")
+    arrays = compile_keccak(k)
+    mlp = MLP_Step.from_matrices(Matrices.from_graph(arrays.to_leveled_graph()))
+    msg = k.format("Rachmaninoff", clip=True)
+    assert infer_bits_bos(mlp, msg).bitstr == k.digest(msg).bitstr
+
+
 def test_level_graph_matches_nodegraph_run():
     """Fast leveler and legacy NodeGraph agree on the same signal graph."""
     from reifier.sparse.compile import compiled_from_io

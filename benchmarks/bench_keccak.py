@@ -6,6 +6,7 @@ Usage:
     python benchmarks/bench_keccak.py --log-w 3 --rounds 3 --paths fast,sparse,tree
 
 Paths:
+    direct  compile_keccak: fully vectorized round stacking (fastest)
     fast    reifier.fast with Keccak(stamp=True) (template stamping)
     sparse  legacy NodeGraph -> SparseGraph pipeline
     tree    TreeCompiler (sys.monitoring tracer); very slow at full size
@@ -20,6 +21,27 @@ import time
 
 from reifier.examples.keccak import Keccak
 from reifier.utils.format import Bits
+
+
+def bench_direct(k_args: dict, msg: Bits, repeat: int) -> None:
+    from reifier.examples.keccak_compile import compile_keccak
+
+    k = Keccak(**k_args)
+    expected = k.digest(msg).bitstr
+    times = []
+    arrays = None
+    for _ in range(repeat):
+        t0 = time.perf_counter()
+        arrays = compile_keccak(k)
+        times.append(time.perf_counter() - t0)
+    assert arrays is not None
+    got = "".join(map(str, arrays.run(msg.ints)))
+    assert got == expected, "compiled circuit disagrees with direct digest"
+    label = ", ".join(f"{t:.3f}s" for t in times)
+    print(
+        f"direct: [{label}] nodes={arrays.n_nodes} edges={arrays.n_edges} "
+        f"levels={len(arrays.level_sizes)}"
+    )
 
 
 def bench_fast(k_args: dict, msg: Bits, repeat: int) -> None:
@@ -80,7 +102,7 @@ def main() -> None:
     parser.add_argument("--log-w", type=int, default=6)
     parser.add_argument("--rounds", type=int, default=24)
     parser.add_argument("--capacity", type=int, default=448)
-    parser.add_argument("--paths", type=str, default="fast")
+    parser.add_argument("--paths", type=str, default="direct,fast")
     parser.add_argument("--repeat", type=int, default=2)
     args = parser.parse_args()
 
@@ -89,7 +111,12 @@ def main() -> None:
     msg = k.format("Rachmaninoff", clip=True)
     print(f"Keccak(log_w={args.log_w}, n={args.rounds}, c={args.capacity})")
 
-    runners = {"fast": bench_fast, "sparse": bench_sparse, "tree": bench_tree}
+    runners = {
+        "direct": bench_direct,
+        "fast": bench_fast,
+        "sparse": bench_sparse,
+        "tree": bench_tree,
+    }
     for name in args.paths.split(","):
         runners[name.strip()](k_args, msg, args.repeat)
 

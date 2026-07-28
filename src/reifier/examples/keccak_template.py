@@ -48,8 +48,10 @@ def _rho_pi_sources(w: int) -> np.ndarray:
     )
 
 
+@lru_cache(maxsize=None)
 def build_round_template(w: int) -> Template:
-    """Build the theta_rho_pi_chi template for word size w without tracing."""
+    """Build the theta_rho_pi_chi template for word size w without tracing.
+    Cached per word size; callers share the arrays and must not mutate them."""
     n = 25 * w  # number of lane positions
     x, y, z = _positions(w)
 
