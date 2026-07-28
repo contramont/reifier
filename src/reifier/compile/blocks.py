@@ -151,38 +151,74 @@ def traverse(
     b: Block, order: Literal["call", "return"] = "call"
 ) -> Generator[Block, None, None]:
     """Walks the call tree and yields each block."""
-    if order == "call":
-        yield b
-    for child in b.children:
-        yield from traverse(child, order)
-    if order == "return":
-        yield b
+    if order == "call":  # pre-order
+        stack = [b]
+        while stack:
+            node = stack.pop()
+            yield node
+            stack.extend(reversed(node.children))
+    else:  # post-order
+        post_stack: list[tuple[Block, bool]] = [(b, False)]
+        while post_stack:
+            node, expanded = post_stack.pop()
+            if expanded:
+                yield node
+                continue
+            post_stack.append((node, True))
+            post_stack.extend((c, False) for c in reversed(node.children))
 
 
-def get_lca_children_split(x: Block, y: Block) -> tuple[Block, Block]:
+def _tree_depth(b: Block, cache: dict[Block, int]) -> int:
+    """Depth of b in the call tree (root=0), memoized in `cache`."""
+    chain: list[Block] = []
+    node: Block | None = b
+    while node is not None and node not in cache:
+        chain.append(node)
+        node = node.parent
+    d = -1 if node is None else cache[node]
+    for link in reversed(chain):
+        d += 1
+        cache[link] = d
+    return d
+
+
+def get_lca_children_split(
+    x: Block, y: Block, depth_cache: dict[Block, int] | None = None
+) -> tuple[Block, Block]:
     """
     Find the last common ancestor of x and y.
     Then returns its two children a and b that are on paths to x and y respectively.
     """
-    x_path = x.path_from_root
-    y_path = y.path_from_root
-    for i in range(min(len(x_path), len(y_path))):
-        if x_path[i] != y_path[i]:
-            return (
-                x_path[i],
-                y_path[i],
-            )  # Found the first mismatch, return lca_child_to_x, lca_child_to_y
-    raise ValueError(
-        f"b and its ancestor are on the same path to root: b ancestor={x.path}, creator ancestor={y.path}"
-    )
+    if depth_cache is None:
+        depth_cache = {}
+    a: Block | None = x
+    b: Block | None = y
+    da = _tree_depth(x, depth_cache)
+    db = _tree_depth(y, depth_cache)
+    prev_a: Block | None = None
+    prev_b: Block | None = None
+    while da > db and a is not None:
+        prev_a, a, da = a, a.parent, da - 1
+    while db > da and b is not None:
+        prev_b, b, db = b, b.parent, db - 1
+    while a is not b and a is not None and b is not None:
+        prev_a, a = a, a.parent
+        prev_b, b = b, b.parent
+    if prev_a is None or prev_b is None:
+        raise ValueError(
+            f"b and its ancestor are on the same path to root: b ancestor={x.path}, creator ancestor={y.path}"
+        )
+    return prev_a, prev_b
 
 
-def update_ancestor_depths(b: Block) -> None:
+def update_ancestor_depths(b: Block, depth_cache: dict[Block, int] | None = None) -> None:
     """On return of a block b, set its depth to be after its inputs, update ancestor depths if necessary"""
     for inflow in b.inputs:
         if inflow.creator is None:
             continue
-        b_ancestor, creator_ancestor = get_lca_children_split(b, inflow.creator)
+        b_ancestor, creator_ancestor = get_lca_children_split(
+            b, inflow.creator, depth_cache
+        )
         if (
             b_ancestor.bot < creator_ancestor.top
         ):  # current block must be above the parent block
@@ -438,6 +474,7 @@ def set_layout(root: Block) -> Block:
 
     # inp_blocks = create_input_blocks(root)
     set_flow_creators(root)
+    depth_cache: dict[Block, int] = {}  # tree depths are stable during this pass
     for b in traverse(root, order="return"):
         # Set creator/copy size to 1x1
         if b.is_creator:
@@ -455,7 +492,7 @@ def set_layout(root: Block) -> Block:
             b.top += 1
 
         # Ensure b comes after its inputs are created
-        update_ancestor_depths(b)
+        update_ancestor_depths(b, depth_cache)
 
         # Ensure correct top depth
         if b.children:

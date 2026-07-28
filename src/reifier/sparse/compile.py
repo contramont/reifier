@@ -78,7 +78,8 @@ class NodeGraph:
         while constants:
             new_constants: OrderedSet["Node"] = OrderedSet()
             for c in constants:
-                value = c.bias + 1
+                # a parentless gate outputs its step activation: 1 iff bias >= 0
+                value = 1 if c.bias >= 0 else 0
                 for child in c.children:
                     w = child.weights[c]
                     child.bias += value * w
@@ -119,6 +120,11 @@ class NodeGraph:
 
                 # Record parents of frontier nodes
                 neuron = signals[child].source
+                if not hasattr(neuron, "incoming"):
+                    raise TypeError(
+                        "Graph contains stamped subcircuits; compile it with "
+                        "reifier.fast.level_graph instead of NodeGraph"
+                    )
                 child.bias = neuron.bias
                 for i, p in enumerate(neuron.incoming):
                     if p not in nodes:
