@@ -1,6 +1,6 @@
 [project]
 name = "reifier"
-version = "0.0.2"
+version = "0.0.4"
 description = "Neural network compilation"
 authors = [{name = "Andis Draguns"}]
 readme = "README.md"
