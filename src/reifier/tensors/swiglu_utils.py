@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import torch as t
 import torch.nn.functional as F
 
@@ -40,7 +42,7 @@ def clone_mlp(model: MLP_SwiGLU) -> MLP_SwiGLU:
     """Clones an MLP_SwiGLU model"""
     sizes = get_swiglu_mlp_sizes(model)
     model_clone = MLP_SwiGLU(sizes)
-    model_clone.load_state_dict(model.state_dict())
+    model_clone.layers = deepcopy(model.layers)  # hidden sizes vary with gated units
     return model_clone
 
 

@@ -75,6 +75,8 @@ class FlatCircuit:
 
     @classmethod
     def from_matrices(cls, matrices: Matrices) -> "FlatCircuit":
+        if any(matrices.ulist):
+            raise ValueError("FlatCircuit does not support gated units (glu)")
         ternarized = cls.ternarize_matrices(matrices)
         flat_layers = [cls.matrix_to_bitlist(m) for m in ternarized]
         sizes = [m.size(1) for m in ternarized] + [ternarized[-1].size(0)]

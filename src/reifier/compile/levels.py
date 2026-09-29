@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from reifier.neurons.core import Unit
+
 
 @dataclass(frozen=True)
 class Parent:
@@ -16,6 +18,7 @@ class Origin:
     index: int  # index of the node in the level
     incoming: tuple[Parent, ...]  # parents of the node
     bias: int  # bias of the node
+    units: tuple[Unit, ...] = ()  # gated units on the parents (neurons.core.glu)
 
 
 @dataclass(frozen=True)

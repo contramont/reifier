@@ -130,14 +130,14 @@ class Block:
             node_to_block[n] = b
 
             # Mark gates
-            if n.name == "gate":
+            if n.name in ("gate", "glu"):
                 # assert n.creation is not None, f"gate {b.path} has no creation"
                 b.outputs = OrderedSet([Flow(list(n.outputs)[0][0], b)])
                 b.flavour = "gate"
                 b.is_creator = True
 
             # Add parent
-            if n.parent and n.parent.name != "gate":  # not tracking gate subcalls
+            if n.parent and n.parent.name not in ("gate", "glu"):  # skip their subcalls
                 b.parent = node_to_block[n.parent]
                 b.parent.children.append(b)
 
@@ -436,17 +436,13 @@ def fold_untraced_bits(root: Block) -> None:
         frontier = new_frontier
     assert len(live_untraced_bits) == 0, "Live untraced bits are currently unsupported"
 
-    # fold untraced bits into gate biases
+    # remove untraced bits, which Tree._gate_origin folds into gate biases
     for b in traverse(root, "call"):
         inflows = b.inputs
-        for j, inflow in enumerate(list(inflows)):
+        for inflow in list(inflows):
             # assert isinstance(inflow, Flow), f"inflow is not a Flow: {type(inflow)} {inflow}, {b.path}"
             if inflow.data in untraced_bits:
-                # fold untraced bit into gate bias
                 if b.flavour == "gate":
-                    untraced_w = b.creation.data.source.weights[j]
-                    untraced_value = b.creation.data.source.incoming[j].activation
-                    b.origin = Origin(0, (), int(untraced_value * untraced_w))
                     b.flavour = "folded"
 
                 # remove from inputs

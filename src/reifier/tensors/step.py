@@ -34,6 +34,8 @@ class MLP_Step(MLP):
     def from_matrices(
         cls, matrices: Matrices, dtype: t.dtype = t.float32
     ) -> "MLP_Step":
+        if any(matrices.ulist):
+            raise ValueError("MLP_Step does not support gated units, use MLP_SwiGLU")
         mlp = cls(matrices.sizes, dtype=dtype)
         for layer, m in zip(mlp.layers, matrices.mlist):
             assert isinstance(layer, StepLayer)

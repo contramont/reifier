@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from math import ceil
 
-from reifier.neurons.core import Bit, gate, const
+from reifier.neurons.core import Bit, Unit, gate, glu, const
 
 
 # Logic gates
@@ -22,6 +22,24 @@ def xor(x: list[Bit]) -> Bit:
     return gate(counters, [(-1) ** i for i in range(len(x))], 1)
 
 
+def glu_xor(x: list[Bit], clean: bool = False) -> Bit:
+    """xor in one SwiGLU layer, where xor takes two, as gated units on s = sum(x):
+    max(0,s)(2-s) + sum_j 4max(0,s-2j) with ceil(n/2) units, or if clean, n units
+    that are flat to first order at every integer s. The terms of both grow like
+    s^2, so wide xors of inexact inputs lose precision (clean from ~32 bits)"""
+    n = len(x)
+    if not clean:
+        units = [Unit((1,) * n, 0, (-1,) * n, 2)]
+        units += [Unit((1,) * n, -2 * j, (0,) * n, 4) for j in range(1, ceil(n / 2))]
+    else:
+        units = []
+        for m in range(1, n + 1, 2):  # max(0,2s-2m+1)(2m+1-2s), a bump at s=m
+            units.append(Unit((2,) * n, 1 - 2 * m, (-2,) * n, 2 * m + 1))
+            if m < n:  # max(0,2s-2m-1)(2s-2m+1) cancels the bump past s=m+1/2
+                units.append(Unit((2,) * n, -1 - 2 * m, (2,) * n, 1 - 2 * m))
+    return glu(x, units)
+
+
 def bitwise(
     gate_fn: Callable[[list[Bit]], Bit],
 ) -> Callable[[list[list[Bit]]], list[Bit]]:
@@ -36,6 +54,7 @@ def nots(x: list[Bit]) -> list[Bit]:
 ors = bitwise(or_)
 ands = bitwise(and_)
 xors = bitwise(xor)
+glu_xors = bitwise(glu_xor)
 
 
 def parity(x: list[Bit]) -> Bit:

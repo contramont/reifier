@@ -15,11 +15,12 @@ class SwiGLU(nn.Module):
         out_f: int,
         has_bias: bool = False,
         dtype: t.dtype = t.float32,
+        hidden_f: int | None = None,
     ):
         super().__init__()  # type: ignore
         self.dtype = dtype  # type: ignore  # ty
         self.has_bias = has_bias  # type: ignore  # ty
-        hidden_features = int(out_f * 2)
+        hidden_features = hidden_f or int(out_f * 2)
         
         self.norm = nn.modules.normalization.RMSNorm(in_f)
         self.wg = nn.Linear(in_f, hidden_features, bias=has_bias)
@@ -39,6 +40,7 @@ class SwiGLU(nn.Module):
         q: int = 4,
         has_bias: bool = True,
         dtype: t.dtype = t.float32,
+        units: tuple[t.Tensor, ...] | None = None,
     ) -> "SwiGLU":
         """
         Prepares SwiGLU weights from Matrices matrix that has biases folded into weights.
@@ -70,8 +72,19 @@ class SwiGLU(nn.Module):
         wo = t.cat((-eye, eye), dim=1)
         wo /= q  # scale down
 
+        # gated units replace the steps of their rows, with one hidden unit each:
+        # silu(c*q*gate) * value / (c*q), which tends to max(0, gate) * value
+        if units is not None:
+            gates, values, outs = units
+            steps = ~outs.any(dim=1).repeat(2)  # step units of rows without gated units
+            wg = t.cat([wg[steps], gates * (c * q)])
+            wv = t.cat([wv[steps], values])
+            wo = t.cat([wo[:, steps], outs / (c * q)], dim=1)
+
         # create swiglu with weights wg, wv, wo
-        swiglu = cls(w.size(1), out_features, has_bias=has_bias, dtype=dtype)
+        swiglu = cls(
+            w.size(1), out_features, has_bias=has_bias, dtype=dtype, hidden_f=len(wg)
+        )
         for param, wi in zip(
             [swiglu.wg, swiglu.wv, swiglu.wo], [wg, wv, wo]
         ):
@@ -103,10 +116,10 @@ class MLP_SwiGLU(MLP):
         dtype: t.dtype = t.float32,
     ) -> "MLP_SwiGLU":
         mlp = cls(matrices.sizes, dtype=dtype)
+        ulist = matrices.ulist or [None] * len(matrices.mlist)
         swiglus = [
-            SwiGLU.from_matrix(m, c=c, q=q, has_bias=has_bias) for m in matrices.mlist
+            SwiGLU.from_matrix(m, c=c, q=q, has_bias=has_bias, units=u)
+            for m, u in zip(matrices.mlist, ulist)
         ]
-        for i, swiglu in enumerate(swiglus):
-            for p, new_p in zip(mlp.layers[i].parameters(), swiglu.parameters()):
-                p.data.copy_(new_p.data)
+        mlp.layers = nn.Sequential(*swiglus)  # hidden sizes vary with gated units
         return mlp
