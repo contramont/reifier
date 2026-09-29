@@ -55,9 +55,8 @@ class Tree(LeveledGraph):
             b.origin = Origin(j, (), -1)
 
         # set origins for outputs
-        for j, out in enumerate(root.outputs):
-            b = out.creator
-            assert b is not None
+        output_blocks = [b for b in root.children if b.flavour == "output"]
+        for j, b in enumerate(output_blocks):
             incoming = [
                 Parent(inp.creator.abs_x, 1)
                 for inp in b.inputs

@@ -1,4 +1,5 @@
 from reifier.sparse.compile import compiled_from_io
+from reifier.neurons.operations import and_, not_
 from reifier.examples.keccak import Keccak
 from reifier.compile.tree import TreeCompiler
 from reifier.utils.format import Bits
@@ -76,7 +77,23 @@ def test_mlp_from_blocks():
     assert out.bitstr == expected
 
 
+def test_mlp_from_blocks_passthrough():
+    """Inputs among the outputs, also repeated, next to computed outputs"""
+    for fn in [
+        lambda x: [x[0], and_(x)],
+        lambda x: [x[1], not_(and_(x)), x[1]],
+        lambda x: (lambda pair: [pair, pair])([x[0], and_(x)]),  # a repeated list
+    ]:
+        tree = TreeCompiler().run(fn, x=Bits("00").bitlist)
+        mlp = MLP_Step.from_matrices(Matrices.from_graph(tree))
+        for x in ["00", "01", "10", "11"]:
+            out = fn(Bits(x).bitlist)
+            flat = [b for o in out for b in (o if isinstance(o, list) else [o])]
+            assert infer_bits_bos(mlp, Bits(x)).bitstr == Bits(flat).bitstr, x
+
+
 if __name__ == "__main__":
     test_mlp_no_hardcoding()
     test_mlp_from_node_graph()
     test_mlp_from_blocks()
+    test_mlp_from_blocks_passthrough()

@@ -471,6 +471,7 @@ def set_layout(root: Block) -> Block:
     # inp_blocks = create_input_blocks(root)
     set_flow_creators(root)
     depth_cache: dict[Block, int] = {}  # tree depths are stable during this pass
+    out_bot: int | None = None  # level of the output blocks
     for b in traverse(root, order="return"):
         # Set creator/copy size to 1x1
         if b.is_creator:
@@ -486,6 +487,11 @@ def set_layout(root: Block) -> Block:
             # Ensure that level 0 has only input blocks
             b.bot += 1
             b.top += 1
+        if b.flavour == "output":
+            # Ensure that all outputs are on the last level, incl. passed-through inputs
+            if out_bot is None:  # outputs come after the other root children
+                out_bot = max(c.top for c in root.children if c.flavour != "output")
+            b.bot, b.top = out_bot, out_bot + 1
 
         # Ensure b comes after its inputs are created
         update_ancestor_depths(b, depth_cache)

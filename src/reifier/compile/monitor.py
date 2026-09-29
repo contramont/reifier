@@ -48,16 +48,16 @@ def find[T](obj: Any, target_type: type[T]) -> list[tuple[T, list[int]]]:
     seen: set[Any] = set()
 
     def search(item: Any, indices: list[int]):
+        # Add instances of target type, also repeated ones
+        if isinstance(item, target_type):
+            instances.append((item, indices))
+            return  # assuming T does not contain T
+
         # Handle circular references
         item_id = id(item)
         if item_id in seen:
             return
         seen.add(item_id)
-
-        # Add instances of target type
-        if isinstance(item, target_type):
-            instances.append((item, indices))
-            return  # assuming T does not contain T
 
         # Skip strings, bytes, and type annotations
         skippable = (str, bytes, type)
@@ -73,6 +73,7 @@ def find[T](obj: Any, target_type: type[T]) -> list[tuple[T, list[int]]]:
                 # copy so sibling branches don't share (and corrupt) the path
                 next_indices = indices + [i] if branching else indices
                 search(elem, next_indices)
+        seen.discard(item_id)  # only guard the current path, so repeats are found
 
     search(obj, indices=[])
 
