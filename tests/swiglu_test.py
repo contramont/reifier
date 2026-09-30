@@ -1,4 +1,8 @@
+import torch as t
+
 from reifier.examples.keccak import Keccak
+from reifier.neurons.core import Bit
+from reifier.neurons.operations import and_, not_, or_, xor
 from reifier.compile.draw_blocks import visualize
 from reifier.utils.format import Bits
 from reifier.tensors.compilation import Compiler
@@ -41,3 +45,18 @@ def test_mlp_swiglu_from_blocks():
 
 if __name__ == "__main__":
     test_mlp_swiglu_from_blocks()
+
+
+def test_bfloat16_wide_gates():
+    """bfloat16 keeps 8 significant bits, so the ReLUs of a wide gate's step, at about
+    c*q*sum, lose the step's width; exact steps (on for 16-bit dtypes) keep it"""
+    n = 128
+
+    def fn(x: list[Bit]) -> list[Bit]:
+        return [or_(x), and_(x), not_(or_(x[: n // 2])), xor(x[:3])]
+
+    mlp = Compiler(mlp_dtype=t.bfloat16).run(fn, x=Bits("0" * n).bitlist)
+    ones = [1] * n
+    for bits in [ones, [0] * n, [1] + [0] * (n - 1), [0] + ones[1:], [1, 1, 0] + ones[3:]]:
+        x = Bits(bits)
+        assert infer_bits_bos(mlp, x).bitstr == Bits(fn(x.bitlist)).bitstr, x.bitstr
