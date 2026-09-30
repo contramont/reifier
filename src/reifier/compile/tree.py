@@ -21,9 +21,11 @@ class Tree(LeveledGraph):
         origin_blocks = cls._set_origins(root)
         cls._set_narrow_origins(origin_blocks)
         levels = [Level(tuple([b.origin for b in level])) for level in origin_blocks]
-        # gated units do not re-threshold, so keep the outputs layer after units that
-        # read computed (inexact) bits
-        rethreshold = len(levels) > 3 and any(o.units for o in levels[-2].origins)
+        # gated units do not re-threshold, so keep the outputs layer after units if
+        # step gates (whose outputs are slightly off) come before them
+        rethreshold = any(o.units for o in levels[-2].origins) and any(
+            not o.units for level in levels[1:-2] for o in level.origins
+        )
         if cls.has_redundant_outputs_layer(levels) and remove_redundant_outputs_layer:
             # keep one layer if the outputs are the inputs
             levels = levels if rethreshold or len(levels) == 2 else levels[:-1]

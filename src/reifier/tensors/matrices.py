@@ -44,18 +44,48 @@ class Matrices:
     @staticmethod
     def layer_to_units(level: Level, size_in: int) -> tuple[t.Tensor, ...] | None:
         """Gated units (neurons.core.glu) of a level as matrices with the biases
-        folded in: they add outs @ (max(0, gates @ x) * (values @ x)) to the outputs"""
-        units = [(o, u) for o in level.origins for u in o.units]
+        folded in: they add outs @ (max(0, gates @ x) * (values @ x)) to the outputs.
+        Units with equal gates and proportional values share one hidden unit, and
+        units whose value or gate is identically 0 are dropped."""
+        units: list[tuple[dict[int, float], dict[int, float]]] = []
+        scales: list[float] = []
+        entries: list[tuple[int, int, float]] = []  # (row, unit, weight) of outs
+        index: dict[tuple, int] = {}
+        for o in level.origins:
+            for u in o.units:
+                g, v = {0: u.bias}, {0: u.value_bias}
+                for p, gw, vw in zip(o.incoming, u.weights, u.value_weights):
+                    if gw:
+                        g[p.index + 1] = g.get(p.index + 1, 0) + gw
+                    if vw:
+                        v[p.index + 1] = v.get(p.index + 1, 0) + vw
+                g = {i: w for i, w in g.items() if w != 0}
+                v = {i: w for i, w in v.items() if w != 0}
+                if not v or (list(g) in ([], [0]) and g.get(0, 0) <= 0):
+                    continue  # always 0
+                c = v[min(v)]
+                key = (
+                    tuple(sorted(g.items())),
+                    tuple(sorted((i, round(w / c, 12)) for i, w in v.items())),
+                )
+                if key not in index:
+                    index[key] = len(units)
+                    units.append((g, v))
+                    scales.append(c)
+                k = index[key]
+                entries.append((o.index + 1, k, c / scales[k]))
         if not units:
             return None
         gates = t.zeros(len(units), size_in + 1)
         values = t.zeros(len(units), size_in + 1)
         outs = t.zeros(len(level.origins) + 1, len(units))
-        for k, (o, u) in enumerate(units):
-            gates[k, 0], values[k, 0], outs[o.index + 1, k] = u.bias, u.value_bias, 1
-            for p, g, v in zip(o.incoming, u.weights, u.value_weights):
-                gates[k, p.index + 1] += g
-                values[k, p.index + 1] += v
+        for k, (g, v) in enumerate(units):
+            for i, w in g.items():
+                gates[k, i] = w
+            for i, w in v.items():
+                values[k, i] = w
+        for row, k, w in entries:
+            outs[row, k] += w
         return gates, values, outs
 
     @staticmethod

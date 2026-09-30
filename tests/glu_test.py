@@ -129,6 +129,21 @@ def test_glu_mixed_with_gates():
     check_all_inputs(fn, 4, transform(mlp))  # parameter symmetries keep it
 
 
+def test_glu_counts_and_shared_units():
+    """A numeric glu hands a count to the next layer; units with equal gates and
+    proportional values share a hidden unit; units on exact bits need no
+    re-thresholding outputs layer"""
+    odd = [Unit((1,), 0, (-2,), 4), Unit((1,), 0, (1,), -2), Unit((1,), -2, (0,), 4)]
+
+    def fn(x: list[Bit]) -> list[Bit]:
+        s = glu(x, [Unit((0, 0, 0), 1, (1, 1, 1), 0)], numeric=True)  # sum(x)
+        return [glu([s], odd), glu([s], odd[::-1])]  # xor(x), twice
+
+    mlp = swiglu(fn, 3)
+    assert [layer.wo.in_features for layer in mlp.layers] == [2 + 1, 2 + 2]
+    check_all_inputs(fn, 3, mlp)
+
+
 def test_tracing_edge_cases():
     """Helpers named like gate or glu, constants among the outputs, identities,
     and exceptions caught inside the traced function"""

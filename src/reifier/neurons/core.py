@@ -78,13 +78,16 @@ def gate(incoming: list[Bit], weights: list[int], threshold: int) -> Bit:
     return Signal(total >= 0, neuron)
 
 
-def glu(incoming: list[Bit], units: list[Unit]) -> Bit:
+def glu(incoming: list[Bit], units: list[Unit], numeric: bool = False) -> Bit:
     """Create a boolean neuron that sums gated units, which must add up to 0 or 1.
     SwiGLU computes each unit with one hidden unit, silu(k * gate) * value / k with
     k = c*q (32 by default): exact where gate or value is 0, and within ~exp(-k)
     elsewhere (integer gates). Unlike step gates, units do not re-threshold: small
     errors in their inputs, float32 rounding included, pass on scaled by the weights,
-    so long stacks of units (roughly 15+ layers) need step gates in between."""
+    so long stacks of units (roughly 15+ layers) need step gates in between.
+    If numeric, the sum may be any number, e.g. a count that later units read as a
+    packed feature; units equal to those of other neurons in the same layer (up to
+    a value scale) share their hidden unit, see Matrices.layer_to_units."""
     units = tuple(
         u
         if type(u.weights) is tuple and type(u.value_weights) is tuple
@@ -101,6 +104,8 @@ def glu(incoming: list[Bit], units: list[Unit]) -> Bit:
         g = sum(a * w for a, w in zip(x, u.weights)) + u.bias
         v = sum(a * w for a, w in zip(x, u.value_weights)) + u.value_bias
         total += max(0, g) * v
+    if numeric:
+        return Signal(total, neuron)
     if abs(total - round(total)) > 1e-6 or round(total) not in (0, 1):
         raise ValueError(f"glu units add up to {total}, not to 0 or 1")
     return Signal(round(total) == 1, neuron)
