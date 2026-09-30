@@ -25,7 +25,8 @@ class Tree(LeveledGraph):
         # read computed (inexact) bits
         rethreshold = len(levels) > 3 and any(o.units for o in levels[-2].origins)
         if cls.has_redundant_outputs_layer(levels) and remove_redundant_outputs_layer:
-            levels = levels if rethreshold else levels[:-1]
+            # keep one layer if the outputs are the inputs
+            levels = levels if rethreshold or len(levels) == 2 else levels[:-1]
         return cls(root=root, origin_blocks=origin_blocks, levels=tuple(levels))
 
     @staticmethod
@@ -62,7 +63,9 @@ class Tree(LeveledGraph):
                 for inp in b.inputs
                 if inp.creator is not None
             ]
-            b.origin = Origin(j, tuple(incoming), -1)
+            # a copy, or a constant output (see add_output_blocks) as a bias
+            bias = -1 if incoming else int(b.creation.data.activation) - 1
+            b.origin = Origin(j, tuple(incoming), bias)
             levels[-1].append(b)
 
         if len(root.outputs) == 0:

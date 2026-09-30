@@ -2,10 +2,14 @@ from dataclasses import dataclass, field
 from collections.abc import Callable, Generator
 from typing import Literal, Any
 
-from reifier.neurons.core import Bit
+from reifier.neurons.core import Bit, gate, glu, take_uid
 from reifier.utils.misc import OrderedSet
 from reifier.compile.levels import Origin
 from reifier.compile.monitor import CallNode, Tracer, find
+
+# Calls of these functions create one Bit each and become leaf blocks. They are
+# matched by code, so that other functions with the same names are traced as usual
+CREATORS = {gate.__code__, glu.__code__}
 
 
 @dataclass(eq=False)
@@ -130,14 +134,14 @@ class Block:
             node_to_block[n] = b
 
             # Mark gates
-            if n.name in ("gate", "glu"):
+            if n.code in CREATORS:
                 # assert n.creation is not None, f"gate {b.path} has no creation"
                 b.outputs = OrderedSet([Flow(list(n.outputs)[0][0], b)])
                 b.flavour = "gate"
                 b.is_creator = True
 
             # Add parent
-            if n.parent and n.parent.name not in ("gate", "glu"):  # skip their subcalls
+            if n.parent and n.parent.code not in CREATORS:  # skip their subcalls
                 b.parent = node_to_block[n.parent]
                 b.parent.children.append(b)
 
@@ -329,6 +333,8 @@ def set_flow_creators(root: Block) -> None:
     for b in traverse(root, "return"):
         for flow in b.inputs | b.outputs:
             if flow.creator is None:
+                if b is root and flow in b.outputs and flow.data not in bit_to_block:
+                    continue  # a constant output, see add_output_blocks
                 assert flow.data in bit_to_block, (
                     f"This block has io created outside of the tree: {b.path}"
                 )
@@ -348,7 +354,7 @@ def assign_inputs(root: Block) -> None:
             b.consumed |= OrderedSet([out.data for out in b.outputs])
     for b in traverse(root, "call"):
         inp_bits = b.consumed - b.created
-        if b.path != "root":
+        if b is not root:
             b.inputs = OrderedSet([Flow(bit, b) for bit in inp_bits])
 
 
@@ -371,9 +377,6 @@ def add_input_blocks(root: Block) -> None:
 
 def add_output_blocks(root: Block) -> None:
     for j, root_outflow in enumerate(root.outputs):
-        assert (
-            root_outflow.creator is not None
-        )  # this should be set by set_flow_creator_for_io_of_each_block
         b = Block(
             f"output-{j}",
             is_creator=True,
@@ -384,16 +387,18 @@ def add_output_blocks(root: Block) -> None:
         inflow = Flow(
             root_outflow.data, b, creator=root_outflow.creator, prev=root_outflow.prev
         )
+        b.outputs = OrderedSet([outflow])
+        # a constant output (no creator, see fold_untraced_bits) has no input
+        b.inputs = OrderedSet([inflow] if root_outflow.creator is not None else [])
         root_outflow.creator = b
         root_outflow.prev = outflow
-        b.outputs = OrderedSet([outflow])
-        b.inputs = OrderedSet([inflow])
         b.parent = root
         root.children.append(b)
 
 
-def fold_untraced_bits(root: Block) -> None:
-    """Finds bits not traced by ftrace and folds them into gates consuming them"""
+def fold_untraced_bits(root: Block, start_uid: int = -1) -> None:
+    """Finds bits not traced by ftrace and folds them into gates consuming them.
+    Bits with uids above start_uid were made while tracing, but not by a traced call"""
 
     # find bits with known creators
     traced_bits: OrderedSet[Bit] = OrderedSet()
@@ -419,20 +424,33 @@ def fold_untraced_bits(root: Block) -> None:
                     untraced_bits.add(parent)
                     new_frontier.add(parent)
         frontier = new_frontier
+    # also those that only pass through blocks, e.g. returned by a helper
+    for b in traverse(root):
+        for flow in b.inputs | b.outputs:
+            if flow.data not in traced_bits:
+                untraced_bits.add(flow.data)
 
-    # ensure that untraced bits are constant
+    # e.g. by a generator passed to gate or glu, which runs inside that call
+    if start_uid >= 0 and any(bit.uid > start_uid for bit in untraced_bits):
+        raise ValueError("Bits were made while tracing, but not by a traced gate or glu")
+
+    # ensure that untraced bits are constant, i.e. no ancestor is an input
     input_bits: OrderedSet[Bit] = OrderedSet()
     for b in traverse(root):
         if b.flavour == "input":
             input_bits.add(b.creation.data)
     live_untraced_bits: OrderedSet[Bit] = OrderedSet()
     frontier |= untraced_bits
+    seen: OrderedSet[Bit] = OrderedSet(untraced_bits)
     while frontier:
         new_frontier = OrderedSet()
         for bit in frontier:
             for parent in bit.source.incoming:
                 if parent in input_bits:
                     live_untraced_bits.add(bit)
+                elif parent not in traced_bits and parent not in seen:
+                    seen.add(parent)
+                    new_frontier.add(parent)
         frontier = new_frontier
     assert len(live_untraced_bits) == 0, "Live untraced bits are currently unsupported"
 
@@ -450,7 +468,7 @@ def fold_untraced_bits(root: Block) -> None:
 
         outflows = b.outputs
         for outflow in list(outflows):
-            if outflow.data in untraced_bits:
+            if outflow.data in untraced_bits and b is not root:  # outputs stay
                 b.outputs.remove(outflow)
 
 
@@ -479,7 +497,7 @@ def set_layout(root: Block) -> Block:
             b.right = b.left + 1
         if (
             b.parent
-            and b.parent.path == "root"
+            and b.parent is root
             and b.flavour
             and b.bot == 0
             and b.flavour != "input"
@@ -490,7 +508,8 @@ def set_layout(root: Block) -> Block:
         if b.flavour == "output":
             # Ensure that all outputs are on the last level, incl. passed-through inputs
             if out_bot is None:  # outputs come after the other root children
-                out_bot = max(c.top for c in root.children if c.flavour != "output")
+                non_outputs = (c.top for c in root.children if c.flavour != "output")
+                out_bot = max(non_outputs, default=1)
             b.bot, b.top = out_bot, out_bot + 1
 
         # Ensure b comes after its inputs are created
@@ -522,6 +541,7 @@ class BlockTracer(Tracer[Bit]):
     tracked_type: type | None = Bit
 
     def run(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Block:
+        start_uid = take_uid()  # bits made while tracing must come from traced calls
         with self.trace():
             out = func(*args, **kwargs)
         self.root.inputs = find(args + tuple(kwargs.values()), Bit)
@@ -529,7 +549,7 @@ class BlockTracer(Tracer[Bit]):
         r = Block.from_root_node(self.root)
         assign_inputs(r)
         add_input_blocks(r)
-        fold_untraced_bits(r)
+        fold_untraced_bits(r, start_uid)
         set_layout(r)
         add_output_blocks(r)
         set_layout(r)

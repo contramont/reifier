@@ -37,7 +37,7 @@ class SwiGLU(nn.Module):
         cls,
         w: t.Tensor,
         c: int = 4,
-        q: int = 4,
+        q: int = 8,
         has_bias: bool = True,
         dtype: t.dtype = t.float32,
         units: tuple[t.Tensor, ...] | None = None,
@@ -64,13 +64,16 @@ class SwiGLU(nn.Module):
         wg[0, 0] -= q  # to ensure that out vector begins with 1
 
         # constructing w_value
+        # it takes part of the scale-down, which keeps hidden activations (and so the
+        # effect of weight noise) at their size for q = 4
+        v = 4 / q
         wv = t.zeros_like(wg)
-        wv[:, 0] += 1  # default value is 1
+        wv[:, 0] += v  # default value
 
         # constructing w_out
         eye = t.eye(out_features)
         wo = t.cat((-eye, eye), dim=1)
-        wo /= q  # scale down
+        wo /= q * v  # scale down
 
         # gated units replace the steps of their rows, with one hidden unit each:
         # silu(c*q*gate) * value / (c*q), which tends to max(0, gate) * value
@@ -78,8 +81,8 @@ class SwiGLU(nn.Module):
             gates, values, outs = units
             steps = ~outs.any(dim=1).repeat(2)  # step units of rows without gated units
             wg = t.cat([wg[steps], gates * (c * q)])
-            wv = t.cat([wv[steps], values])
-            wo = t.cat([wo[:, steps], outs / (c * q)], dim=1)
+            wv = t.cat([wv[steps], values * v])
+            wo = t.cat([wo[:, steps], outs / (c * q * v)], dim=1)
 
         # create swiglu with weights wg, wv, wo
         swiglu = cls(
@@ -111,7 +114,7 @@ class MLP_SwiGLU(MLP):
         cls,
         matrices: Matrices,
         c: int = 4,
-        q: int = 4,
+        q: int = 8,
         has_bias: bool = False,
         dtype: t.dtype = t.float32,
     ) -> "MLP_SwiGLU":
@@ -119,7 +122,9 @@ class MLP_SwiGLU(MLP):
         ulist = matrices.ulist or [None] * len(matrices.mlist)
         swiglus = [
             SwiGLU.from_matrix(m, c=c, q=q, has_bias=has_bias, units=u)
-            for m, u in zip(matrices.mlist, ulist)
+            for m, u in zip(matrices.mlist, ulist, strict=True)
         ]
+        for swiglu in swiglus:  # weights are made in float32, then cast
+            swiglu.to(dtype).dtype = dtype
         mlp.layers = nn.Sequential(*swiglus)  # hidden sizes vary with gated units
         return mlp

@@ -1,9 +1,19 @@
 import itertools
 
 import pytest
+import torch as t
 
 from reifier.neurons.core import Bit, Unit, const, gate, glu
-from reifier.neurons.operations import and_, copy, glu_xor, glu_xors, inhib, not_, xor
+from reifier.neurons.operations import (
+    and_,
+    copy,
+    glu_xor,
+    glu_xors,
+    inhib,
+    not_,
+    or_,
+    xor,
+)
 from reifier.utils.format import Bits
 from reifier.compile.tree import TreeCompiler
 from reifier.tensors.compilation import Compiler
@@ -45,8 +55,12 @@ def matrices(fn, n: int) -> Matrices:
         (lambda x: [gate([ONE, x[0], ZERO, x[1]], [-1, 2, 5, 1], 1)], 2),  # shifted
         (lambda x: [gate([x[0], x[0], x[1]], [1, 1, -1], 2)], 2),  # repeat lost
         (lambda x: (lambda a: [gate([a, a], [1, 1], 2)])(and_(x)), 2),
+        (lambda x: [gate((b for b in x), [1, -1], 1)], 2),  # iterated twice
     ],
-    ids=["not", "inhib", "weighted", "consts", "const_first", "repeat", "repeat_deep"],
+    ids=[
+        "not", "inhib", "weighted", "consts", "const_first", "repeat", "repeat_deep",
+        "generator",
+    ],
 )
 def test_gate_fixes(fn, n):
     check_all_inputs(fn, n, swiglu(fn, n))
@@ -113,6 +127,69 @@ def test_glu_mixed_with_gates():
     mlp = swiglu(fn, 4)
     check_all_inputs(fn, 4, mlp)
     check_all_inputs(fn, 4, transform(mlp))  # parameter symmetries keep it
+
+
+def test_tracing_edge_cases():
+    """Helpers named like gate or glu, constants among the outputs, identities,
+    and exceptions caught inside the traced function"""
+
+    def glu(x: list[Bit]) -> Bit:  # traced like any helper, not as the primitive
+        return xor([and_(x[:2]), x[2]])
+
+    def gate(x: list[Bit]) -> Bit:
+        return or_(x)
+
+    def pass_on(b: Bit) -> Bit:
+        return b
+
+    def fails() -> None:
+        raise ValueError
+
+    def catches(x: list[Bit]) -> Bit:  # the raising call unwinds, not returns
+        try:
+            fails()
+        except ValueError:
+            pass
+        return and_(x)
+
+    for fn, n in [
+        (lambda x: [catches(x)], 2),
+        (lambda x: [glu(x), gate(x)], 3),
+        (lambda x: [ONE, x[0], and_(x), ZERO], 2),  # untraced constants
+        (lambda x: [pass_on(ONE), and_(x)], 2),  # passed on, not consumed
+        (lambda x: [ONE, ZERO], 1),
+        (lambda x: [x[0], x[1]], 2),  # the outputs are the inputs
+    ]:
+        check_all_inputs(fn, n, swiglu(fn, n))
+        check_all_inputs(fn, n, MLP_Step.from_matrices(matrices(fn, n)))
+
+
+def test_glu_arguments():
+    """Iterables and float value weights work; bits made while gate or glu iterate
+    their inputs cannot be traced, so compiling such circuits fails"""
+    x = const("101")
+    unit = Unit(iter((2, -1, 1)), 0, [-1, 0.5, -0.5], 1.5)  # CHI, as iterables
+    assert glu(iter(x), [unit]).activation == 0
+    assert glu(const("111"), [Unit((1, 1, 1), -2, (0.3, 0.6, 0.1), 0)]).activation
+    xor2 = Unit((1, 1), 0, (-1, -1), 2)
+    for fn in [
+        lambda x: [gate(map(not_, [and_(x), or_(x)]), [1, 1], 1)],
+        lambda x: [glu((not_(b) for b in [and_(x), or_(x)]), [xor2])],
+    ]:
+        with pytest.raises(ValueError):
+            swiglu(fn, 2)
+
+
+def test_compile_options():
+    """A traced function may be named root, and mlp_dtype sets the layers' dtype"""
+
+    def root(x: list[Bit]) -> list[Bit]:
+        return [and_(x), glu_xor(x)]
+
+    check_all_inputs(root, 2, swiglu(root, 2))
+    mlp = Compiler(mlp_dtype=t.float64).run(root, x=Bits("00").bitlist)
+    assert all(p.dtype == t.float64 for p in mlp.parameters())
+    check_all_inputs(root, 2, mlp)
 
 
 def test_glu_rejected():

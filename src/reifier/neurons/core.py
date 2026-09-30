@@ -70,20 +70,28 @@ def step(x: float | int) -> bool:
 def gate(incoming: list[Bit], weights: list[int], threshold: int) -> Bit:
     """Create a linear threshold gate as a boolean neuron with a step function"""
     # Equivalent to Neuron(...).outgoing, inlined for speed on the hot path
+    incoming, weights = tuple(incoming), tuple(weights)  # iterated twice
     total = -threshold
     for signal, weight in zip(incoming, weights):
         total += signal.activation * weight
-    neuron = Neuron(tuple(incoming), tuple(weights), -threshold, step)
+    neuron = Neuron(incoming, weights, -threshold, step)
     return Signal(total >= 0, neuron)
 
 
 def glu(incoming: list[Bit], units: list[Unit]) -> Bit:
     """Create a boolean neuron that sums gated units, which must add up to 0 or 1.
     SwiGLU computes each unit with one hidden unit, silu(k * gate) * value / k with
-    k = c*q (16 by default): exact where gate or value is 0, and within ~exp(-k)
-    elsewhere (integer gates). Unlike step gates, units do not re-threshold, so
-    small errors in their inputs pass on, scaled by the weights."""
-    neuron = GluNeuron(tuple(incoming), tuple(units))
+    k = c*q (32 by default): exact where gate or value is 0, and within ~exp(-k)
+    elsewhere (integer gates). Unlike step gates, units do not re-threshold: small
+    errors in their inputs, float32 rounding included, pass on scaled by the weights,
+    so long stacks of units (roughly 15+ layers) need step gates in between."""
+    units = tuple(
+        u
+        if type(u.weights) is tuple and type(u.value_weights) is tuple
+        else Unit(tuple(u.weights), u.bias, tuple(u.value_weights), u.value_bias)
+        for u in units
+    )
+    neuron = GluNeuron(tuple(incoming), units)
     n = len(neuron.incoming)
     if any(len(u.weights) != n or len(u.value_weights) != n for u in neuron.units):
         raise ValueError(f"glu units need {n} weights and value_weights each")
@@ -93,9 +101,9 @@ def glu(incoming: list[Bit], units: list[Unit]) -> Bit:
         g = sum(a * w for a, w in zip(x, u.weights)) + u.bias
         v = sum(a * w for a, w in zip(x, u.value_weights)) + u.value_bias
         total += max(0, g) * v
-    if total not in (0, 1):
+    if abs(total - round(total)) > 1e-6 or round(total) not in (0, 1):
         raise ValueError(f"glu units add up to {total}, not to 0 or 1")
-    return Signal(total == 1, neuron)
+    return Signal(round(total) == 1, neuron)
 
 
 def const(values: list[bool] | list[int] | str) -> list[Bit]:

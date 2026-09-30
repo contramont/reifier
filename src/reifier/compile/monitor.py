@@ -25,10 +25,11 @@ class CallNode[T]:
     )
     count: int = 0
     counts: dict[str, int] = field(default_factory=dict[str, int])  # child call counts
+    code: CodeType | None = None  # the called function's code
 
-    def create_child(self, name: str) -> "CallNode[T]":
+    def create_child(self, name: str, code: CodeType | None = None) -> "CallNode[T]":
         self.counts[name] = self.counts.get(name, 0) + 1
-        child = CallNode(name, parent=self, count=self.counts[name] - 1)
+        child = CallNode(name, parent=self, count=self.counts[name] - 1, code=code)
         self.children.append(child)
         return child
 
@@ -113,7 +114,7 @@ class Tracer[T]:
         """Called when entering any function"""
         if self.ignore_event(code):
             return
-        node = self.stack[-1].create_child(code.co_name)
+        node = self.stack[-1].create_child(code.co_name, code)
         self.stack.append(node)
 
     def on_return(self, code: CodeType, offset: int, retval: Any):
@@ -123,6 +124,14 @@ class Tracer[T]:
         node = self.stack.pop()
         if self.tracked_type:
             node.outputs = find(retval, self.tracked_type)
+
+    def on_unwind(self, code: CodeType, offset: int, exc: BaseException):
+        """Called when a function exits by raising (PY_UNWIND, no PY_RETURN follows):
+        pop its node, so an exception caught inside the traced function (or an import,
+        whose machinery raises and catches) does not leave the stack unbalanced"""
+        if self.ignore_event(code):
+            return
+        self.stack.pop()
 
     @property
     def root(self) -> CallNode[T]:
@@ -137,10 +146,12 @@ class Tracer[T]:
         tool = mon.DEBUGGER_ID
         pre = mon.events.PY_START
         post = mon.events.PY_RETURN
+        unwind = mon.events.PY_UNWIND
         mon.use_tool_id(tool, "tracer")
         mon.register_callback(tool, pre, self.on_call)
         mon.register_callback(tool, post, self.on_return)
-        mon.set_events(tool, pre | post)
+        mon.register_callback(tool, unwind, self.on_unwind)
+        mon.set_events(tool, pre | post | unwind)
         try:
             yield
         finally:

@@ -26,7 +26,7 @@ def glu_xor(x: list[Bit], clean: bool = False) -> Bit:
     """xor in one SwiGLU layer, where xor takes two, as gated units on s = sum(x):
     max(0,s)(2-s) + sum_j 4max(0,s-2j) with ceil(n/2) units, or if clean, n units
     that are flat to first order at every integer s. The terms of both grow like
-    s^2, so wide xors of inexact inputs lose precision (clean from ~32 bits)"""
+    s^2, which costs float32 precision in wide xors (clean from ~96 bits)"""
     n = len(x)
     if not clean:
         units = [Unit((1,) * n, 0, (-1,) * n, 2)]
