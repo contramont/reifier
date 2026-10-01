@@ -1,3 +1,5 @@
+import math
+
 import torch as t
 import torch.nn as nn
 import torch.nn.functional as F
@@ -42,6 +44,8 @@ class SwiGLU(nn.Module):
         dtype: t.dtype = t.float32,
         units: tuple[t.Tensor, ...] | None = None,
         exact: bool = False,
+        bos2_in: bool = False,
+        bos2_out: bool = False,
     ) -> "SwiGLU":
         """
         Prepares SwiGLU weights from Matrices matrix that has biases folded into weights.
@@ -53,7 +57,15 @@ class SwiGLU(nn.Module):
         exact: steps that 16-bit floats compute exactly on 0/1 inputs. A step rises over
         [1/2, 1/2 + 1/c] instead, so at sum 1 its ReLUs sit at c*q/2 and c*q/4, and a row
         whose sum can exceed 1 by more than it can fall below 0 is built as
-        BOS - step(1 - sum), which keeps large sums where both ReLUs are off
+        BOS - step(1 - sum), which keeps large sums where both ReLUs are off. A BOS
+        weight c*q*(bias - 3/4) fits bfloat16's 8 significant bits only while |bias| < 64
+        (float16's 11: |bias| < 512); wider rows need bos2_in, see MLP_SwiGLU.from_matrices
+        bos2_in: the input carries a second copy of BOS right after its other features,
+        written by the layer before with bos2_out. The bits of every BOS weight beyond
+        bfloat16's 8 significant bits go to it, so the BOS weights of wide rows are exact
+        in 16-bit floats (only the BOS weights: an input weight with more than 8
+        significant bits still rounds)
+        bos2_out: append a copy of the BOS output
         """
         # c: making ReLU-simulated step fn steeper
         # q: scaling before and after SiLU to avoid non-ReLU-like dip
@@ -104,9 +116,20 @@ class SwiGLU(nn.Module):
             wv = t.cat([wv[steps], values * v])
             wo = t.cat([wo[:, steps], outs / (c * q * v)], dim=1)
 
+        if bos2_in:  # BOS weights = bfloat16 part on BOS + the rest on the second BOS
+            cols = []
+            for m in (wg, wv):
+                hi = m[:, 0].to(t.bfloat16).float()
+                cols.append(m[:, 0] - hi)
+                m[:, 0] = hi
+            wg = t.cat([wg, cols[0].unsqueeze(1)], dim=1)
+            wv = t.cat([wv, cols[1].unsqueeze(1)], dim=1)
+        if bos2_out:
+            wo = t.cat([wo, wo[:1]], dim=0)
+
         # create swiglu with weights wg, wv, wo
         swiglu = cls(
-            w.size(1), out_features, has_bias=has_bias, dtype=dtype, hidden_f=len(wg)
+            wg.size(1), wo.size(0), has_bias=has_bias, dtype=dtype, hidden_f=len(wg)
         )
         for param, wi in zip(
             [swiglu.wg, swiglu.wv, swiglu.wo], [wg, wv, wo]
@@ -139,16 +162,57 @@ class MLP_SwiGLU(MLP):
         dtype: t.dtype = t.float32,
         exact: bool | None = None,
     ) -> "MLP_SwiGLU":
-        """exact: see SwiGLU.from_matrix; by default on for 16-bit dtypes"""
+        """exact: see SwiGLU.from_matrix; by default on for 16-bit dtypes. With c and q
+        powers of 2, a layer whose BOS weights have more significant bits than the dtype
+        keeps (bfloat16, and float32, whose exact builds may be cast to it: 8, i.e. rows
+        with thresholds above 64, e.g. the counters of xors of > 64 inputs; float16: 11,
+        thresholds above 512) reads a second copy of BOS that takes the remaining bits
+        (SwiGLU.from_matrix(bos2_in)); if that is the first layer, a layer of step
+        copies of the inputs goes first to make it, which costs about 3 (n_in + 1)^2
+        dense parameters. This makes those rows exact at the sums near their
+        thresholds; a wide xor still rounds in bf16 on inputs whose counters sum far
+        above their thresholds"""
         if exact is None:
             exact = dtype in (t.bfloat16, t.float16)
         mlp = cls(matrices.sizes, dtype=dtype)
-        ulist = matrices.ulist or [None] * len(matrices.mlist)
-        swiglus = [
-            SwiGLU.from_matrix(m, c=c, q=q, has_bias=has_bias, units=u, exact=exact)
-            for m, u in zip(matrices.mlist, ulist, strict=True)
-        ]
+        mlist = list(matrices.mlist)
+        ulist = list(matrices.ulist or [None] * len(mlist))
+
+        def build(bos2: list[bool]) -> list[SwiGLU]:
+            return [
+                SwiGLU.from_matrix(
+                    m, c=c, q=q, has_bias=has_bias, units=u, exact=exact,
+                    bos2_in=bos2[i], bos2_out=bos2[i + 1],
+                )
+                for i, (m, u) in enumerate(zip(mlist, ulist, strict=True))
+            ]
+
+        swiglus = build([False] * (len(mlist) + 1))
+        pow2 = all(x > 0 and math.log2(x).is_integer() for x in (c, q))
+        if exact and pow2:  # BOS weights beyond the 16-bit format's precision: a second
+            # BOS takes the rest (with c or q not a power of 2 the other weights round too)
+            bits = 11 if dtype == t.float16 else 8  # float32 builds: bfloat16's
+            need = [i for i, L in enumerate(swiglus) if not _bos_fits(L, bits)]
+            if need:
+                if need[0] == 0:  # the input has one BOS: copy the inputs first
+                    mlist = [t.eye(mlist[0].size(1), dtype=t.float32)] + mlist
+                    ulist = [None] + ulist
+                    need = [i + 1 for i in need]
+                bos2 = [False] * (len(mlist) + 1)
+                for i in need:
+                    bos2[i] = True
+                swiglus = build(bos2)
         for swiglu in swiglus:  # weights are made in float32, then cast
             swiglu.to(dtype).dtype = dtype
         mlp.layers = nn.Sequential(*swiglus)  # hidden sizes vary with gated units
         return mlp
+
+
+def _bos_fits(L: SwiGLU, bits: int) -> bool:
+    """whether the BOS weights of wg and wv (built in float32) have at most this many
+    significant bits (bfloat16: 8, float16: 11)"""
+    for w in (L.wg.weight, L.wv.weight):
+        m = t.frexp(w.detach()[:, 0].float()).mantissa * 2**bits
+        if not t.equal(m, m.round()):
+            return False
+    return True
