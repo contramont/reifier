@@ -52,3 +52,20 @@ from reifier.examples.keccak_compile import compile_keccak
 circuit = compile_keccak(Keccak(log_w=6, n=24, c=448, pad_char="_"))
 ```
 Benchmark all paths with `python benchmarks/bench_keccak.py`.
+
+Optimization levels with `reifier.opt`, an optional package beside the core compiler. A
+level trades size for robustness, from `"ultra"` (bfloat16 or float16 on GPUs, next to a
+host model's norm scales, LayerNorm shifts and noise) through `"hardened"`, `"robust"` and
+`"O2"` to `"O3"` (float32). Each level compiles several recipes and keeps the smallest:
+```python
+import torch as t
+from reifier.neurons.operations import add
+from reifier.opt import Compiler
+from reifier.utils.format import Bits
+
+comp = Compiler("robust", mlp_dtype=t.bfloat16)
+mlp = comp.run(lambda x: add(x[:16], x[16:]), x=Bits("0" * 32).bitlist)
+print(comp.chosen, sum(p.numel() for p in mlp.parameters()))  # robust 31678
+```
+The core's `reifier.tensors.compilation.Compiler(mlp_dtype=t.bfloat16)` builds 156,115
+parameters for this adder. Each level's guarantees are in `reifier.opt`'s docstring.
