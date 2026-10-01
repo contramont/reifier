@@ -1,0 +1,3 @@
+{"log_w": 6, "xof_depth": 3, "rounds": 2, "depth": 38, "dense": 6527735970, "sparse": 4039202, "hidden": 368652, "max_width": 36098, "margin": 4.76837158203125e-07, "wrong_bits": 0, "ok": true, "compile_s": 46.7, "build_s": 67.7}
+{"log_w": 3, "xof_depth": 1, "rounds": 24, "depth": 144, "dense": 374839360, "sparse": 1968720, "hidden": 173032, "max_width": 4402, "margin": 3.5762786865234375e-07, "wrong_bits": 0, "ok": true, "compile_s": 24.6, "build_s": 4.6}
+{"log_w": 6, "xof_depth": 3, "rounds": 4, "depth": 74, "dense": 12972317214, "sparse": 8048030, "hidden": 730452, "max_width": 36098, "margin": 2.384185791015625e-07, "wrong_bits": 0, "ok": true, "compile_s": 109.1, "build_s": 135.4}

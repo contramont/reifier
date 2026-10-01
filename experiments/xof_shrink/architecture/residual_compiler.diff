@@ -1,0 +1,839 @@
+--- a/src/reifier/neurons/core.py	2026-09-29 04:40:22.657120876 +0000
++++ b/src/reifier/neurons/core.py	2026-09-29 05:14:21.274177308 +0000
+@@ -52,10 +52,12 @@
+ 
+ @dataclass(frozen=True, eq=False, slots=True)
+ class GluNeuron:
+-    """A neuron that sums gated units, see glu"""
++    """A neuron that sums gated units, see glu. With inplace = i, it adds the units
++    to its input incoming[i], so its units compute the update new - incoming[i]"""
+ 
+     incoming: tuple[Signal, ...]
+     units: tuple[Unit, ...]
++    inplace: int | None = None
+ 
+ 
+ # Linear threshold circuits
+@@ -77,13 +79,15 @@
+     return Signal(total >= 0, neuron)
+ 
+ 
+-def glu(incoming: list[Bit], units: list[Unit]) -> Bit:
++def glu(incoming: list[Bit], units: list[Unit], inplace: int | None = None) -> Bit:
+     """Create a boolean neuron that sums gated units, which must add up to 0 or 1.
+     SwiGLU computes each unit with one hidden unit, silu(k * gate) * value / k:
+-    exact where gate or value is 0, and within ~exp(-k) elsewhere (integer gates)"""
+-    neuron = GluNeuron(tuple(incoming), tuple(units))
++    exact where gate or value is 0, and within ~exp(-k) elsewhere (integer gates).
++    With inplace = i, the units add up to the update new - incoming[i] instead, which
++    a residual layer adds to incoming[i] where it stands (see compile.residual)"""
++    neuron = GluNeuron(tuple(incoming), tuple(units), inplace)
+     x = [s.activation for s in neuron.incoming]
+-    total = 0
++    total = 0 if inplace is None else x[inplace]
+     for u in neuron.units:
+         g = sum(a * w for a, w in zip(x, u.weights)) + u.bias
+         v = sum(a * w for a, w in zip(x, u.value_weights)) + u.value_bias
+--- a/src/reifier/neurons/operations.py	2026-09-29 04:40:22.657120876 +0000
++++ b/src/reifier/neurons/operations.py	2026-09-29 05:32:50.719539877 +0000
+@@ -22,12 +22,20 @@
+     return gate(counters, [(-1) ** i for i in range(len(x))], 1)
+ 
+ 
+-def glu_xor(x: list[Bit], clean: bool = False) -> Bit:
++def glu_xor(
++    x: list[Bit], clean: bool = False, inplace: bool = False, flat: bool = False
++) -> Bit:
+     """xor in one SwiGLU layer, where xor takes two, as gated units on s = sum(x):
+     max(0,s)(2-s) + sum_j 4max(0,s-2j) with ceil(n/2) units, whose terms grow like
+     s^2 (fine to ~64 bits) and pass small input errors on, or if clean, n units
+-    that are flat at every integer s"""
++    that are flat at every integer s. If flat, s^2 - sum_(odd k<n) 4max(0,s-k): as
++    many units plus a constant, and flat at every integer s too, see glu_xor_flat.
++    If inplace, the units compute the update of x[0], see glu_xor_update"""
+     n = len(x)
++    if inplace:
++        return glu_xor_update(x)
++    if flat:
++        return glu_xor_flat(x)
+     if not clean:
+         units = [Unit((1,) * n, 0, (-1,) * n, 2)]
+         units += [Unit((1,) * n, -2 * j, (0,) * n, 4) for j in range(1, ceil(n / 2))]
+@@ -40,6 +48,37 @@
+     return glu(x, units)
+ 
+ 
++def glu_xor_flat(x: list[Bit]) -> Bit:
++    """xor as s^2 - sum_(odd k<n) 4max(0,s-k) on s = sum(x): the kinks at odd s are
++    symmetric (slope 2 to -2) and s^2 is flat at even s, so the sum has zero slope
++    at every integer s and input errors do not pass on. s^2 is the unit
++    max(0,s+1/2)(s-1/2) = s^2 - 1/4, whose gate is never 0, plus a constant unit 1/4"""
++    n = len(x)
++    ones = (1,) * n
++    units = [Unit(ones, 0.5, ones, -0.5), Unit((0,) * n, 1, (0,) * n, 0.25)]
++    units += [Unit(ones, -k, (0,) * n, -4) for k in range(1, n, 2)]
++    return glu(x, units)
++
++
++def glu_xor_update(x: list[Bit]) -> Bit:
++    """xor of x as an update of a = x[0] in place (glu inplace=0): the units add up
++    to (1-2a) p(t), with p(t) = t(2-t) + sum_j 4max(0,t-2j) the parity of t = sum(x[1:]),
++    in as many units as glu_xor(x). The factor a in (1-2a) t(2-t) is a gate that is
++    open only if a = 1: a t(2t-4) = max(0, t + (m+1)(a-1)) (2t-4) for t <= m"""
++    m = len(x) - 1  # t in 0..m
++    if m == 0:
++        return glu(x, [], inplace=0)
++    rest = (1,) * m
++    if m == 1:  # p(t) = t
++        return glu(x, [Unit((0, 1), 0, (-2, 0), 1)], inplace=0)
++    units = [
++        Unit((0,) + rest, 0, (0,) + (-1,) * m, 2),  # max(0,t)(2-t)
++        Unit((m + 1,) + rest, -(m + 1), (0,) + (2,) * m, -4),  # a t(2t-4)
++    ]
++    units += [Unit((0,) + rest, -2 * j, (-8,) + (0,) * m, 4) for j in range(1, ceil(m / 2))]
++    return glu(x, units, inplace=0)
++
++
+ def bitwise(
+     gate_fn: Callable[[list[Bit]], Bit],
+ ) -> Callable[[list[list[Bit]]], list[Bit]]:
+--- a/src/reifier/compile/tree.py	2026-09-29 04:40:22.657120876 +0000
++++ b/src/reifier/compile/tree.py	2026-09-29 05:14:21.274177308 +0000
+@@ -87,6 +87,10 @@
+                 Unit(*fold(u.weights, u.bias), *fold(u.value_weights, u.value_bias))
+                 for u in neuron.units
+             )
++            if neuron.inplace is not None:  # add the updated input: max(0, x_i) * 1
++                n = len(neuron.incoming)
++                e_i = tuple(int(j == neuron.inplace) for j in range(n))
++                units += (Unit(*fold(e_i, 0), *fold((0,) * n, 1)),)
+             return Origin(b.abs_x, tuple(Parent(i, 0) for i in parents), -1, units)
+         weights, bias = fold(neuron.weights, neuron.bias)
+         return Origin(b.abs_x, tuple(map(Parent, parents, weights)), bias)
+--- /dev/null	2026-07-17 20:39:29.466000000 +0000
++++ b/src/reifier/compile/residual.py	2026-09-29 06:10:13.546423257 +0000
+@@ -0,0 +1,548 @@
++"""Compiles Bit circuits to residual SwiGLU networks, x -> x + SwiGLU(x).
++
++The residual stream has d features. Feature 0 is BOS (always 1) and every other feature
++holds a bit as a spin s = 2b - 1, so all features are +-1: RMSNorm is then the identity
++(the norm cannot rescale by input, as it would with 0/1 bits) and each layer adds exact
++updates to the stream. A layer writes a new bit v into a slot that holds an old bit y
++by adding 2 (v - y):
++- copies are free, as a bit stays where it is, and so are nots (a sign flip that
++  readers fold into their weights) and constants (folded into biases),
++- a gated neuron with inplace = i (see neurons.core.glu) updates its input i in place:
++  its units already add up to v - y,
++- any other write clears y with one linear unit max(0, 1) (-y + ...), exact, which also
++  removes the error y carried; slots that hold a known constant need no clearing.
++Slots are reused once their bits are dead, like registers, so d stays close to the
++largest number of live bits. With gated=True the layers are x -> alpha x + SwiGLU(x)
++with a fixed 0/1 alpha per feature (a gated residual), and writes drop y instead.
++
++A recurrent program applies the same block of layers (tied weights) several times to
++a loop state, e.g. an XOF step, see compile_recurrent. The block writes each bit of
++the new state to the slot of the same bit of the old state, and outputs can be read
++after every step with one tied readout."""
++
++import sys
++from collections import defaultdict
++from collections.abc import Callable, Sequence
++from dataclasses import dataclass, field
++from typing import Any
++
++import torch as t
++
++from reifier.neurons.core import Bit, GluNeuron, Neuron, const
++
++K = 16  # SwiGLU computes a unit max(0, g) * v as silu(K * g) * v / K, as in swiglu.py
++
++# A linear form sum_j w[j] b_j + bias over variables (by uid) that are bits b_j
++Form = tuple[dict[int, float], float]
++Resolved = tuple  # ("const", c) or ("var", uid, sign), where sign -1 means 1 - b_uid
++
++
++@dataclass
++class GUnit:
++    """A gated unit max(0, gate) * value with linear forms over variables"""
++
++    gate: Form
++    value: Form
++
++
++@dataclass
++class Node:
++    """A computed variable: its value is sum(units) + linear"""
++
++    uid: int
++    units: list[GUnit]
++    linear: Form  # e.g. the updated input of an inplace glu
++    parents: set[int]  # variables read
++    level: int = 0
++
++
++@dataclass
++class Layer:
++    """x += outs @ (silu(K * gates @ x) * (values @ x)) / K, as COO entries.
++    A gated residual layer first sets the slots in drop to 0: x = alpha * x + ..."""
++
++    d: int
++    h: int = 0
++    drop: list[int] = field(default_factory=list)  # gated: slots whose old value is dropped
++    gates: list[tuple[int, int, float]] = field(default_factory=list)  # (unit, slot, w)
++    values: list[tuple[int, int, float]] = field(default_factory=list)
++    outs: list[tuple[int, int, float]] = field(default_factory=list)  # (slot, unit, w)
++
++    def matrices(self, dtype: t.dtype = t.float32) -> tuple[t.Tensor, t.Tensor, t.Tensor]:
++        """Sparse wg, wv, wo of the SwiGLU layer, with K folded in"""
++
++        def coo(entries: list, shape: tuple[int, int], scale: float) -> t.Tensor:
++            if not entries:
++                idx = t.zeros(2, 0, dtype=t.long)
++                return t.sparse_coo_tensor(idx, t.zeros(0, dtype=dtype), shape).coalesce()
++            i, j, v = zip(*entries)
++            m = t.sparse_coo_tensor(t.tensor([i, j]), t.tensor(v, dtype=t.float64), shape)
++            m = m.coalesce()
++            keep = m.values() != 0
++            vals = (m.values()[keep] * scale).to(dtype)
++            return t.sparse_coo_tensor(m.indices()[:, keep], vals, shape).coalesce()
++
++        return (
++            coo(self.gates, (self.h, self.d), K),
++            coo(self.values, (self.h, self.d), 1),
++            coo(self.outs, (self.d, self.h), 1 / K),
++        )
++
++
++@dataclass
++class Tap:
++    """Reads outputs from the stream after schedule position pos: row i of matrix
++    gives output rows[i] (0 is BOS, -1 discards it). Taps may share a matrix"""
++
++    pos: int
++    matrix: t.Tensor  # (m, d)
++    rows: list[int]
++
++
++@dataclass
++class Program:
++    """embed -> layers[schedule[0]] -> layers[schedule[1]] -> ... , with outputs
++    [1, bits] read out linearly by taps, by default one after the last layer.
++    embed maps [1, bits] to the stream"""
++
++    d: int
++    embed: t.Tensor  # (d, 1 + n_in)
++    layers: list[Layer]  # unique layers
++    schedule: list[int]
++    readout: list[Tap]
++    n_out: int  # outputs incl. BOS
++
++
++class Graph:
++    """The circuit between given input bits and output bits, with constants folded,
++    and copies and nots resolved to (variable, sign) aliases of computed variables"""
++
++    def __init__(self, inputs: Sequence[Bit], outputs: Sequence[Bit]):
++        self.inputs = [b.uid for b in inputs]
++        assert len(set(self.inputs)) == len(self.inputs), "repeated input bits"
++        self.nodes: dict[int, Node] = {}
++        self._memo: dict[int, Resolved] = {u: ("var", u, 1) for u in self.inputs}
++        limit = sys.getrecursionlimit()
++        sys.setrecursionlimit(max(limit, 100000))
++        try:
++            self.outputs = [self.resolve(b) for b in outputs]
++        finally:
++            sys.setrecursionlimit(limit)
++        self.level = {u: 0 for u in self.inputs}
++        for u, node in self.nodes.items():  # nodes come after their parents
++            node.level = 1 + max(self.level[p] for p in node.parents)
++            self.level[u] = node.level
++        self.depth = max([n.level for n in self.nodes.values()], default=0)
++
++    def resolve(self, b: Bit) -> Resolved:
++        if b.uid in self._memo:
++            return self._memo[b.uid]
++        src = b.source
++        parents = [self.resolve(p) for p in src.incoming]
++        variables = {p[1] for p in parents if p[0] == "var"}
++        if not variables:
++            r: Resolved = ("const", int(b.activation))
++        elif len(variables) == 1:  # a function of one bit: a constant, copy or not
++            (u,) = variables
++            f0, f1 = (_evaluate(src, [_value(p, x) for p in parents]) for x in (0, 1))
++            r = ("const", f0) if f0 == f1 else ("var", u, 1 if f1 else -1)
++        else:
++            self.nodes[b.uid] = _node(b.uid, src, parents)
++            r = ("var", b.uid, 1)
++        self._memo[b.uid] = r
++        return r
++
++
++def _value(p: Resolved, x: int) -> int:
++    if p[0] == "const":
++        return p[1]
++    return x if p[2] == 1 else 1 - x
++
++
++def _evaluate(src: Neuron | GluNeuron, x: list[int]) -> int:
++    if isinstance(src, GluNeuron):
++        total = 0 if src.inplace is None else x[src.inplace]
++        for u in src.units:
++            g = sum(a * w for a, w in zip(x, u.weights)) + u.bias
++            v = sum(a * w for a, w in zip(x, u.value_weights)) + u.value_bias
++            total += max(0, g) * v
++        return int(total)
++    return int(sum(a * w for a, w in zip(x, src.weights)) + src.bias >= 0)
++
++
++def _form(parents: list[Resolved], weights: Sequence[float], bias: float) -> Form:
++    """sum_i w_i x_i + bias over resolved parents, as a form over variables"""
++    w: dict[int, float] = defaultdict(float)
++    for p, wi in zip(parents, weights):
++        if wi == 0:
++            continue
++        if p[0] == "const":
++            bias += wi * p[1]
++        elif p[2] == 1:
++            w[p[1]] += wi
++        else:  # wi (1 - b)
++            bias += wi
++            w[p[1]] -= wi
++    return {j: v for j, v in w.items() if v != 0}, bias
++
++
++def _node(uid: int, src: Neuron | GluNeuron, parents: list[Resolved]) -> Node:
++    if isinstance(src, GluNeuron):
++        units = [
++            GUnit(_form(parents, u.weights, u.bias), _form(parents, u.value_weights, u.value_bias))
++            for u in src.units
++        ]
++        lin: dict[int, float] = defaultdict(float)
++        bias = 0.0
++        if src.inplace is not None:
++            e = [int(j == src.inplace) for j in range(len(parents))]
++            w, bias = _form(parents, e, 0)
++            for j, c in w.items():
++                lin[j] += c
++        for u in [u for u in units if not u.gate[0]]:  # constant gate c: c * value
++            c = u.gate[1]
++            if c > 0:
++                for j, v in u.value[0].items():
++                    lin[j] += c * v
++                bias += c * u.value[1]
++        units = [u for u in units if u.gate[0]]
++        linear: Form = ({j: c for j, c in lin.items() if c != 0}, bias)
++    else:  # threshold gate z >= 0 as a step of two units, as SwiGLU.from_matrix does:
++        # 4max(0, z+5/8) - 4max(0, z+3/8), with gates scaled by 4 as the norm does not
++        # sharpen them here: max(0, 4z+5/2) - max(0, 4z+3/2), within e^-24 at integer z
++        z, zbias = _form(parents, src.weights, src.bias)
++        z4 = {j: 4 * c for j, c in z.items()}
++        units = [GUnit((z4, 4 * zbias + 2.5), ({}, 1)), GUnit((z4, 4 * zbias + 1.5), ({}, -1))]
++        linear = ({}, 0)
++    variables = {p[1] for p in parents if p[0] == "var"}
++    return Node(uid, units, linear, variables)
++
++
++JUNK = ("junk",)  # a slot holding an unknown bit, e.g. scratch of an earlier step
++MOVED = ("moved",)  # a slot holding a loop state bit moved there
++
++
++class Allocator:
++    """Assigns stream slots to the variables of a graph, level by level, and emits the
++    layers that compute them. A write of node v into a slot holding y adds
++    2 (units(v) + linear(v) - y). Its linear rest is one linear unit, max(0, 1) times
++    the rest (clear="linear", exact, so it also removes the error of y), or shared
++    units max(0, b) per slot read (clear="relu"); a constant rest is one BOS unit
++    per layer, and there is no rest for an update in place.
++    Slot choice: a forced slot (recurrent outputs), the slot a forced update in place
++    needs its target in (hint), the slot of its target for an update in place, a
++    slot holding a known bit, a dead slot, or a new slot"""
++
++    def __init__(
++        self,
++        graph: Graph,
++        slot_of: dict[int, int],  # input uid -> slot
++        d: int,
++        out_slots: list[int] | None = None,  # recurrent: the slot of each output
++        new_slots_fresh: bool = True,  # new slots hold 0, else junk
++        prefer_new: bool = False,  # take a new slot rather than clear a dead one
++        clear: str = "linear",  # or "relu"
++        gated: bool = False,  # gated residual: a write that is not in place drops y
++    ):
++        assert clear in ("linear", "relu")
++        self.clear = clear
++        self.gated = gated
++        self.g = graph
++        self.slot_of = dict(slot_of)
++        self.d = d
++        self.content: dict[int, Any] = {s: u for u, s in slot_of.items()}
++        self.new_slots_fresh = new_slots_fresh
++        self.prefer_new = prefer_new
++        self.new_slots: list[int] = []
++        self.out_slots = out_slots
++        self.layers: list[Layer] = []
++
++    def run(self) -> list[Resolved]:
++        """Emits the layers, returns the outputs as ("var", slot, sign) or constants"""
++        g = self.g
++        depth = g.depth
++        by_level: dict[int, list[Node]] = defaultdict(list)
++        for node in g.nodes.values():
++            by_level[node.level].append(node)
++        last_use: dict[int, int] = defaultdict(int)
++        for node in g.nodes.values():
++            for p in node.parents:
++                last_use[p] = max(last_use[p], node.level)
++
++        forced: dict[int, int] = {}  # node uid -> slot it is written to
++        moves: dict[int, list[tuple[int, int, int]]] = defaultdict(list)  # layer -> (u, sign, slot)
++        keep: dict[int, int] = {}  # variable -> last layer that reads it (as last_use)
++        reserved: dict[int, int] = {}  # slot -> layer from which nothing else writes it
++        if self.out_slots is None:  # outputs stay where they are to the end
++            for o in g.outputs:
++                if o[0] == "var":
++                    keep[o[1]] = depth + 1
++        else:
++            assert len(self.out_slots) == len(g.outputs)
++            for o, s in zip(g.outputs, self.out_slots):
++                if o[0] == "const":
++                    raise NotImplementedError("constant loop state bits")
++                _, u, sign = o
++                lvl = g.level[u]
++                if lvl == depth > 0 and sign == 1 and u not in forced:
++                    forced[u] = s
++                    reserved[s] = depth
++                elif lvl == 0 and self.slot_of[u] == s and sign == 1:
++                    keep[u] = depth + 1  # stays in place
++                    reserved[s] = 1
++                else:  # moved after it is computed
++                    m = max(lvl + 1, 1)
++                    if m > depth:
++                        raise NotImplementedError("output move past the last layer")
++                    moves[m].append((u, sign, s))
++                    keep[u] = max(keep.get(u, 0), m)
++                    reserved[s] = min(reserved.get(s, m), m)
++
++        hint: dict[int, int] = {}  # node -> slot a forced update in place needs it in
++        for u, s in forced.items():
++            node = g.nodes[u]
++            for j, c in node.linear[0].items():
++                if c == 1 and j in g.nodes and g.nodes[j].level == node.level - 1:
++                    hint[j] = s
++
++        for layer in range(1, depth + 1):
++            claimed: set[int] = set()
++
++            def dead(s: int) -> bool:  # holds nothing needed after this layer's reads
++                c = self.content.get(s)
++                if isinstance(c, tuple):
++                    return c != MOVED
++                return last_use[c] <= layer and keep.get(c, 0) <= layer
++
++            def free(s: int) -> bool:
++                return s not in claimed and reserved.get(s, depth + 1) > layer and dead(s)
++
++            writes: list[tuple[Node | None, int, Form]] = []  # (node, slot, linear)
++            unplaced = []
++            for node in by_level[layer]:  # forced slots and updates in place
++                if node.uid in forced:
++                    s = forced[node.uid]
++                    assert s not in claimed and dead(s), f"slot {s} is busy"
++                else:
++                    targets = [hint[node.uid]] if node.uid in hint else []
++                    targets += [self.slot_of[j] for j, c in node.linear[0].items() if c == 1]
++                    s = next((s for s in targets if free(s)), None)
++                    if s is None:
++                        unplaced.append(node)
++                        continue
++                claimed.add(s)
++                writes.append((node, s, node.linear))
++            for u, sign, s in moves.get(layer, []):  # loop state bits to their slots
++                assert s not in claimed and dead(s), f"slot {s} is busy"
++                claimed.add(s)
++                writes.append((None, s, ({u: 1.0}, 0) if sign == 1 else ({u: -1.0}, 1)))
++            known = sorted((s for s, c in self.content.items() if isinstance(c, tuple) and c[0] == "const" and free(s)), reverse=True)
++            deads = sorted((s for s, c in self.content.items() if (not isinstance(c, tuple) or c == JUNK) and free(s)), reverse=True)
++            for node in unplaced:  # a slot with a known bit, a dead slot, or a new slot
++                if known:
++                    s = known.pop()
++                elif deads and not self.prefer_new:
++                    s = deads.pop()
++                else:
++                    s = self._new_slot()
++                claimed.add(s)
++                writes.append((node, s, node.linear))
++
++            L = _LayerBuilder(self.slot_of)
++            for node, s, (w, bias) in writes:  # reads see the stream before the writes
++                if node is not None:
++                    for unit in node.units:
++                        L.unit(unit, {s: 2.0})
++                rest = {self.slot_of[j]: c for j, c in w.items()}
++                old = self.content.get(s)
++                inplace = old is not None and not isinstance(old, tuple) and w.get(old) == 1
++                if self.gated and not inplace:  # drop y: add the new spin 2v - 1
++                    L.layer.drop.append(s)
++                    bias -= 0.5
++                elif isinstance(old, tuple) and old[0] == "const":
++                    bias -= old[1]
++                elif old is not None:  # a dead bit or junk: clear it
++                    assert old != MOVED
++                    rest[s] = rest.get(s, 0) - 1
++                rest = {r: c for r, c in rest.items() if c != 0}
++                if rest and self.clear == "linear":
++                    L.linear((rest, bias), s, 2.0)
++                    continue
++                for r, c in rest.items():
++                    L.identity(r, s, 2 * c)
++                if bias != 0:
++                    L.bos(s, 2 * bias)
++            for node, s, _ in writes:
++                if node is not None:
++                    self.slot_of[node.uid] = s
++                    self.content[s] = node.uid
++                else:
++                    self.content[s] = MOVED
++            L.layer.d = self.d
++            self.layers.append(L.layer)
++        for layer in self.layers:
++            layer.d = self.d
++
++        placed: list[Resolved] = []
++        for i, o in enumerate(g.outputs):
++            if o[0] == "const":
++                placed.append(o)
++            elif self.out_slots is not None:
++                placed.append(("var", self.out_slots[i], 1))
++            else:
++                placed.append(("var", self.slot_of[o[1]], o[2]))
++        return placed
++
++    def _new_slot(self) -> int:
++        s = self.d
++        self.d += 1
++        self.new_slots.append(s)
++        self.content[s] = ("const", 0) if self.new_slots_fresh else JUNK
++        return s
++
++
++class _LayerBuilder:
++    """Collects the units of one layer in spin space, where b = (s + 1) / 2"""
++
++    def __init__(self, slot_of: dict[int, int]):
++        self.slot_of = slot_of
++        self.layer = Layer(d=0)
++        self.shared: dict[Any, int] = {}  # identity units per slot read, BOS unit
++
++    def _row(self, w: dict[int, float], bias: float, entries: list, row: int) -> None:
++        for s, c in w.items():
++            entries.append((row, s, c / 2))
++            bias += c / 2
++        if bias != 0:
++            entries.append((row, 0, bias))
++
++    def _add(self, gate: tuple[dict[int, float], float], value: tuple[dict[int, float], float]) -> int:
++        row = self.layer.h
++        self.layer.h += 1
++        self._row(*gate, self.layer.gates, row)
++        self._row(*value, self.layer.values, row)
++        return row
++
++    def unit(self, unit: GUnit, outs: dict[int, float]) -> None:
++        by_slot = lambda f: ({self.slot_of[j]: c for j, c in f[0].items()}, f[1])  # noqa: E731
++        row = self._add(by_slot(unit.gate), by_slot(unit.value))
++        for s, w in outs.items():
++            self.layer.outs.append((s, row, w))
++
++    def identity(self, read: int, write: int, w: float) -> None:
++        """adds w * max(0, b) to slot write, for the bit b in slot read"""
++        if read not in self.shared:
++            self.shared[read] = self._add(({read: 1.0}, 0), ({}, 1))
++        self.layer.outs.append((write, self.shared[read], w))
++
++    def linear(self, form: tuple[dict[int, float], float], write: int, w: float) -> None:
++        """adds w times the linear form of slot bits to slot write: max(0, 1) * form"""
++        row = self._add(({}, 1), form)
++        self.layer.outs.append((write, row, w))
++
++    def bos(self, write: int, w: float) -> None:
++        if "bos" not in self.shared:
++            self.shared["bos"] = self._add(({}, 1), ({}, 1))
++        self.layer.outs.append((write, self.shared["bos"], w))
++
++
++def _embed(d: int, n_in: int, stream: list[tuple]) -> t.Tensor:
++    """(d, 1 + n_in): BOS, then slot s holds stream[s - 1] = ("in", i) or ("const", c).
++    Slots past the stream hold 0"""
++    e = t.zeros(d, 1 + n_in)
++    e[:, 0] = -1
++    e[0, 0] = 1
++    for s, item in enumerate(stream, start=1):
++        if item[0] == "in":
++            e[s, 1 + item[1]] = 2
++        else:
++            e[s, 0] = 2 * item[1] - 1
++    return e
++
++
++def _readout(d: int, placed: list[Resolved]) -> t.Tensor:
++    """(1 + n, d): BOS, then each bit (1 + sign * s) / 2, or a constant"""
++    r = t.zeros(1 + len(placed), d)
++    r[0, 0] = 1
++    for i, p in enumerate(placed, start=1):
++        if p[0] == "const":
++            r[i, 0] = p[1]
++        else:
++            _, s, sign = p
++            r[i, 0] += 0.5
++            r[i, s] += 0.5 * sign
++    return r
++
++
++def compile_unrolled(fn: Callable[[list[Bit]], Any], n_in: int, **kwargs: Any) -> Program:
++    """A residual program for fn(list of n_in bits) -> bits"""
++    inputs = const("0" * n_in)
++    g = Graph(inputs, _flatten(fn(inputs)))
++    alloc = Allocator(g, {b.uid: i + 1 for i, b in enumerate(inputs)}, 1 + n_in, **kwargs)
++    placed = alloc.run()
++    n = len(alloc.layers)
++    e = _embed(alloc.d, n_in, [("in", i) for i in range(n_in)])
++    tap = Tap(n - 1, _readout(alloc.d, placed), list(range(1 + len(placed))))
++    return Program(alloc.d, e, alloc.layers, list(range(n)), [tap], 1 + len(placed))
++
++
++def compile_recurrent(
++    init: Callable[[list[Bit]], list[Bit]],
++    step: Callable[[list[Bit]], list[Bit]],
++    readout: Callable[[list[list[Bit]]], Any],
++    n_in: int,
++    n_steps: int,
++    **kwargs: Any,
++) -> Program:
++    """A residual program that applies one block of layers, compiled from step, to a
++    loop state n_steps times, so the steps share weights. init(input bits) gives the
++    first state, as input bits and constants. readout(states after each step) gives
++    the outputs, as state bits and constants; each is read out after its step, and
++    steps that read the same state bits share one readout matrix (tied)"""
++    inputs = const("0" * n_in)
++    index = {b.uid: i for i, b in enumerate(inputs)}
++    stream = []
++    for b in init(inputs):
++        if b.uid in index:
++            stream.append(("in", index[b.uid]))
++        elif not b.source.incoming:
++            stream.append(("const", int(b.activation)))
++        else:
++            raise ValueError("init must give input bits or constants")
++    n = len(stream)
++    x = const("0" * n)
++    y = step(x)
++    assert len(y) == n, "step must keep the state size"
++    slots = list(range(1, n + 1))
++    alloc = Allocator(Graph(x, y), {b.uid: s for b, s in zip(x, slots)}, 1 + n, out_slots=slots, new_slots_fresh=False, **kwargs)
++    alloc.run()
++    d, depth = alloc.d, len(alloc.layers)
++    e = _embed(d, n_in, stream)
++
++    states = [const("0" * n) for _ in range(n_steps)]
++    where = {b.uid: (k, i) for k, st in enumerate(states) for i, b in enumerate(st)}
++    outs = _flatten(readout(states))
++    placed: dict[int, list[tuple[int, Resolved]]] = defaultdict(list)  # step -> (out, bit)
++    for j, b in enumerate(outs, start=1):
++        if b.uid in where:
++            k, i = where[b.uid]
++            placed[k].append((j, ("var", slots[i], 1)))
++        elif not b.source.incoming:
++            placed[n_steps - 1].append((j, ("const", int(b.activation))))
++        else:
++            raise ValueError("readout must give state bits or constants")
++    placed[n_steps - 1]  # BOS is read after the last step
++    taps: list[Tap] = []
++    for k in sorted(placed):
++        m = _readout(d, [p for _, p in placed[k]])
++        m = next((tap.matrix for tap in taps if t.equal(tap.matrix, m)), m)  # tie
++        rows = [0 if k == n_steps - 1 else -1] + [j for j, _ in placed[k]]
++        taps.append(Tap((k + 1) * depth - 1, m, rows))
++    schedule = [i for _ in range(n_steps) for i in range(depth)]
++    return Program(d, e, alloc.layers, schedule, taps, 1 + len(outs))
++
++
++def _flatten(x: Any) -> list[Bit]:
++    if isinstance(x, Bit):
++        return [x]
++    return [b for item in x for b in _flatten(item)]
+--- /dev/null	2026-07-17 20:39:29.466000000 +0000
++++ b/src/reifier/tensors/residual.py	2026-09-29 05:50:56.785869989 +0000
+@@ -0,0 +1,92 @@
++import torch as t
++import torch.nn as nn
++
++from reifier.compile.residual import Program
++from .swiglu import SwiGLU
++
++
++class ResSwiGLU(SwiGLU):
++    """Pre-norm residual SwiGLU layer, as in transformers: x + SwiGLU(x)"""
++
++    def forward(self, x: t.Tensor) -> t.Tensor:
++        return x.type(self.dtype) + super().forward(x)
++
++
++class GatedResSwiGLU(SwiGLU):
++    """Residual SwiGLU layer with a fixed 0/1 gate per feature on the skip path:
++    alpha * x + SwiGLU(x), so a layer can overwrite features"""
++
++    def __init__(self, in_f: int, out_f: int, **kwargs):  # type: ignore
++        super().__init__(in_f, out_f, **kwargs)
++        self.alpha = nn.Parameter(t.ones(in_f))
++
++    def forward(self, x: t.Tensor) -> t.Tensor:
++        return self.alpha * x.type(self.dtype) + super().forward(x)
++
++
++class MLP_ResSwiGLU(nn.Module):
++    """Residual SwiGLU MLP: a linear embedding, residual SwiGLU layers applied in the
++    order of schedule (a layer may be applied several times: tied weights), and linear
++    readouts of the stream after some schedule positions (taps), which fill the rows
++    of the output given by tap_rows (-1: unused) and may be shared by several taps"""
++
++    def __init__(
++        self,
++        embed: nn.Linear,
++        layers: nn.ModuleList,
++        schedule: list[int],
++        readouts: nn.ModuleList,
++        taps: list[tuple[int, int, list[int]]],  # (schedule position, readout, rows)
++        n_out: int,
++        dtype: t.dtype = t.float32,
++    ):
++        super().__init__()  # type: ignore
++        self.dtype = dtype  # type: ignore  # ty
++        self.embed = embed
++        self.layers = layers
++        self.schedule = schedule
++        self.readouts = readouts
++        self.taps = taps
++        self.n_out = n_out
++
++    def forward(self, x: t.Tensor) -> t.Tensor:
++        x = self.embed(x.type(self.dtype))
++        out = t.zeros(*x.shape[:-1], self.n_out, dtype=self.dtype, device=x.device)
++        for pos, i in enumerate(self.schedule):
++            x = self.layers[i](x)
++            for tap_pos, r, rows in self.taps:
++                if tap_pos == pos:
++                    y = self.readouts[r](x)
++                    keep = [j for j, row in enumerate(rows) if row >= 0]
++                    out[..., [rows[j] for j in keep]] += y[..., keep]
++        return out
++
++    @classmethod
++    def from_program(cls, p: Program, dtype: t.dtype = t.float32) -> "MLP_ResSwiGLU":
++        def linear(w: t.Tensor) -> nn.Linear:
++            lin = nn.Linear(w.size(1), w.size(0), bias=False, dtype=dtype)
++            with t.no_grad():
++                lin.weight.copy_(w)
++            return lin
++
++        layers = nn.ModuleList()
++        gated = any(layer.drop for layer in p.layers)
++        for layer in p.layers:
++            wg, wv, wo = layer.matrices(dtype)
++            cls_layer = GatedResSwiGLU if gated else ResSwiGLU
++            swiglu = cls_layer(p.d, p.d, has_bias=False, dtype=dtype, hidden_f=layer.h)
++            with t.no_grad():
++                for param, w in zip([swiglu.wg, swiglu.wv, swiglu.wo], [wg, wv, wo]):
++                    param.weight.copy_(w.to_dense())
++                if gated:
++                    swiglu.alpha[layer.drop] = 0
++            layers.append(swiglu)
++        readouts = nn.ModuleList()
++        index: dict[int, int] = {}  # matrix id -> readout
++        taps = []
++        for tap in p.readout:
++            if id(tap.matrix) not in index:
++                index[id(tap.matrix)] = len(readouts)
++                readouts.append(linear(tap.matrix))
++            taps.append((tap.pos, index[id(tap.matrix)], tap.rows))
++        return cls(linear(p.embed), layers, p.schedule, readouts, taps, p.n_out, dtype)
+--- /dev/null	2026-07-17 20:39:29.466000000 +0000
++++ b/tests/residual_test.py	2026-09-29 06:08:50.151167381 +0000
+@@ -0,0 +1,78 @@
++import itertools
++
++import pytest
++import torch as t
++
++from reifier.compile.residual import compile_recurrent, compile_unrolled
++from reifier.neurons.core import Bit, Unit, const, glu
++from reifier.neurons.operations import glu_xor, not_, and_, xor
++from reifier.tensors.residual import MLP_ResSwiGLU
++
++CHI = Unit((2, -1, 1), 0, (-1, 0.5, -0.5), 1.5)  # a ^ (~b & c)
++CHI_UPDATE = Unit((0, -1, 1), 0, (-2, 0, 0), 1)  # (1-2a) max(0, c-b), in place on a
++
++
++def outputs(mlp: MLP_ResSwiGLU, bits: tuple[int, ...]) -> list[float]:
++    y = mlp(t.tensor([[1, *bits]], dtype=t.float32))[0]
++    return (y[1:] / y[0]).tolist()
++
++
++def check_all_inputs(fn, n: int, mlp: MLP_ResSwiGLU, tol: float = 1e-3) -> None:
++    for bits in itertools.product([0, 1], repeat=n):
++        expected = [int(b.activation) for b in fn(const(bits))]
++        got = outputs(mlp, bits)
++        assert max(abs(g - e) for g, e in zip(got, expected)) < tol, (bits, got, expected)
++
++
++@pytest.mark.parametrize("n", range(1, 12))
++def test_xor_update_flat(n):
++    for bits in itertools.product([0, 1], repeat=n):
++        assert glu_xor(const(bits), inplace=True).activation == sum(bits) % 2
++        assert glu_xor(const(bits), flat=True).activation == sum(bits) % 2
++
++
++def fn_mixed(x: list[Bit]) -> list[Bit]:
++    """in place and not in place gated units, threshold gates, nots and constants"""
++    a = glu_xor(x[:4], inplace=True)  # updates x[0] in place
++    b = glu_xor([x[1], x[4], x[5]], flat=True)
++    c = xor([x[2], x[3]])  # threshold gates
++    d = glu([a, b, c], [CHI_UPDATE], inplace=0)
++    e = glu([not_(b), c, const("1")[0]], [CHI])
++    return [d, e, not_(a), and_([c, x[5]]), x[0]]
++
++
++@pytest.mark.parametrize("gated", [False, True])
++def test_unrolled(gated):
++    mlp = MLP_ResSwiGLU.from_program(compile_unrolled(fn_mixed, 6, gated=gated))
++    check_all_inputs(fn_mixed, 6, mlp)
++
++
++@pytest.mark.parametrize("gated", [False, True])
++def test_recurrent_tied(gated):
++    """a 4-bit state: a rotation with xor and chi, applied 3 times with tied weights,
++    and a register holding the first state bit of the step before"""
++
++    def step(x: list[Bit]) -> list[Bit]:
++        s, reg = x[:4], x[4]
++        new = [glu_xor([s[(i + 1) % 4], s[i], s[(i + 2) % 4]]) for i in range(4)]
++        new = [glu([new[i], new[(i + 1) % 4], new[(i + 2) % 4]], [CHI_UPDATE], inplace=0) for i in range(4)]
++        return new + [s[0]]
++
++    def init(msg: list[Bit]) -> list[Bit]:
++        return msg[:3] + const("1") + const("0")
++
++    def eager(msg: list[Bit]) -> list[Bit]:
++        states = [init(msg)]
++        for _ in range(3):
++            states.append(step(states[-1]))
++        return readout(states[1:])
++
++    def readout(states: list[list[Bit]]) -> list[Bit]:
++        return [states[0][1], states[1][2]] + states[-1]
++
++    program = compile_recurrent(init, step, readout, 3, 3, gated=gated)
++    assert len(program.layers) == 2 and program.schedule == [0, 1] * 3
++    mlp = MLP_ResSwiGLU.from_program(program)
++    n_unique = sum(p.numel() for p in mlp.parameters())
++    assert n_unique < sum(p.numel() for p in mlp.layers[0].parameters()) * 3
++    check_all_inputs(eager, 3, mlp)

@@ -1,0 +1,1 @@
+{"A": 2, "Q": 2, "lines": 324, "stats": {"v-b_pairs": [380, 200, 380, 200], "v-b_final_in": 9840, "v-c_pairs": [380, 200, 380, 200], "v-c_final_in": 9840, "i_pairs": [388, 388], "i_final_in": 5696, "v-a_triples": [45432, 0], "iii-a_triples": [41456, 96], "iii-b_triples": [41456, 96]}, "nfound": 0, "found": [], "planted": null, "planted_found": false, "t": 7.094007730484009}
