@@ -10,7 +10,8 @@
 <p align="center">Compile algorithms into neural network circuits.</p>
 
 Learn it in the browser with the [interactive tutorial](https://contramont.org/reifier/tutorial/):
-build threshold circuits gate by gate, then download them as neural networks.
+build threshold circuits gate by gate, then download them as neural networks. The
+[demo](https://contramont.org/reifier/demo/) has a 4-bit adder and a sandbox for your own circuits.
 
 Installation:
 ```bash
@@ -88,10 +89,10 @@ parameters for this adder. Each level's guarantees are in `reifier.opt`'s docstr
 
 ## Models from the tutorial
 
-The tutorial's Download model button compiles the program in its editor into the network
-that `reifier.tensors.compilation.Compiler().run(program, inputs)` builds, and saves it as
-`.safetensors`: a stack of float32 SwiGLU layers that reads a leading 1, then the input
-bits. Plain PyTorch runs it:
+The Download model button of the tutorial and the demo compiles the program in the editor
+into the network that `reifier.tensors.compilation.Compiler().run(program, inputs)` builds,
+and saves it as `.safetensors`: a stack of float32 SwiGLU layers that reads a leading 1,
+then the input bits. Plain PyTorch runs it:
 ```python
 import torch
 import torch.nn.functional as F
