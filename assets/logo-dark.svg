@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="-10.25 -9 100 100">
   <title>Reifier</title>
-  <path d="M20 41 L59.5 72" fill="none" stroke="#e8e4df" stroke-width="6" stroke-linecap="round"/>
+  <path d="M20 41 L59.5 72" fill="none" stroke="#e8e4df" stroke-width="7.2" stroke-linecap="round"/>
   <g fill="#e8e4df">
     <rect x="10" y="0" width="20" height="20" rx="3"/>
     <rect x="10" y="31" width="20" height="20" rx="3"/>
