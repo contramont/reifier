@@ -1,14 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 100 100">
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="-10.25 -9 100 100">
   <title>Reifier</title>
-  <g fill="none" stroke-width="5.5" stroke-linecap="round">
-    <path d="M22 22 C49 22 49 50 76 50" stroke="#4583c9"/>
-    <path d="M22 50 H76" stroke="#c95745"/>
-    <path d="M22 78 C49 78 49 50 76 50" stroke="#4583c9"/>
-  </g>
+  <path d="M20 41 L59.5 72" fill="none" stroke="#262320" stroke-width="6" stroke-linecap="round"/>
   <g fill="#262320">
-    <rect x="6" y="14" width="16" height="16" rx="4.5"/>
-    <rect x="6" y="70" width="16" height="16" rx="4.5"/>
-    <circle cx="76" cy="50" r="18"/>
+    <rect x="10" y="0" width="20" height="20" rx="3"/>
+    <rect x="10" y="31" width="20" height="20" rx="3"/>
+    <rect x="10" y="62" width="20" height="20" rx="3"/>
+    <rect x="49.5" y="62" width="20" height="20" rx="3"/>
+    <path d="M41 3 A3 3 0 0 1 44 0 A25.5 25.5 0 0 1 44 51 A3 3 0 0 1 41 48 Z"/>
   </g>
-  <rect x="7.75" y="43.75" width="12.5" height="12.5" rx="2.75" fill="none" stroke="#262320" stroke-width="3.5"/>
 </svg>

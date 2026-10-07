@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/contramont/reifier/refs/heads/main/assets/logo-dark.svg">
-    <img alt="Reifier logo: three input bits joined by weighted edges into one neuron" src="https://raw.githubusercontent.com/contramont/reifier/refs/heads/main/assets/logo.svg" width="128">
+    <img alt="Reifier logo: the letter R built from square bits and a wire" src="https://raw.githubusercontent.com/contramont/reifier/refs/heads/main/assets/logo.svg" width="128">
   </picture>
 </p>
 
