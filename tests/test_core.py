@@ -15,6 +15,7 @@ from reifier import (
     const,
     flatten,
     gate,
+    glu,
     lower,
     network,
     not_,
@@ -118,7 +119,7 @@ def test_placing_keeps_units():
     live = [n.circuit for n in flatten(lower(g, "reglu")).nodes if n.inputs]  # not const("0")
     weights = {(c.wi.tobytes(), c.b.tobytes()) for c in live}
     placed = [c for layer in place(g, "reglu").nodes for c in units_of(layer.circuit)]
-    units = [c for c in placed if c.label not in ("copy", "0")]
+    units = [c for c in placed if c.label not in ("copy", "0", "empty")]
     assert len(units) == len(live) and all(c.f == "reglu" for c in placed)
     # every unit keeps its weights: the carry 0 enters the xor block as a constant feature,
     # since folding it into the block's biases would make the block a different one
@@ -140,7 +141,40 @@ def test_circuits_are_placed_as_blocks():
     blocks = [n.circuit for layer in layers for n in layer.nodes if name(n.circuit) == "xors[1/1]"]
     assert len(blocks) == 1  # the three xors: one block, in one layer
     assert [name(n.circuit) for n in blocks[0].nodes] == ["xor.reglu[1/1]"] * 3
+    assert len(blocks[0].outputs) == 3  # side by side, nothing between them
     assert matches(g, network(g, "geglu", norm=True), table(9))
+
+
+@circuit
+def count(xs):
+    return glu(xs, [([0] * len(xs), 1, [1] * len(xs), 0)], kind="int")
+
+
+@circuit
+def majority(xs):  # a block two layers high
+    return gate([count(xs)], [1], len(xs) // 2 + 1)
+
+
+@pytest.mark.parametrize(
+    "g",
+    [
+        add.trace(bits(4), bits(4)),
+        trace(lambda x: [majority(x[:3]), x[3], majority(x[3:]), majority(x[1:4])], bits(6)),
+    ],
+)
+def test_blocks_are_rectangles(g):
+    layers = [n.circuit for n in place(g, "reglu").nodes]
+    assert len({len(layer.outputs) for layer in layers}) == 1  # each level as wide
+    for layer in layers:
+        col = {x: i for i, x in enumerate(layer.inputs)}
+        at = 0
+        for n in dict.fromkeys(y.node for y in layer.outputs):  # one after another
+            assert layer.outputs[at : at + len(n.outputs)] == n.outputs
+            if isinstance(n.circuit, Graph) and not n.circuit.name.endswith(("[1/1]", "[1/2]")):
+                # a block's second layer reads its first, right below it
+                assert [col[x] for x in n.inputs] == list(range(at, at + len(n.outputs)))
+            at += len(n.outputs)
+    assert matches(g, network(g, "geglu", norm=True), table(len(g.inputs)))
 
 
 def test_placed_circuits_are_built_once():

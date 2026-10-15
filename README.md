@@ -42,17 +42,20 @@ gate is a unit with `f = "step"`; a GLU is a unit with a gated `f` such as `"reg
 multiplies relu of the left half of `wi @ x + b` by its right half. `cast` turns step units
 into relu units, relu into reglu, and reglu into swiglu or geglu.
 
-**Local structure** (`place.py`): `place(graph, f)` puts each unit in the layer after its
-inputs, as it is: placing a unit only wires it to the layer below. Copies carry signals to the
-layers that read them. A circuit is placed once, as a block of layers, and every use of it
-puts that block in the layers after its inputs: the units in it stay side by side, on the
-same layers. The result is a chain of layer graphs.
+**Local structure** (`place.py`): `place(graph, f)` puts units on a grid of layers and
+features. Each circuit is placed once, as a block: a rectangle as wide as its widest level, with
+the features it does not use left empty. Each use of a circuit puts its block in the layers after
+its inputs, at the first features free on all of its levels, so what a circuit holds stays
+together and in place. Units keep their weights: placing one only wires it to the level below.
+Copies carry signals straight up to the levels that read them. The result is a chain of layer
+graphs, each as wide as the others.
 
 **Global structure** (`target.py`): `network(graph, f, norm)` builds a target architecture
 around the placed units. Each layer holds its units side by side as one unit, and global parts
 act on whole layers: BOS = 1 leads every layer and carries the biases, and an RMSNorm can come
-before each layer. The matrices of a block's layer are built once and copied into each use. Targets include MLPs of step or relu units and GLU layers (reglu, swiglu,
-geglu) with or without RMSNorms.
+before each layer. The matrices of a block's layer are built once and copied into each use.
+Targets include MLPs of step or relu units and GLU layers (reglu, swiglu, geglu) with or without
+RMSNorms.
 
 | File | Contents |
 |---|---|

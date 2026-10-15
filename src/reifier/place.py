@@ -1,13 +1,16 @@
-"""Placing units in layers: the local structure of a network.
+"""Placing units on a grid: the local structure of a network.
 
-Each circuit is placed once, as a block of layers, and reused wherever it is called: its
-units and the blocks of the circuits it calls each go in the layer after their inputs,
-side by side, and copies carry signals to the layers that read them. A block reads its
-inputs in its first layer and gives its outputs in its last, so what a circuit holds
-stays together. Placed units keep their weights: placing one only wires it to the layer
+A level is a row of features, and a layer maps the level below it to the next. Each
+circuit is placed once, as a block: a rectangle of layers and features, as wide as its
+widest level, with the features it leaves unused empty. Each use of a circuit puts its
+block in the layers after its inputs, at the first features free on all of its levels.
+Units are blocks one layer high, and copies carry signals straight up to the levels
+that read them. A block reads its inputs in its first layer and gives its outputs in
+its last. Placed units keep their weights: placing one only wires it to the level
 below. Constants fold into the biases of the units that read them.
 """
 
+from collections import defaultdict
 from dataclasses import replace
 from functools import cache
 
@@ -18,78 +21,87 @@ from .units import Unit
 
 
 def place(graph: Graph, f: str) -> Graph:
-    """graph as a chain of layers of f units, each layer a graph of units and of the layers
-    of the placed circuits that graph calls"""
+    """graph as a chain of layers of f units, each layer a graph of the units and of the
+    layers of the blocks in it, one after another, as wide as every other layer"""
     return _place(lower(graph, f), f)
 
 
 @cache
 def _place(g: Graph, f: str) -> Graph:
-    value, blocks = {}, {}  # constants; each node's layers and the signals its first one reads
+    value, blocks = {}, {}  # constants; each node's layers, what its first reads, its outputs
     for n in g.nodes:
         c = n.circuit
         if all(x in value for x in n.inputs):  # a constant
             value |= zip(n.outputs, c.eval([value[x] for x in n.inputs]))
         elif isinstance(c, Graph):
-            blocks[n] = [layer.circuit for layer in _place(c, f).nodes], list(n.inputs)
+            p = _place(c, f)
+            at = [y.index for y in p.outputs]  # the feature of each output in its last level
+            blocks[n] = [layer.circuit for layer in p.nodes], list(n.inputs), at
         elif isinstance(c, Unit) and c.f == f:  # constant inputs go into the biases
             live = [j for j, x in enumerate(n.inputs) if x not in value]
             k = np.array([value.get(x, 0.0) for x in n.inputs])
-            blocks[n] = (
-                [replace(c, wi=c.wi[:, live], b=c.b + c.wi @ k)],
-                [n.inputs[j] for j in live],
-            )
+            u = replace(c, wi=c.wi[:, live], b=c.b + c.wi @ k)
+            blocks[n] = [u], [n.inputs[j] for j in live], range(len(c.kinds))
         else:
             raise TypeError(f"{c} is not a unit of {f}")
-    made = list(dict.fromkeys(x for _, xs in blocks.values() for x in xs if x in value))
+    made = list(dict.fromkeys(x for _, xs, _ in blocks.values() for x in xs if x in value))
     start, end = {}, dict.fromkeys(g.inputs, 0) | dict.fromkeys(made, 1)
-    for n, (layers, xs) in blocks.items():
+    for n, (layers, xs, _) in blocks.items():
         start[n] = 1 + max((end[x] for x in xs), default=0)
         end |= dict.fromkeys(n.outputs, start[n] + len(layers) - 1)
     top = max([1] + [end[y] for y in g.outputs if y not in value])
+    made += [y for y in dict.fromkeys(g.outputs) if y in value and y not in end]
+    end |= {y: top for y in made if y not in end}  # constant outputs: made in the last layer
     need = dict.fromkeys(g.outputs, top)  # the last level each signal is read at
-    for n, (_, xs) in blocks.items():
+    for n, (_, xs, _) in blocks.items():
         for x in xs:
             need[x] = max(need.get(x, 0), start[n] - 1)
 
+    # rectangles (first level, layers, signals the first reads, outputs, a copy?), lowest
+    # first and copies first, each at the first features free on all of its levels
+    rects = [(end[x], [carry(f, [], value[x], x.kind)], [], {x: 0}, False) for x in made]
+    rects += [
+        (start[n], ls, xs, dict(zip(n.outputs, at)), False) for n, (ls, xs, at) in blocks.items()
+    ]
+    rects += [
+        (end[x] + 1, [carry(f, [1], 0.0, x.kind)] * (need[x] - end[x]), [x], {x: 0}, True)
+        for x in need
+        if need[x] > end[x]
+    ]
+    where = {(x, 0): i for i, x in enumerate(g.inputs)}  # (signal, level) -> feature
+    grid, layer = defaultdict(bytearray), defaultdict(list)  # used features; rects by level
+
+    def fits(c, w, levels):
+        return not any(any(grid[d][c : c + w]) for d in levels)
+
+    for s, ls, xs, outs, copy in sorted(rects, key=lambda r: (r[0], not r[4])):
+        w, levels = len(ls[0].kinds), range(s, s + len(ls))
+        c = where[xs[0], s - 1] if copy else 0  # a copy goes straight up if it can
+        if not fits(c, w, levels):
+            c = max(len(grid[d]) if 0 not in grid[d] else grid[d].index(0) for d in levels)
+            while not fits(c, w, levels):
+                c += 1
+        for d in levels:
+            grid[d] += bytes(max(0, c + w - len(grid[d])))
+            grid[d][c : c + w] = b"\1" * w
+            layer[d].append((c, s, ls, xs))
+        where |= {
+            (x, d): c + j for x, j in outs.items() for d in (levels if copy else [s + len(ls) - 1])
+        }
+
+    width = max(len(grid[d]) for d in range(1, top + 1))
     h = ins = inputs(*(s.kind for s in g.inputs))
-    level = list(g.inputs)  # what each feature of the level below holds: a signal of g,
-    for d in range(1, top + 1):  # or (n, j), output j of a block n still in progress
-        here = inputs(*(s.kind for s in h))
-        at, keys, outs = dict(zip(level, here)), [], []
-        for x in made if d == 1 else ():
-            keys.append(x)
-            outs += emit(carry(f, [], value[x], x.kind), [])
-        for n, (layers, xs) in blocks.items():
-            if start[n] <= d < start[n] + len(layers):
-                k = d - start[n]
-                reads = (
-                    [at[x] for x in xs]
-                    if k == 0
-                    else [at[n, j] for j in range(len(layers[k - 1].kinds))]
-                )
-                outs += emit(layers[k], reads)
-                keys += (
-                    n.outputs
-                    if k == len(layers) - 1
-                    else [(n, j) for j in range(len(layers[k].kinds))]
-                )
-        for x in level:
-            if isinstance(x, tuple) or need.get(x, 0) < d:  # not needed above
-                continue
-            keys.append(x)
-            outs += emit(carry(f, [1], 0.0, x.kind), [at[x]])
-        if d == top:  # the outputs of g, in order
-            for y in g.outputs:
-                if y in value and y not in set(keys):
-                    keys.append(y)
-                    outs += emit(carry(f, [], value[y], y.kind), [])
-            first = {}
-            for i, key in enumerate(keys):
-                first.setdefault(key, i)
-            outs = [outs[first[y]] for y in g.outputs]
-        h, level = emit(Graph(f"{g.name}[{d}/{top}]", here, outs), h), keys
-    return Graph(f"{g.name}.{f}", ins, h)
+    for d in range(1, top + 1):
+        here, outs = inputs(*(s.kind for s in h)), []
+        for c, s, ls, xs in sorted(layer[d], key=lambda r: r[0]):
+            outs += emit(empty(f, c - len(outs)), []) if c > len(outs) else []
+            reads = (
+                [here[where[x, d - 1]] for x in xs] if d == s else here[c : c + len(ls[0].kinds)]
+            )
+            outs += emit(ls[d - s], reads)
+        outs += emit(empty(f, width - len(outs)), []) if width > len(outs) else []
+        h = emit(Graph(f"{g.name}[{d}/{top}]", here, outs), h)
+    return Graph(f"{g.name}.{f}", ins, [h[where[y, top]] for y in g.outputs])
 
 
 def carry(f: str, r, c: float, kind: str) -> Unit:
@@ -103,3 +115,9 @@ def carry(f: str, r, c: float, kind: str) -> Unit:
         wi, b, wo = np.vstack([0 * r, r]), [1, c], [[1]]
     label = "copy" if r.size else f"{c:g}"
     return Unit(wi, np.array(b, float), f, np.array(wo, float), (kind,), label)
+
+
+@cache
+def empty(f: str, k: int) -> Unit:
+    """k unused features: a unit of f with no hidden units, so always 0"""
+    return Unit(np.zeros((0, 0)), np.zeros(0), f, np.zeros((k, 0)), ("bit",) * k, "empty")
