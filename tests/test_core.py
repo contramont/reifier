@@ -6,7 +6,9 @@ import numpy as np
 import pytest
 
 from reifier import (
+    Graph,
     add,
+    and_,
     at_least,
     bits,
     circuit,
@@ -15,11 +17,13 @@ from reifier import (
     gate,
     lower,
     network,
+    not_,
     place,
     show,
     trace,
     xor,
 )
+from reifier.target import side_by_side
 
 TARGETS = {
     "step mlp": lambda g: network(g, "step"),
@@ -104,15 +108,49 @@ def test_architectures():
     assert fs["geglu, rmsnorm"] == ["rmsnorm", "geglu"] * 4
 
 
+def units_of(layer):  # the units in a placed layer, inside its blocks too
+    for n in layer.nodes:
+        yield from units_of(n.circuit) if isinstance(n.circuit, Graph) else [n.circuit]
+
+
 def test_placing_keeps_units():
     g = add.trace(bits(4), bits(4))
     live = [n.circuit for n in flatten(lower(g, "reglu")).nodes if n.inputs]  # not const("0")
     weights = {(c.wi.tobytes(), c.b.tobytes()) for c in live}
-    placed = [n.circuit for layer in place(g, "reglu").nodes for n in layer.circuit.nodes]
-    units = [c for c in placed if c.label != "copy"]
+    placed = [c for layer in place(g, "reglu").nodes for c in units_of(layer.circuit)]
+    units = [c for c in placed if c.label not in ("copy", "0")]
     assert len(units) == len(live) and all(c.f == "reglu" for c in placed)
-    kept = [c for c in units if (c.wi.tobytes(), c.b.tobytes()) in weights]
-    assert len(kept) == len(units) - 1  # the xor that reads the carry 0 has it in its bias
+    # every unit keeps its weights: the carry 0 enters the xor block as a constant feature,
+    # since folding it into the block's biases would make the block a different one
+    assert all((c.wi.tobytes(), c.b.tobytes()) in weights for c in units)
+    assert [c.label for c in placed].count("0") == 1
+
+
+def test_circuits_are_placed_as_blocks():
+    @circuit
+    def xors(a, b, c, n):
+        return [xor([a[k], b[k], c[k]]) for k in range(n)][::-1]
+
+    def program(x):  # the xors read signals from different depths
+        return xors(x[:3], [not_(v) for v in x[3:6]], [and_([v, x[0]]) for v in x[6:]], 3)
+
+    g = trace(program, bits(9))
+    layers = [n.circuit for n in place(g, "reglu").nodes]
+    name = lambda c: c.name if isinstance(c, Graph) else str(c)
+    blocks = [n.circuit for layer in layers for n in layer.nodes if name(n.circuit) == "xors[1/1]"]
+    assert len(blocks) == 1  # the three xors: one block, in one layer
+    assert [name(n.circuit) for n in blocks[0].nodes] == ["xor.reglu[1/1]"] * 3
+    assert matches(g, network(g, "geglu", norm=True), table(9))
+
+
+def test_placed_circuits_are_built_once():
+    g = add.trace(bits(8), bits(8))
+    layers = [n.circuit for layer in place(g, "reglu").nodes for n in layer.circuit.nodes]
+    xors = [c for c in layers if isinstance(c, Graph) and c.name.startswith("xor")]
+    assert len(xors) == 8 and len(set(xors)) == 1  # one placed xor, used eight times
+    side_by_side.cache_clear()
+    net = network(g, "reglu")
+    assert side_by_side.cache_info().misses < len(xors) + len(net.nodes) * 4
 
 
 @pytest.mark.parametrize("target", TARGETS)

@@ -6,6 +6,8 @@ the features of every layer and carries the biases, and an RMSNorm can come befo
 each layer, in which case outputs are relative to BOS.
 """
 
+from functools import cache
+
 import numpy as np
 
 from .core import Graph, emit, inputs
@@ -36,24 +38,59 @@ def rmsnorm(kinds) -> Unit:
     return Unit(eye, np.zeros(len(kinds)), "rmsnorm", eye, kinds, "rmsnorm")
 
 
+@cache
+def side_by_side(layer: Graph) -> Unit:
+    """A layer's units, and the units of the layers of blocks in it, side by side as one
+    unit. Built once for each layer, however many times its circuit is used"""
+    return _beside(*_parts(layer), len(layer.inputs), str(layer))
+
+
 def merge(layer: Graph) -> Unit:
-    """The units of a layer side by side, as one unit from [BOS, *inputs] to [BOS, *outputs]
-    with the biases on BOS"""
+    """A layer as one unit from [BOS, *inputs] to [BOS, *outputs], with biases on BOS"""
+    parts, rows = _parts(layer)
+    parts = [(carry(parts[0][0].f, [1], 0.0, "bit"), [0])] + [
+        (u, [c + 1 for c in cols]) for u, cols in parts
+    ]
+    rows = [(0, 0)] + [(i + 1, j) for i, j in rows]
+    return _beside(parts, rows, len(layer.inputs) + 1, str(layer), bos=True)
+
+
+def _parts(layer: Graph):
+    """The units of a layer (a block's layer as one unit) with the columns each reads, and
+    for each output, the part and the part's output it is"""
     nodes = list(dict.fromkeys(y.node for y in layer.outputs))  # in the order they were placed
-    f, col = nodes[0].circuit.f, {x: i + 1 for i, x in enumerate(layer.inputs)}
-    parts = [(carry(f, [1], 0.0, "bit"), [0])]  # BOS
-    parts += [(n.circuit, [col[x] for x in n.inputs]) for n in nodes]
-    gates, values, offset, start = [], [], 0, {}
-    for i, (c, cols) in enumerate(parts):
-        wi = np.zeros((len(c.b), len(col) + 1))
-        np.add.at(wi.T, cols, c.wi.T)  # the unit's inputs, as columns of the layer
-        wi[:, 0] += c.b
-        gates.append(wi[: c.hidden])
-        values.append(wi[c.hidden :])
-        start[i], offset = offset, offset + c.hidden
-    where = {y: (i + 1, j) for i, n in enumerate(nodes) for j, y in enumerate(n.outputs)}
-    wo = np.zeros((len(layer.outputs) + 1, offset))
-    for row, (i, j) in enumerate([(0, 0)] + [where[y] for y in layer.outputs]):
-        wo[row, start[i] : start[i] + parts[i][0].hidden] = parts[i][0].wo[j]
-    wi = np.vstack(gates + values if f in GATED else gates)
-    return Unit(wi, np.zeros(len(wi)), f, wo, ("bit", *(y.kind for y in layer.outputs)), str(layer))
+    col = {x: i for i, x in enumerate(layer.inputs)}
+    units = [side_by_side(n.circuit) if isinstance(n.circuit, Graph) else n.circuit for n in nodes]
+    where = {y: (i, j) for i, n in enumerate(nodes) for j, y in enumerate(n.outputs)}
+    return [(u, [col[x] for x in n.inputs]) for u, n in zip(units, nodes)], [
+        where[y] for y in layer.outputs
+    ]
+
+
+def _beside(parts, rows, n_in, label, bos=False) -> Unit:
+    """Units side by side on n_in inputs, each reading the columns given with it; output
+    r is output j of part i for rows[r] = (i, j). With bos, biases go into column 0"""
+    f, sizes = parts[0][0].f, [c.hidden for c, _ in parts]
+    start, halves = np.cumsum([0, *sizes]), 2 if parts[0][0].f in GATED else 1
+    width = start[-1]
+    wi, b, wo = (
+        np.zeros((halves * width, n_in)),
+        np.zeros(halves * width),
+        np.zeros((len(rows), width)),
+    )
+    for (c, cols), s in zip(parts, start):
+        for h in range(halves):  # gates, then values: rows s.. of each half
+            r, src = (
+                slice(h * width + s, h * width + s + c.hidden),
+                slice(h * c.hidden, (h + 1) * c.hidden),
+            )
+            if len(set(cols)) == len(cols):
+                wi[r, cols] = c.wi[src]
+            else:  # an input read twice adds up
+                np.add.at(wi[r].T, cols, c.wi[src].T)
+            b[r] = c.b[src]
+    for r, (i, j) in enumerate(rows):
+        wo[r, start[i] : start[i + 1]] = parts[i][0].wo[j]
+    if bos:
+        wi[:, 0], b = wi[:, 0] + b, 0 * b
+    return Unit(wi, b, f, wo, tuple(parts[i][0].kinds[j] for i, j in rows), label)

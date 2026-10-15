@@ -44,12 +44,14 @@ into relu units, relu into reglu, and reglu into swiglu or geglu.
 
 **Local structure** (`place.py`): `place(graph, f)` puts each unit in the layer after its
 inputs, as it is: placing a unit only wires it to the layer below. Copies carry signals to the
-layers that read them. The result is a chain of layer graphs.
+layers that read them. A circuit is placed once, as a block of layers, and every use of it
+puts that block in the layers after its inputs: the units in it stay side by side, on the
+same layers. The result is a chain of layer graphs.
 
 **Global structure** (`target.py`): `network(graph, f, norm)` builds a target architecture
 around the placed units. Each layer holds its units side by side as one unit, and global parts
 act on whole layers: BOS = 1 leads every layer and carries the biases, and an RMSNorm can come
-before each layer. Targets include MLPs of step or relu units and GLU layers (reglu, swiglu,
+before each layer. The matrices of a block's layer are built once and copied into each use. Targets include MLPs of step or relu units and GLU layers (reglu, swiglu,
 geglu) with or without RMSNorms.
 
 | File | Contents |

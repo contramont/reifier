@@ -110,10 +110,7 @@ class Graph(Circuit):
 
     def __post_init__(self):
         self.nodes = toposort(self)
-
-    @property
-    def kinds(self):
-        return tuple(s.kind for s in self.outputs)
+        self.kinds = tuple(s.kind for s in self.outputs)
 
     def eval(self, xs) -> list:
         """The output values for one value per input, or for a string of bits"""
