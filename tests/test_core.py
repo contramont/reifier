@@ -13,19 +13,20 @@ from reifier import (
     const,
     flatten,
     gate,
-    glu_layers,
-    inputs,
-    mlp,
+    lower,
+    network,
+    place,
     show,
     trace,
     xor,
 )
 
 TARGETS = {
-    "step mlp": lambda g: mlp(g, "step"),
-    "relu mlp": lambda g: mlp(g, "relu"),
-    "glu": glu_layers,
-    "glu, rmsnorm": lambda g: glu_layers(g, norm=True),
+    "step mlp": lambda g: network(g, "step"),
+    "relu mlp": lambda g: network(g, "relu"),
+    "reglu": lambda g: network(g, "reglu"),
+    "swiglu": lambda g: network(g, "swiglu"),
+    "geglu, rmsnorm": lambda g: network(g, "geglu", norm=True),
 }
 
 
@@ -98,22 +99,20 @@ def test_targets_match_the_circuit(target):
 def test_architectures():
     g = add.trace(bits(4), bits(4))
     fs = {t: [n.circuit.f for n in TARGETS[t](g).nodes] for t in TARGETS}
-    assert set(fs["step mlp"]) == {"step", "id"} and fs["step mlp"][-1] == "id"
-    assert set(fs["relu mlp"]) == {"relu", "id"} and fs["relu mlp"].count("id") == 1
-    assert fs["glu"] == ["swiglu", "id"] * (len(fs["glu"]) // 2)
-    assert fs["glu, rmsnorm"] == ["rmsnorm", "swiglu", "id"] * (len(fs["glu"]) // 2)
-    # the hand-written xors take one layer where gates take two
-    assert len(fs["relu mlp"]) < len(fs["step mlp"])
+    assert fs["step mlp"] == ["step"] * 5 and fs["reglu"] == ["reglu"] * 4
+    assert fs["relu mlp"] == ["relu"] * 4  # the hand-written xors take one layer, not two
+    assert fs["geglu, rmsnorm"] == ["rmsnorm", "geglu"] * 4
 
 
-def test_int_signals_need_a_target_that_has_them():
-    g = at_least.trace(bits(5), 3)
-    for target in ["relu mlp", "glu", "glu, rmsnorm"]:
-        assert matches(g, TARGETS[target](g), table(5))
-    with pytest.raises(TypeError):  # popcount is a relu block, not a step block
-        mlp(g, "step")
-    with pytest.raises(TypeError):
-        gate(inputs("real"), [1], 1)
+def test_placing_keeps_units():
+    g = add.trace(bits(4), bits(4))
+    live = [n.circuit for n in flatten(lower(g, "reglu")).nodes if n.inputs]  # not const("0")
+    weights = {(c.wi.tobytes(), c.b.tobytes()) for c in live}
+    placed = [n.circuit for layer in place(g, "reglu").nodes for n in layer.circuit.nodes]
+    units = [c for c in placed if c.label != "copy"]
+    assert len(units) == len(live) and all(c.f == "reglu" for c in placed)
+    kept = [c for c in units if (c.wi.tobytes(), c.b.tobytes()) in weights]
+    assert len(kept) == len(units) - 1  # the xor that reads the carry 0 has it in its bias
 
 
 @pytest.mark.parametrize("target", TARGETS)
@@ -137,13 +136,12 @@ def test_show_lists_each_circuit_once():
     assert text.count("= xor/3(") == 3 and "gate[1 1 1 >= 2]" in text
 
 
-def test_gemma_ffn_is_four_blocks():
+def test_gemma_ffn_is_three_units():
     example = runpy.run_path(str(Path(__file__).parents[1] / "examples" / "gemma_ffn.py"))
     text, err = example["check"]()
     assert err < 1e-9
     assert [line.split(" = ")[1].split("(")[0] for line in text.splitlines()[1:-1]] == [
         "rmsnorm[8]",
-        "geglu[64]",
-        "id[8]",
+        "geglu[32]",
         "id[8]",
     ]

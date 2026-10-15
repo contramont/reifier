@@ -1,7 +1,7 @@
 """A small circuit library."""
 
-from .blocks import block, const, gate, glu
 from .core import circuit
+from .units import const, gate, glu, unit
 
 
 @circuit
@@ -33,15 +33,15 @@ def xor(xs):
 
 @xor.impl("relu")
 def xor_relu(xs):
-    """One relu layer: s - 2 relu(s - 1) + 2 relu(s - 2) - ..., where s = sum(xs)"""
+    """One relu unit: s - 2 relu(s - 1) + 2 relu(s - 2) - ..., where s = sum(xs)"""
     n = len(xs)
-    h = block(xs, [[1] * n] * n, [-j for j in range(n)], "relu")
-    return block(h, [[1] + [2 * (-1) ** j for j in range(1, n)]], [0], kind="bit")[0]
+    wo = [[1] + [2 * (-1) ** j for j in range(1, n)]]
+    return unit(xs, [[1] * n] * n, [-j for j in range(n)], "relu", wo, "bit")[0]
 
 
 @xor.impl("reglu")
 def xor_reglu(xs):
-    """One GLU layer: relu(s)(2 - s) + 4 relu(s - 2) + 4 relu(s - 4) + ..., s = sum(xs)"""
+    """One reglu unit: relu(s)(2 - s) + 4 relu(s - 2) + 4 relu(s - 4) + ..., s = sum(xs)"""
     n, ones, zeros = len(xs), [1] * len(xs), [0] * len(xs)
     units = [(ones, 0, [-1] * n, 2)] + [(ones, -2 * j, zeros, 4) for j in range(1, (n + 1) // 2)]
     return glu(xs, units)
@@ -61,7 +61,7 @@ def add(a, b):
 @circuit
 def popcount(xs):
     """An int signal from one relu unit: relu(sum(xs))"""
-    return block(xs, [[1] * len(xs)], [0], "relu", "int")[0]
+    return unit(xs, [[1] * len(xs)], [0], "relu", [[1]], "int")[0]
 
 
 @circuit

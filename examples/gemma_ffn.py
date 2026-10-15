@@ -1,24 +1,24 @@
 """A circuit on reals: Gemma's feed-forward block, x + down(gelu(gate(n)) * up(n)) with
-n = rmsnorm(x), as four blocks: rmsnorm, geglu, linear, and the residual sum.
+n = rmsnorm(x), as three units: the norm, the GeGLU, and the residual sum.
 
 Run: python examples/gemma_ffn.py
 """
 
 import numpy as np
 
-from reifier import block, circuit, inputs, show
+from reifier import circuit, inputs, show, unit
 
 
 def gemma_ffn(norm, w_gate, w_up, w_down):
     """The block for one layer's weights, in the layout of Gemma's checkpoints"""
     d, f = w_down.shape
+    eye = np.eye(d)
 
     @circuit
     def ffn(x):
-        n = block(x, np.eye(d), np.zeros(d), "rmsnorm")
-        h = block(n, np.vstack([w_gate, w_up]) * (1 + norm), np.zeros(2 * f), "geglu")
-        y = block(h, w_down, np.zeros(d))
-        return block([*x, *y], np.hstack([np.eye(d), np.eye(d)]), np.zeros(d))  # x + y
+        n = unit(x, eye, np.zeros(d), "rmsnorm", np.diag(1 + norm))
+        y = unit(n, np.vstack([w_gate, w_up]), np.zeros(2 * f), "geglu", w_down)
+        return unit([*x, *y], np.hstack([eye, eye]), np.zeros(d), "id", eye)  # x + y
 
     return ffn
 
