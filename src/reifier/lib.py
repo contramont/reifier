@@ -1,0 +1,63 @@
+"""A small circuit library."""
+
+from math import ceil
+
+from .core import circuit, const, gate, glu, unit
+
+
+@circuit
+def copy(x):  # the simplest circuit
+    return gate([x], [1], 1)
+
+
+@circuit
+def not_(x):
+    return gate([x], [-1], 0)
+
+
+@circuit
+def and_(xs):
+    return gate(xs, [1] * len(xs), len(xs))
+
+
+@circuit
+def or_(xs):
+    return gate(xs, [1] * len(xs), 1)
+
+
+@circuit
+def xor(xs):
+    n = len(xs)
+    counts = [gate(xs, [1] * n, i + 1) for i in range(n)]  # at least i + 1 ones
+    return gate(counts, [(-1) ** i for i in range(n)], 1)
+
+
+@xor.impl("glu")
+def xor_glu(xs):
+    """One layer instead of two: relu(s)(2 - s) + sum_j 4 relu(s - 2j), s = sum(xs)"""
+    n = len(xs)
+    units = [unit([1] * n, 0, [-1] * n, 2)]
+    units += [unit([1] * n, -2 * j, [0] * n, 4) for j in range(1, ceil(n / 2))]
+    return glu(xs, units)
+
+
+@circuit
+def add(a, b):
+    """Parallel adder, most significant bit first"""
+    a, b = a[::-1], b[::-1]
+    n = len(a)
+    p = [or_([a[i], b[i]]) for i in range(n)]
+    q = [[and_([a[i], b[i]] + p[i + 1 : k]) for i in range(k)] for k in range(n)]
+    c = const("0") + [or_(q[k]) for k in range(1, n)]
+    return [xor([a[k], b[k], c[k]]) for k in range(n)][::-1]
+
+
+@circuit
+def popcount(xs):
+    """An int signal from one gated unit: relu(1) * sum(xs)"""
+    return glu(xs, [unit([0] * len(xs), 1, [1] * len(xs), 0)], kind="int")
+
+
+@circuit
+def at_least(xs, k):  # k is static: each k gets its own trace
+    return gate([popcount(xs)], [1], k)

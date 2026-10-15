@@ -1,37 +1,58 @@
-from .neurons.core import Bit, BitFn, const, gate
-from .neurons import operations as ops
-from .neurons.operations import not_, and_, or_, xor, add
+"""Reifier: compile Python functions on symbolic bits into SwiGLU networks."""
 
-from .utils.format import Bits
-from .utils import format
-
-# from .compile.tree import TreeCompiler
-# from .tensors.compilation import Compiler
-
-from .examples.keccak import Keccak
-# from .examples.sandbagging import get_sandbagger
-
+from .core import (
+    GLU,
+    Circuit,
+    Gate,
+    Graph,
+    Signal,
+    Unit,
+    bits,
+    circuit,
+    const,
+    flatten,
+    gate,
+    glu,
+    inputs,
+    lower,
+    rule,
+    show,
+    trace,
+    unit,
+    verify,
+)
+from .lib import add, and_, at_least, copy, not_, or_, popcount, xor
+from .swiglu import Layer, run_swiglu, to_swiglu
 
 __all__ = [
-    # Core Primitives:
-    "Bit",
-    "const",
-    "gate",
-    "BitFn",
-    # Operations:
-    "ops",
-    "not_",
-    "and_",
-    "or_",
-    "xor",
+    "GLU",
+    "Circuit",
+    "Gate",
+    "Graph",
+    "Layer",
+    "Signal",
+    "Unit",
     "add",
-    # Utils:
-    "format",
-    "Bits",
-    # Compilation:
-    # "TreeCompiler",
-    # "Compiler",
-    # Examples:
-    "Keccak",
-    # "get_sandbagger",
+    "and_",
+    "at_least",
+    "bits",
+    "circuit",
+    "const",
+    "copy",
+    "flatten",
+    "gate",
+    "glu",
+    "inputs",
+    "lower",
+    "not_",
+    "or_",
+    "popcount",
+    "rule",
+    "run_swiglu",
+    "show",
+    "to_swiglu",
+    "trace",
+    "unit",
+    "verify",
+    "xor",
 ]
