@@ -1,7 +1,7 @@
 """Circuits on symbolic signals.
 
 A Signal is a wire with a kind ("bit", "int", "real", ...) but no value. A Circuit maps
-signals to signals: a leaf circuit computes with numpy, a Graph with other circuits.
+signals to signals: a leaf circuit computes values itself, a Graph with other circuits.
 @circuit traces a Python function into a Graph, once per argument structure. Passes
 such as flatten and lower interpret a graph into a new graph.
 """
@@ -10,8 +10,6 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from functools import cache, update_wrapper
 from graphlib import TopologicalSorter
-
-import numpy as np
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +49,7 @@ def emit(c: Circuit, inputs) -> list[Signal]:
 
 class Circuit:
     """Maps signals to signals. A subclass has kinds, one per output, and eval, which
-    maps rows of input values (n_in, batch) to rows of output values (n_out, batch)"""
+    maps a value for each input to a value for each output"""
 
     kinds: tuple[str, ...] = ()
 
@@ -117,16 +115,10 @@ class Graph(Circuit):
     def kinds(self):
         return tuple(s.kind for s in self.outputs)
 
-    def eval(self, x):
-        def rows(c, xs):
-            return list(c.eval(np.reshape(xs, (len(xs), x.shape[1]))))
-
-        return np.reshape(interpret(self, list(x), rows), (len(self.outputs), -1))
-
-    def run(self, x) -> np.ndarray:
-        """Rows of inputs (batch, n_in), or a string of bits, to rows of outputs"""
-        x = np.atleast_2d(np.array(list(x) if isinstance(x, str) else x, float))
-        return self.eval(x.T).T
+    def eval(self, xs) -> list:
+        """The output values for one value per input, or for a string of bits"""
+        xs = [int(c) for c in xs] if isinstance(xs, str) else list(xs)
+        return interpret(self, xs, lambda c, vs: list(c.eval(vs)))
 
     def __str__(self):
         return f"{self.name}/{len(self.inputs)}"
@@ -148,7 +140,7 @@ def toposort(g: Graph) -> list[Node]:
 
 
 def interpret(g: Graph, args: list, apply: Callable) -> list:
-    """Run g on args (rows of values, signals, ...), with apply(circuit, inputs) per node"""
+    """Run g on args (values, signals, ...), with apply(circuit, inputs) per node"""
     env = dict(zip(g.inputs, args, strict=True))
     for n in g.nodes:
         outs = apply(n.circuit, [env[s] for s in n.inputs])

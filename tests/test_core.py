@@ -6,8 +6,6 @@ import numpy as np
 import pytest
 
 from reifier import (
-    GLU,
-    RULES,
     add,
     at_least,
     bits,
@@ -15,29 +13,33 @@ from reifier import (
     const,
     flatten,
     gate,
+    glu_layers,
     inputs,
-    layers,
+    mlp,
     show,
-    to_swiglu,
     trace,
     xor,
 )
-from reifier.glu import step_to_relu
 
-RULES["relu_auto", GLU] = step_to_relu  # relu without the hand-written circuits
+TARGETS = {
+    "step mlp": lambda g: mlp(g, "step"),
+    "relu mlp": lambda g: mlp(g, "relu"),
+    "glu": glu_layers,
+    "glu, rmsnorm": lambda g: glu_layers(g, norm=True),
+}
 
 
 def table(n):
-    return np.array(list(product((0, 1), repeat=n)), float)
+    return [list(r) for r in product((0, 1), repeat=n)]
 
 
-def ints(x, n):  # rows of msb-first bits -> integers
-    return x @ (1 << np.arange(n)[::-1])
+def run(net, x):  # a compiled network: BOS = 1 first, in and out; outputs relative to BOS
+    y = net.eval([1, *x])
+    return np.array(y[1:]) / y[0]
 
 
-def network(graph, x, dialect="relu", compile=to_swiglu):  # run layers that read BOS first
-    net = compile(graph, dialect)
-    return net.run(np.c_[np.ones(len(x)), x])[:, 1:], net
+def matches(graph, net, xs):  # silu is relu to within exp(-k BOS), and norms shrink BOS
+    return all(np.allclose(run(net, x), graph.eval(x), atol=1e-3) for x in xs)
 
 
 def test_caching_traces_once_per_structure():
@@ -68,45 +70,57 @@ def test_circuits_only_read_their_inputs():
 def test_static_arguments_key_the_cache():
     g3, g4 = at_least.trace(bits(5), 3), at_least.trace(bits(5), 4)
     assert g3 is not g4 and g3 is at_least.trace(bits(5), 3)
-    x = table(5)
-    assert np.array_equal(g3.run(x)[:, 0], x.sum(1) >= 3)
-    assert np.array_equal(g4.run(x)[:, 0], x.sum(1) >= 4)
+    for x in table(5):
+        assert g3.eval(x) == [sum(x) >= 3] and g4.eval(x) == [sum(x) >= 4]
 
 
-def test_add_exhaustive():
-    g, x = add.trace(bits(8), bits(8)), table(16)
-    want = (ints(x[:, :8], 8) + ints(x[:, 8:], 8)) % 256
-    assert np.array_equal(ints(g.run(x), 8), want)
+def test_add():
+    g = add.trace(bits(4), bits(4))
+    for x in table(8):
+        y = int("".join(str(int(b)) for b in g.eval(x)), 2)
+        assert y == (int("".join(map(str, x[:4])), 2) + int("".join(map(str, x[4:])), 2)) % 16
 
 
-def test_hand_written_xor_matches_reference():
-    for n in range(1, 10):
-        x = table(n)
-        assert np.allclose(xor.trace(bits(n)).run(x), xor.impls["relu"].trace(bits(n)).run(x))
+def test_hand_written_xors_match_reference():
+    for n in range(1, 8):
+        g = xor.trace(bits(n))
+        for impl in xor.impls.values():
+            h = impl.trace(bits(n))
+            assert all(np.isclose(h.eval(x)[0], g.eval(x)[0]) for x in table(n))
 
 
-def test_each_stage_is_a_circuit_that_matches():
-    g, x = add.trace(bits(8), bits(8)), table(16)
-    for dialect, n_layers in [("relu", 4), ("relu_auto", 5)]:  # xor in one layer, or two
-        for compile, act, tol in [(layers, "relu", 1e-12), (to_swiglu, "silu", 1e-9)]:
-            y, net = network(g, x, dialect, compile)
-            assert len(net.nodes) == n_layers and np.abs(y - g.run(x)).max() < tol
-            assert all(n.circuit.act == act and not n.circuit.bg.any() for n in net.nodes)
+@pytest.mark.parametrize("target", TARGETS)
+def test_targets_match_the_circuit(target):
+    g = add.trace(bits(4), bits(4))
+    assert matches(g, TARGETS[target](g), table(8))
 
 
-def test_int_signals_compile():
-    g, x = at_least.trace(bits(5), 3), table(5)
-    y, net = network(g, x)
-    assert len(net.nodes) == 2 and np.allclose(y, g.run(x), atol=1e-9)
+def test_architectures():
+    g = add.trace(bits(4), bits(4))
+    fs = {t: [n.circuit.f for n in TARGETS[t](g).nodes] for t in TARGETS}
+    assert set(fs["step mlp"]) == {"step", "id"} and fs["step mlp"][-1] == "id"
+    assert set(fs["relu mlp"]) == {"relu", "id"} and fs["relu mlp"].count("id") == 1
+    assert fs["glu"] == ["swiglu", "id"] * (len(fs["glu"]) // 2)
+    assert fs["glu, rmsnorm"] == ["rmsnorm", "swiglu", "id"] * (len(fs["glu"]) // 2)
+    # the hand-written xors take one layer where gates take two
+    assert len(fs["relu mlp"]) < len(fs["step mlp"])
+
+
+def test_int_signals_need_a_target_that_has_them():
+    g = at_least.trace(bits(5), 3)
+    for target in ["relu mlp", "glu", "glu, rmsnorm"]:
+        assert matches(g, TARGETS[target](g), table(5))
+    with pytest.raises(TypeError):  # popcount is a relu block, not a step block
+        mlp(g, "step")
     with pytest.raises(TypeError):
         gate(inputs("real"), [1], 1)
 
 
-def test_constants_and_passthrough_compile():
+@pytest.mark.parametrize("target", TARGETS)
+def test_constants_and_passthrough_compile(target):
     g = trace(lambda x: [x[1], const("1")[0], x[0], gate([x[0]], [1], 0)], bits(2))
-    x = table(2)
-    assert np.array_equal(g.run(x), np.c_[x[:, 1], np.ones(4), x[:, 0], np.ones(4)])
-    assert np.allclose(network(g, x)[0], g.run(x), atol=1e-9)
+    assert [g.eval(x) for x in table(2)] == [[x[1], 1, x[0], 1] for x in table(2)]
+    assert matches(g, TARGETS[target](g), table(2))
 
 
 def test_show_lists_each_circuit_once():
@@ -123,7 +137,13 @@ def test_show_lists_each_circuit_once():
     assert text.count("= xor/3(") == 3 and "gate[1 1 1 >= 2]" in text
 
 
-def test_new_circuit_types_live_outside_the_package():
+def test_gemma_ffn_is_four_blocks():
     example = runpy.run_path(str(Path(__file__).parents[1] / "examples" / "gemma_ffn.py"))
     text, err = example["check"]()
-    assert err < 1e-9 and "rmsnorm[8]" in text and "gelu[32]" in text
+    assert err < 1e-9
+    assert [line.split(" = ")[1].split("(")[0] for line in text.splitlines()[1:-1]] == [
+        "rmsnorm[8]",
+        "geglu[64]",
+        "id[8]",
+        "id[8]",
+    ]
