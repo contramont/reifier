@@ -7,15 +7,15 @@
 
 <h1 align="center">Reifier, simple</h1>
 
-<p align="center">Compile algorithms into neural network circuits, in under 500 lines.</p>
+<p align="center">Compile algorithms into neural network circuits, in a few hundred lines.</p>
 
-This is the `simple` branch: a from-scratch rewrite of reifier around two units, `Signal` and
-`Circuit`. It needs Python 3.14 and numpy. Try it in the browser at
+This is the `simple` branch: a from-scratch rewrite of reifier around `Signal` and `Circuit`.
+It needs Python 3.14 and numpy. Try it in the browser at
 [contramont.org/reifier/simple](https://contramont.org/reifier/simple/), which runs this
 branch's code.
 
 ```python
-from reifier import bits, circuit, gate, run_swiglu, show, to_swiglu
+from reifier import bits, circuit, gate, show, to_swiglu
 
 @circuit
 def xor(xs):
@@ -26,44 +26,60 @@ def xor(xs):
 graph = xor.trace(bits(3))
 print(show(graph))             # the circuit as text, each sub-circuit once
 print(graph.run("101"))        # [[0.]]
-layers = to_swiglu(graph)      # 2 SwiGLU layers as numpy matrices
-print(run_swiglu(layers, [[1, 0, 1]]).round())  # [[0.]]
+net = to_swiglu(graph)         # 2 SwiGLU layers, also a circuit
+print(net.run("1101").round()) # [[1. 0.]]: BOS = 1 first, in and out
 ```
 
 ## Design
 
-- **Signals have no values.** A `Signal` is a wire with a kind (`"bit"`, `"int"` or
-  `"real"`). Branching on a bit raises an error, so a circuit's structure can only depend on
-  its arguments' shapes. Values come from `graph.run`, on whole batches at once.
-- **`@circuit` traces once per argument structure.** The first call to a decorated function
-  traces it into a `Graph`; later calls with the same shapes, kinds and static arguments add one
-  node that points to that graph, without running the function. Undecorated functions are inlined
-  into their callers.
-- **Every pass is one interpreter.** `interpret(graph, args, prim)` walks a graph and calls
-  `prim` on each op: evaluation, `flatten` and `lower` differ only in `prim`.
-- **Circuit types are dialects.** A dialect is the set of primitives a graph may contain:
-  `"threshold"` allows `Gate`, `"glu"` allows `GLU`. `lower(graph, "glu")` rewrites each gate
-  with a rule (`@rule("glu", Gate)`), unless the circuit has a hand-written implementation for
-  the dialect, as `xor` has in one layer instead of two:
+- **A `Signal` is a wire with a kind but no value** (`"bit"`, `"int"`, `"real"`, ...).
+  Branching on a bit raises an error, so a circuit's structure depends only on the shapes of
+  its arguments. Values come from `graph.run`, on whole batches at once.
+- **A `Circuit` maps signals to signals.** A leaf circuit is a class with `kinds` (one per
+  output) and `eval` (numpy rows in, rows out); a `Graph` is made of other circuits. The core
+  (`core.py`) knows no leaf types, so a new kind of circuit, such as an RMSNorm, is a few lines
+  outside it ([examples/gemma_ffn.py](examples/gemma_ffn.py) builds Gemma's feed-forward block).
+- **`@circuit` traces a function once per argument structure.** Later calls with the same
+  shapes, kinds and static arguments add one node that reuses the trace. Undecorated functions
+  are inlined into their callers.
+- **Passes interpret a graph into a new graph.** `flatten` inlines sub-circuits; `lower(graph,
+  dialect)` rewrites leaves with `RULES[dialect, type]` and uses a circuit's hand-written version
+  for the dialect where it has one:
 
   ```python
-  @xor.impl("glu")
-  def xor_glu(xs): ...
+  @xor.impl("relu")
+  def xor_relu(xs): ...  # one layer of units instead of two layers of gates
   ```
 
-`to_swiglu` lowers to `"glu"`, flattens, gives each gate the earliest layer it can run in, adds
-copies for signals that later layers read and folds constants into biases. Each layer maps
-`h` to `wo @ (silu(wg @ h) * (wv @ h))`, where `h[0] = 1` carries the biases.
+## One leaf: the GLU
+
+`glu.py` has the only leaf the compiler needs, `GLU`: `wo @ (act(wg @ x + bg) * (wv @ x + bv))`,
+the feed-forward block of transformers. Its activation is its dialect:
+
+| Activation | What it is |
+|---|---|
+| `"step"` | linear threshold gates, which `gate()` makes: the circuits you write |
+| `"relu"` | what `layers` stacks: a step is two relus, exact on integer sums |
+| `"silu"` | SwiGLU: `silu(kz) / k` is `relu(z)` to within `exp(-k\|z\|)` |
+
+Every stage of compiling is a circuit, so it runs and shows like the program:
+
+```python
+lower(graph, "relu")  # gates as relu units, hand-written versions where there are some
+layers(graph)         # one relu GLU per layer; copies carry signals, BOS carries biases
+to_swiglu(graph)      # the same layers with silu, as in a transformer
+```
 
 ## Layout
 
 | File | Contents |
 |---|---|
-| `src/reifier/core.py` | signals, primitives, circuits, passes, `show`, `verify` |
-| `src/reifier/swiglu.py` | compilation to SwiGLU layers and a numpy forward pass |
-| `src/reifier/lib.py` | `not_`, `and_`, `or_`, `xor` (with its GLU implementation), `add`, `popcount`, `at_least` |
+| `src/reifier/core.py` | signals, circuits, graphs, tracing, `flatten`, `lower`, `show` |
+| `src/reifier/glu.py` | the GLU, gates, dialect rules, `layers` and `to_swiglu` |
+| `src/reifier/lib.py` | `not_`, `and_`, `or_`, `xor` (with a one-layer version), `add`, `popcount`, `at_least` |
+| `examples/gemma_ffn.py` | a circuit on reals: a new leaf (RMSNorm) and Gemma's FFN block |
 
 Run the tests with `uv run pytest`.
 
 Not here yet, and on `main`: optimization levels, PyTorch and `.safetensors` export, RMSNorm
-layers, and fast compilation of very large circuits such as SHA-3.
+layers in compiled networks, and fast compilation of very large circuits such as SHA-3.

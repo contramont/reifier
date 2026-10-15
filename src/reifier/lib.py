@@ -1,8 +1,7 @@
 """A small circuit library."""
 
-from math import ceil
-
-from .core import circuit, const, gate, glu, unit
+from .core import circuit
+from .glu import const, gate, glu
 
 
 @circuit
@@ -32,12 +31,12 @@ def xor(xs):
     return gate(counts, [(-1) ** i for i in range(n)], 1)
 
 
-@xor.impl("glu")
-def xor_glu(xs):
-    """One layer instead of two: relu(s)(2 - s) + sum_j 4 relu(s - 2j), s = sum(xs)"""
-    n = len(xs)
-    units = [unit([1] * n, 0, [-1] * n, 2)]
-    units += [unit([1] * n, -2 * j, [0] * n, 4) for j in range(1, ceil(n / 2))]
+@xor.impl("relu")
+def xor_relu(xs):
+    """One layer instead of two: relu(s)(2 - s) + 4 relu(s - 2) + 4 relu(s - 4) + ...,
+    where s = sum(xs)"""
+    n, ones, zeros = len(xs), [1] * len(xs), [0] * len(xs)
+    units = [(ones, 0, [-1] * n, 2)] + [(ones, -2 * j, zeros, 4) for j in range(1, (n + 1) // 2)]
     return glu(xs, units)
 
 
@@ -54,8 +53,8 @@ def add(a, b):
 
 @circuit
 def popcount(xs):
-    """An int signal from one gated unit: relu(1) * sum(xs)"""
-    return glu(xs, [unit([0] * len(xs), 1, [1] * len(xs), 0)], kind="int")
+    """An int signal from one unit: relu(1) * sum(xs)"""
+    return glu(xs, [([0] * len(xs), 1, [1] * len(xs), 0)], kind="int")
 
 
 @circuit
