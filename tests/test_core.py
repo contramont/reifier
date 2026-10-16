@@ -219,6 +219,7 @@ def test_programs_need_no_decorator():
     g = trace(program, bits(3), bits(3))
     assert g.name == "program"
     assert [n.circuit.name for n in g.nodes] == ["add"]
+    assert g.eval("011 001") == g.eval([0, 1, 1, 0, 0, 1]) == [1, 0, 0]  # bits, spaces aside
     assert matches(g, network(g, "geglu", norm=True), table(6))
 
 
