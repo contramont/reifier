@@ -70,14 +70,19 @@ def _parts(layer: Graph, ff: int | None):
 
 def _beside(parts, n_in, label, ff=None, bos=False) -> Unit:
     """Units side by side on n_in inputs, each reading the columns given with it, their
-    outputs one after another, and their hidden units too: ff for each output if ff, so
-    under their outputs. With bos, biases go into column 0"""
+    outputs one after another, and their hidden units too: if ff, under their features,
+    ff for each of their outputs and of the unused features after them. With bos, biases
+    go into column 0"""
     f = parts[0][0].f
     os = np.cumsum([0, *(len(c.wo) for c, _ in parts)])
     hs = ff * os if ff else np.cumsum([0, *(c.hidden for c, _ in parts)])
-    for (c, _), a, b in zip(parts, hs, hs[1:]):
+    ends, end = [], hs[-1]  # how far each part's hidden units may reach
+    for (c, _), a in zip(parts[::-1], hs[-2::-1]):
+        ends.append(end)
+        end = a if c.hidden or not ff else end
+    for (c, _), a, b in zip(parts, hs, ends[::-1]):
         if c.hidden > b - a:
-            raise ValueError(f"{c} has {c.hidden} hidden units, more than {ff} for each output")
+            raise ValueError(f"{c} has {c.hidden} hidden units, more than {ff} for each feature")
     halves, width = 2 if f in GATED else 1, hs[-1]
     wi, b, wo = (
         np.zeros((halves * width, n_in)),

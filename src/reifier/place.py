@@ -2,7 +2,8 @@
 
 A level is a row of features, and a layer maps the level below it to the next. Each
 circuit is placed once, as a block: a rectangle of layers and features, as wide as its
-widest level, with the features it leaves unused empty. Each use of a circuit puts its
+widest level, its inputs included, with the features it leaves unused empty. A unit is
+as wide as its inputs or its outputs, whichever are more. Each use of a circuit puts its
 block in the layers after its inputs, at the first features free on all of its levels.
 Units are blocks one layer high, and copies carry signals straight up to the levels
 that read them. A block reads its inputs in its first layer and gives its outputs in
@@ -75,7 +76,7 @@ def _place(g: Graph, f: str) -> Graph:
         return not any(any(grid[d][c : c + w]) for d in levels)
 
     for s, ls, xs, outs, copy in sorted(rects, key=lambda r: (r[0], not r[4])):
-        w, levels = len(ls[0].kinds), range(s, s + len(ls))
+        w, levels = max(len(ls[0].kinds), len(xs)), range(s, s + len(ls))
         c = where[xs[0], s - 1] if copy else 0  # a copy goes straight up if it can
         if not fits(c, w, levels):
             c = max(len(grid[d]) if 0 not in grid[d] else grid[d].index(0) for d in levels)
@@ -89,7 +90,7 @@ def _place(g: Graph, f: str) -> Graph:
             (x, d): c + j for x, j in outs.items() for d in (levels if copy else [s + len(ls) - 1])
         }
 
-    width = max(len(grid[d]) for d in range(1, top + 1))
+    width = max(len(g.inputs), *(len(grid[d]) for d in range(1, top + 1)))
     h = ins = inputs(*(s.kind for s in g.inputs))
     for d in range(1, top + 1):
         here, outs = inputs(*(s.kind for s in h)), []

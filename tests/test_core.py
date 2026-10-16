@@ -141,7 +141,7 @@ def test_circuits_are_placed_as_blocks():
     blocks = [n.circuit for layer in layers for n in layer.nodes if name(n.circuit) == "xors[1/1]"]
     assert len(blocks) == 1  # the three xors: one block, in one layer
     assert [name(n.circuit) for n in blocks[0].nodes] == ["xor.reglu[1/1]"] * 3
-    assert len(blocks[0].outputs) == 3  # side by side, nothing between them
+    assert len(blocks[0].outputs) == 9  # side by side, each as wide as its three inputs
     assert matches(g, network(g, "geglu", norm=True), table(9))
 
 
@@ -165,6 +165,7 @@ def majority(xs):  # a block two layers high
 def test_blocks_are_rectangles(g):
     layers = [n.circuit for n in place(g, "reglu").nodes]
     assert len({len(layer.outputs) for layer in layers}) == 1  # each level as wide
+    assert len(layers[0].outputs) >= len(g.inputs)  # and as its inputs
     for layer in layers:
         col = {x: i for i, x in enumerate(layer.inputs)}
         at = 0
@@ -173,6 +174,10 @@ def test_blocks_are_rectangles(g):
             if isinstance(n.circuit, Graph) and not n.circuit.name.endswith(("[1/1]", "[1/2]")):
                 # a block's second layer reads its first, right below it
                 assert [col[x] for x in n.inputs] == list(range(at, at + len(n.outputs)))
+            assert (
+                len(n.outputs) >= len(n.inputs)
+                or layer.outputs[at + len(n.outputs)].node.circuit.label == "empty"
+            )
             at += len(n.outputs)
     assert matches(g, network(g, "geglu", norm=True), table(len(g.inputs)))
 
@@ -201,10 +206,10 @@ def test_hidden_units_sit_under_their_features():
         assert u.hidden == 4 * len(u.wo)
         out, hid = np.nonzero(u.wo)
         assert (out == hid // 4).all()  # each of the adder's units has one output
-    xor9 = xor.trace(bits(9))  # one unit, five hidden units: too many for one feature
+    wide = trace(lambda x: [glu(x, [([1], 0, [1], 0)] * 5)], bits(1))  # 5 hidden units, 1 feature
     with pytest.raises(ValueError):
-        network(xor9, "geglu", ff=4)
-    assert matches(xor9, network(xor9, "geglu", ff=None), table(9)[::7])
+        network(wide, "geglu", ff=4)
+    assert matches(wide, network(wide, "geglu", ff=None), table(1))
 
 
 def test_programs_need_no_decorator():

@@ -43,8 +43,9 @@ multiplies relu of the left half of `wi @ x + b` by its right half. `cast` turns
 into relu units, relu into reglu, and reglu into swiglu or geglu.
 
 **Local structure** (`place.py`): `place(graph, f)` puts units on a grid of layers and
-features. Each circuit is placed once, as a block: a rectangle as wide as its widest level, with
-the features it does not use left empty. Each use of a circuit puts its block in the layers after
+features. Each circuit is placed once, as a block: a rectangle as wide as its widest level, its
+inputs included, with the features it does not use left empty; a unit is as wide as its inputs or
+its outputs, whichever are more. Each use of a circuit puts its block in the layers after
 its inputs, at the first features free on all of its levels, so what a circuit holds stays
 together and in place. Units keep their weights: placing one only wires it to the level below.
 Copies carry signals straight up to the levels that read them. The result is a chain of layer
