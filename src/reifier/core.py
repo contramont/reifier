@@ -7,9 +7,9 @@ such as flatten and lower interpret a graph into a new graph.
 """
 
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from functools import cache, update_wrapper
-from graphlib import TopologicalSorter
+from itertools import count
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,12 +30,16 @@ class Signal:
         return f"<{self.kind} from {self.node.circuit}>"
 
 
+_made = count()  # nodes are numbered as they are made: each after the nodes it reads
+
+
 @dataclass(frozen=True, eq=False, slots=True)
 class Node:
     """A circuit applied to signals"""
 
     circuit: Circuit
     inputs: tuple[Signal, ...]
+    number: int = field(default_factory=lambda: next(_made), repr=False)
 
     @property
     def outputs(self) -> list[Signal]:
@@ -125,15 +129,16 @@ class Graph(Circuit):
 
 
 def toposort(g: Graph) -> list[Node]:
-    """The nodes between the inputs and the outputs of g, each after its inputs"""
-    deps, todo, stop = {}, [s.node for s in g.outputs], {s.node for s in g.inputs}
+    """The nodes between the inputs and the outputs of g, in the order they were made,
+    so each after its inputs"""
+    seen, todo, stop = set(), [s.node for s in g.outputs], {s.node for s in g.inputs}
     while todo:
-        if (n := todo.pop()) not in deps and n not in stop:
+        if (n := todo.pop()) not in seen and n not in stop:
             if isinstance(n.circuit, Input):
                 raise ValueError(f"{g.name} reads a signal that is not one of its inputs")
-            deps[n] = [s.node for s in n.inputs]
-            todo += deps[n]
-    return [n for n in TopologicalSorter(deps).static_order() if n in deps]
+            seen.add(n)
+            todo += [s.node for s in n.inputs]
+    return sorted(seen, key=lambda n: n.number)
 
 
 def interpret(g: Graph, args: list, apply: Callable) -> list:
