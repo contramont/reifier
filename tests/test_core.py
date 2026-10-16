@@ -194,6 +194,16 @@ def test_constants_and_passthrough_compile(target):
     assert matches(g, TARGETS[target](g), table(2))
 
 
+def test_programs_need_no_decorator():
+    def program(a, b):  # not a circuit itself, but the circuits it calls are blocks
+        return add(a, b)
+
+    g = trace(program, bits(3), bits(3))
+    assert g.name == "program"
+    assert [n.circuit.name for n in g.nodes] == ["add"]
+    assert matches(g, network(g, "geglu", norm=True), table(6))
+
+
 def test_show_lists_each_circuit_once():
     text = show(add.trace(bits(3), bits(3)))
     heads = sorted(line for line in text.splitlines() if line and not line.startswith(" "))
