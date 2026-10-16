@@ -194,6 +194,19 @@ def test_constants_and_passthrough_compile(target):
     assert matches(g, TARGETS[target](g), table(2))
 
 
+def test_hidden_units_sit_under_their_features():
+    g = add.trace(bits(4), bits(4))
+    for n in network(g, "geglu", ff=4).nodes:  # ff = 4: four hidden units for each feature
+        u = n.circuit
+        assert u.hidden == 4 * len(u.wo)
+        out, hid = np.nonzero(u.wo)
+        assert (out == hid // 4).all()  # each of the adder's units has one output
+    xor9 = xor.trace(bits(9))  # one unit, five hidden units: too many for one feature
+    with pytest.raises(ValueError):
+        network(xor9, "geglu", ff=4)
+    assert matches(xor9, network(xor9, "geglu", ff=None), table(9)[::7])
+
+
 def test_programs_need_no_decorator():
     def program(a, b):  # not a circuit itself, but the circuits it calls are blocks
         return add(a, b)

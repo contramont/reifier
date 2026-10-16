@@ -50,8 +50,9 @@ together and in place. Units keep their weights: placing one only wires it to th
 Copies carry signals straight up to the levels that read them. The result is a chain of layer
 graphs, each as wide as the others.
 
-**Global structure** (`target.py`): `network(graph, f, norm)` builds a target architecture
-around the placed units. Each layer holds its units side by side as one unit, and global parts
+**Global structure** (`target.py`): `network(graph, f, norm, ff)` builds a target architecture
+around the placed units. Each layer holds its units side by side as one unit, `ff` times as wide
+inside as outside (4 by default), with each unit's hidden units under its features. Global parts
 act on whole layers: BOS = 1 leads every layer and carries the biases, and an RMSNorm can come
 before each layer. The matrices of a block's layer are built once and copied into each use.
 Targets include MLPs of step or relu units and GLU layers (reglu, swiglu, geglu) with or without
