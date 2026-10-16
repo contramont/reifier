@@ -16,10 +16,13 @@ from .place import carry, place
 from .units import GATED, Unit, cast
 
 
-def network(graph: Graph, f: str = "geglu", norm: bool = False, ff: int | None = 4) -> Graph:
+def network(
+    graph: Graph, f: str = "geglu", norm: bool = False, ff: int | None = 4, at: dict | None = None
+) -> Graph:
     """graph compiled for a stack of layers of f units, such as an MLP of step or relu
-    units, or GLU layers (reglu, swiglu, geglu), each after an RMSNorm if norm"""
-    return stack(place(graph, "reglu" if f in GATED else f), f, norm, ff)
+    units, or GLU layers (reglu, swiglu, geglu), each after an RMSNorm if norm; at moves
+    blocks, as in place"""
+    return stack(place(graph, "reglu" if f in GATED else f, at), f, norm, ff)
 
 
 def stack(placed: Graph, f: str, norm: bool = False, ff: int | None = 4) -> Graph:

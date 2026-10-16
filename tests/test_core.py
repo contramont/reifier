@@ -246,3 +246,17 @@ def test_gemma_ffn_is_three_units():
         "geglu[32]",
         "id[8]",
     ]
+
+
+def test_blocks_can_be_moved():
+    g = trace(add, bits(3), bits(3))
+    p = place(g, "reglu")
+    width = len(p.nodes[0].circuit.outputs)
+    assert all(p.features[0, k] == ("in", k) for k in range(6))
+    i = next(i for i, n in enumerate(g.nodes) if getattr(n.circuit, "name", "") == "xor")
+    (d, c), (top, _) = p.at[i], max(p.at.values())
+    q = place(g, "reglu", at={i: (top + 1, width + 2)})  # later, and right of the rest
+    assert q.at[i] == (top + 1, width + 2) and len(q.nodes) == top + 1
+    assert q.features[top + 1, width + 2] == (i, 0)
+    assert matches(g, network(g, "geglu", norm=True, at={i: (top + 1, width + 2)}), table(6))
+    assert place(g, "reglu", at={i: (0, c)}).at[i] == (d, c)  # no lower than its inputs allow

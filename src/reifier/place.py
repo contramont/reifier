@@ -8,7 +8,8 @@ block in the layers after its inputs, at the first features free on all of its l
 Units are blocks one layer high, and copies carry signals straight up to the levels
 that read them. A block reads its inputs in its first layer and gives its outputs in
 its last. Placed units keep their weights: placing one only wires it to the level
-below. Constants fold into the biases of the units that read them.
+below. Constants fold into the biases of the units that read them. A block can be moved
+to a later layer, or to other features where they are free.
 """
 
 from collections import defaultdict
@@ -21,14 +22,18 @@ from .core import Graph, emit, inputs, lower
 from .units import Unit
 
 
-def place(graph: Graph, f: str) -> Graph:
+def place(graph: Graph, f: str, at: dict | None = None) -> Graph:
     """graph as a chain of layers of f units, each layer a graph of the units and of the
-    layers of the blocks in it, one after another, as wide as every other layer"""
-    return _place(lower(graph, f), f)
+    layers of the blocks in it, one after another, as wide as every other layer. at moves
+    blocks, {i: (layer, feature)} for graph.nodes[i]: no lower than its inputs allow, and
+    at that feature if free. The result tells where each block went, at, and what each
+    feature (level, feature) carries, features: ("in", i) or output j of node i, (i, j)"""
+    return _place(lower(graph, f), f, tuple(sorted((at or {}).items())))
 
 
 @cache
-def _place(g: Graph, f: str) -> Graph:
+def _place(g: Graph, f: str, at: tuple = ()) -> Graph:
+    want = {g.nodes[i]: spot for i, spot in at if i < len(g.nodes)}  # lowering keeps the order
     value, blocks = {}, {}  # constants; each node's layers, what its first reads, its outputs
     for n in g.nodes:
         c = n.circuit
@@ -48,7 +53,7 @@ def _place(g: Graph, f: str) -> Graph:
     made = list(dict.fromkeys(x for _, xs, _ in blocks.values() for x in xs if x in value))
     start, end = {}, dict.fromkeys(g.inputs, 0) | dict.fromkeys(made, 1)
     for n, (layers, xs, _) in blocks.items():
-        start[n] = 1 + max((end[x] for x in xs), default=0)
+        start[n] = max(1 + max((end[x] for x in xs), default=0), want.get(n, (0, 0))[0])
         end |= dict.fromkeys(n.outputs, start[n] + len(layers) - 1)
     top = max([1] + [end[y] for y in g.outputs if y not in value])
     made += [y for y in dict.fromkeys(g.outputs) if y in value and y not in end]
@@ -58,26 +63,28 @@ def _place(g: Graph, f: str) -> Graph:
         for x in xs:
             need[x] = max(need.get(x, 0), start[n] - 1)
 
-    # rectangles (first level, layers, signals the first reads, outputs, a copy?), lowest
-    # first and copies first, each at the first features free on all of its levels
-    rects = [(end[x], [carry(f, [], value[x], x.kind)], [], {x: 0}, False) for x in made]
+    # rectangles (first level, layers, signals the first reads, outputs, a copy?, node),
+    # lowest first, copies and then moved blocks first, each where it was moved if free
+    # there, else at the first features free on all of its levels
+    rects = [(end[x], [carry(f, [], value[x], x.kind)], [], {x: 0}, False, None) for x in made]
     rects += [
-        (start[n], ls, xs, dict(zip(n.outputs, at)), False) for n, (ls, xs, at) in blocks.items()
+        (start[n], ls, xs, dict(zip(n.outputs, o)), False, n) for n, (ls, xs, o) in blocks.items()
     ]
     rects += [
-        (end[x] + 1, [carry(f, [1], 0.0, x.kind)] * (need[x] - end[x]), [x], {x: 0}, True)
+        (end[x] + 1, [carry(f, [1], 0.0, x.kind)] * (need[x] - end[x]), [x], {x: 0}, True, None)
         for x in need
         if need[x] > end[x]
     ]
     where = {(x, 0): i for i, x in enumerate(g.inputs)}  # (signal, level) -> feature
-    grid, layer = defaultdict(bytearray), defaultdict(list)  # used features; rects by level
+    grid, layer, col = defaultdict(bytearray), defaultdict(list), {}  # used; by level; columns
 
     def fits(c, w, levels):
         return not any(any(grid[d][c : c + w]) for d in levels)
 
-    for s, ls, xs, outs, copy in sorted(rects, key=lambda r: (r[0], not r[4])):
+    for s, ls, xs, outs, copy, n in sorted(rects, key=lambda r: (r[0], not r[4], r[5] not in want)):
         w, levels = max(len(ls[0].kinds), len(xs)), range(s, s + len(ls))
-        c = where[xs[0], s - 1] if copy else 0  # a copy goes straight up if it can
+        # a copy goes straight up if it can, a moved block where it was moved to
+        c = where[xs[0], s - 1] if copy else want[n][1] if n in want else 0
         if not fits(c, w, levels):
             c = max(len(grid[d]) if 0 not in grid[d] else grid[d].index(0) for d in levels)
             while not fits(c, w, levels):
@@ -86,6 +93,8 @@ def _place(g: Graph, f: str) -> Graph:
             grid[d] += bytes(max(0, c + w - len(grid[d])))
             grid[d][c : c + w] = b"\1" * w
             layer[d].append((c, s, ls, xs))
+        if n is not None:
+            col[n] = c
         where |= {
             (x, d): c + j for x, j in outs.items() for d in (levels if copy else [s + len(ls) - 1])
         }
@@ -102,7 +111,12 @@ def _place(g: Graph, f: str) -> Graph:
             outs += emit(ls[d - s], reads)
         outs += emit(empty(f, width - len(outs)), []) if width > len(outs) else []
         h = emit(Graph(f"{g.name}[{d}/{top}]", here, outs), h)
-    return Graph(f"{g.name}.{f}", ins, [h[where[y, top]] for y in g.outputs])
+    out = Graph(f"{g.name}.{f}", ins, [h[where[y, top]] for y in g.outputs])
+    index = {n: i for i, n in enumerate(g.nodes)}
+    ref = lambda x: ("in", g.inputs.index(x)) if x.node not in index else (index[x.node], x.index)
+    out.at = {index[n]: (start[n], c) for n, c in col.items()}
+    out.features = {(d, c): ref(x) for (x, d), c in where.items()}
+    return out
 
 
 def carry(f: str, r, c: float, kind: str) -> Unit:
