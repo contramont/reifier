@@ -113,8 +113,8 @@ class Graph(Circuit):
         self.kinds = tuple(s.kind for s in self.outputs)
 
     def eval(self, xs) -> list:
-        """The output values for one value per input, or for a string of bits, spaces aside"""
-        xs = [int(c) for c in "".join(xs.split())] if isinstance(xs, str) else list(xs)
+        """The output values for one value per input, or for a string of bits"""
+        xs = [int(c) for c in xs] if isinstance(xs, str) else list(xs)
         return interpret(self, xs, lambda c, vs: list(c.eval(vs)))
 
     def __str__(self):

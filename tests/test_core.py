@@ -19,11 +19,9 @@ from reifier import (
     lower,
     network,
     not_,
-    or_,
     place,
     show,
     trace,
-    unwired,
     xor,
 )
 from reifier.target import side_by_side
@@ -123,8 +121,7 @@ def test_placing_keeps_units():
     placed = [c for layer in place(g, "reglu").nodes for c in units_of(layer.circuit)]
     units = [c for c in placed if c.label not in ("copy", "0", "empty")]
     assert len(units) == len(live) and all(c.f == "reglu" for c in placed)
-    # every unit keeps its weights: the carry 0 enters the xor block as a constant feature,
-    # since folding it into the block's biases would make the block a different one
+    # every unit keeps its weights; the constant 0 is a unit too, read by the xor block
     assert all((c.wi.tobytes(), c.b.tobytes()) in weights for c in units)
     assert [c.label for c in placed].count("0") == 1
 
@@ -221,7 +218,6 @@ def test_programs_need_no_decorator():
     g = trace(program, bits(3), bits(3))
     assert g.name == "program"
     assert [n.circuit.name for n in g.nodes] == ["add"]
-    assert g.eval("011 001") == g.eval([0, 1, 1, 0, 0, 1]) == [1, 0, 0]  # bits, spaces aside
     assert matches(g, network(g, "geglu", norm=True), table(6))
 
 
@@ -250,50 +246,9 @@ def test_gemma_ffn_is_three_units():
     ]
 
 
-def test_blocks_can_be_moved():
-    g = trace(add, bits(3), bits(3))
-    p = place(g, "reglu")
-    width = len(p.nodes[0].circuit.outputs)
-    assert all(p.features[0, k] == ("in", k) for k in range(6))
-    i = next(i for i, n in enumerate(g.nodes) if getattr(n.circuit, "name", "") == "xor")
-    (d, c), (top, _) = p.at[i], max(p.at.values())
-    q = place(g, "reglu", at={i: (top + 1, width + 2)})  # later, and right of the rest
-    assert q.at[i] == (top + 1, width + 2) and len(q.nodes) == top + 1
-    assert q.features[top + 1, width + 2] == (i, 0)
-    assert matches(g, network(g, "geglu", norm=True, at={i: (top + 1, width + 2)}), table(6))
-    assert place(g, "reglu", at={i: (0, c)}).at[i] == (d, c)  # no lower than its inputs allow
-
-
-def test_copies_move_and_layers_stay_empty():
-    g = trace(add, bits(3), bits(3))
-    p = place(g, "reglu")
-    width, top = len(p.nodes[0].circuit.outputs), len(p.nodes)
-    (d, c), r = next(((d, c), r) for (d, c), r in p.features.items() if d >= 1 and r[0] == "in")
-    q = place(g, "reglu", at={r: width + 3})  # the copies of an input, at another feature
-    assert q.features[d, width + 3] == r and q.features.get((d, c)) != r
-    assert matches(g, network(g, "geglu", norm=True, at={r: width + 3}), table(6))
-    q = place(g, "reglu", empty=[2])  # no block in layer 2: copies carry what crosses it
-    assert all(not s <= 2 < s + 1 for s, _ in q.at.values()) and len(q.nodes) == top + 1
-    assert matches(g, network(g, "geglu", norm=True, empty=[2]), table(6))
-    assert len(place(g, "reglu", empty=[top + 1]).nodes) == top + 1  # a layer on top
-
-
-def test_unwired_inputs_read_nothing():
-    def program(a, b):
-        return [and_([a, unwired()]), or_([unwired(), b]), not_(unwired())]
-
-    g = trace(program, *bits(2))
-    p = place(g, "reglu")
-    labels = {getattr(n.circuit, "label", "") for layer in p.nodes for n in layer.circuit.nodes}
-    made = [g.nodes[r[0]].circuit for r in p.features.values() if r[0] != "in"]
-    assert "0" not in labels and all(getattr(c, "label", "") != "unwired" for c in made)
-    assert matches(g, network(g, "geglu", norm=True), table(2))
-
-
-def test_unread_outputs_stay_where_they_are_made():
-    a, b, c = bits(3)
-    g = Graph("g", [a, b, c], [and_([a, b]), or_([and_([b, c]), a])])  # the first, read by nothing
-    p = place(g, "reglu", unread=[0])
-    assert len(p.outputs) == 1 and len(p.nodes) == 2
-    i = g.nodes.index(g.outputs[0].node)
-    assert sum(r == (i, 0) for r in p.features.values()) == 1  # made, and not carried up
+def test_constants_are_units():  # not folded into the biases of what reads them
+    g = trace(lambda x: gate([x, const("1")[0]], [1, 1], 2), *bits(1))
+    placed = [c for layer in place(g, "reglu").nodes for c in units_of(layer.circuit)]
+    units = [c for c in placed if c.label not in ("copy", "empty")]
+    assert sorted(c.wi.shape[1] for c in units) == [0, 2]  # the constant reads nothing
+    assert matches(g, network(g, "geglu", norm=True), table(1))

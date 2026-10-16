@@ -88,12 +88,6 @@ def const(bits: str) -> list[Signal]:
     ]
 
 
-def unwired(kind="bit") -> Signal:
-    """An input wired to nothing yet: 0, which placing reads from a feature nothing makes"""
-    one = np.ones((1, 1))
-    return emit(Unit(one[:, :0], -one[0], "step", one, (kind,), "unwired"), [])[0]
-
-
 def glu(xs, units, kind="bit") -> Signal:
     """The sum of relu(g . xs + gb) * (v . xs + vb) over units (g, gb, v, vb)"""
     g, gb, v, vb = zip(*units)

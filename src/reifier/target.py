@@ -16,11 +16,10 @@ from .place import carry, place
 from .units import GATED, Unit, cast
 
 
-def network(graph: Graph, f="geglu", norm=False, ff: int | None = 4, at=None, empty=()) -> Graph:
+def network(graph: Graph, f: str = "geglu", norm: bool = False, ff: int | None = 4) -> Graph:
     """graph compiled for a stack of layers of f units, such as an MLP of step or relu
-    units, or GLU layers (reglu, swiglu, geglu), each after an RMSNorm if norm; at and
-    empty move blocks and keep layers free, as in place"""
-    return stack(place(graph, "reglu" if f in GATED else f, at, empty), f, norm, ff)
+    units, or GLU layers (reglu, swiglu, geglu), each after an RMSNorm if norm"""
+    return stack(place(graph, "reglu" if f in GATED else f), f, norm, ff)
 
 
 def stack(placed: Graph, f: str, norm: bool = False, ff: int | None = 4) -> Graph:
@@ -52,7 +51,7 @@ def side_by_side(layer: Graph, ff: int | None = None) -> Unit:
 def merge(layer: Graph, ff: int | None = None) -> Unit:
     """A layer as one unit from [BOS, *inputs] to [BOS, *outputs], with biases on BOS"""
     parts = [(u, [c + 1 for c in cols]) for u, cols in _parts(layer, ff)]
-    bos = carry(parts[0][0].f, [1], 0.0, "bit")
+    bos = carry(parts[0][0].f, "bit")
     return _beside([(bos, [0]), *parts], len(layer.inputs) + 1, str(layer), ff, bos=True)
 
 

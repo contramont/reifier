@@ -4,4 +4,4 @@ from .core import RULES, Circuit, Graph, Signal, bits, circuit, flatten, inputs,
 from .lib import add, and_, at_least, copy, not_, or_, popcount, xor
 from .place import place
 from .target import network, stack
-from .units import FUNCS, Unit, const, gate, glu, unit, unwired
+from .units import FUNCS, Unit, const, gate, glu, unit
