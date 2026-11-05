@@ -54,16 +54,16 @@ def _place(g: Graph, f: str) -> Graph:
     where = {(x, 0): i for i, x in enumerate(g.inputs)}  # (signal, level) -> feature
     grid, placed = defaultdict(bytearray), []  # the features used at each level; the rectangles
 
-    def fits(c, w, levels):
-        return not any(any(grid[d][c : c + w]) for d in levels)
+    def first_free(c, w, levels):  # the first feature from c with w free on all of levels
+        while (e := max(free(grid[d], c, w) for d in levels)) > c:
+            c = e
+        return c
 
     for s, ls, xs, outs, copy in sorted(rects, key=lambda r: (r[0], not r[4])):
         w, levels = max(len(ls[0].kinds), len(xs)), range(s, s + len(ls))
         c = where[xs[0], s - 1] if copy else 0  # a copy goes straight up if it can
-        if not fits(c, w, levels):
-            c = max(len(grid[d]) if 0 not in grid[d] else grid[d].index(0) for d in levels)
-            while not fits(c, w, levels):
-                c += 1
+        if first_free(c, w, levels) != c:
+            c = first_free(0, w, levels)
         for d in levels:
             grid[d] += bytes(max(0, c + w - len(grid[d])))
             grid[d][c : c + w] = b"\1" * w
@@ -72,6 +72,11 @@ def _place(g: Graph, f: str) -> Graph:
             (x, d): c + j for x, j in outs.items() for d in (levels if copy else [s + len(ls) - 1])
         }
     return build(g, f, placed, where)
+
+
+def free(level: bytearray, c: int, w: int) -> int:
+    """The first feature from c that starts w free ones on a level, whose last feature is used"""
+    return i if (i := level.find(bytes(w), c)) >= 0 else max(c, len(level))
 
 
 def block(c, f: str) -> tuple[list, list]:
