@@ -10,10 +10,15 @@ the levels that read them. A block reads its inputs in its first layer and gives
 outputs in its last. Placed units keep their weights: placing one only wires it to the
 level below.
 
+How wide a rectangle is, is a choice: wide, the default above, or fit(ff), which keeps no
+features for inputs, so a unit is as wide as its outputs, or as its hidden units need with
+ff to a feature, and a block as its widest level.
+
 Placing is two steps: arranging the rectangles, then building the layers they make.
 """
 
 from collections import defaultdict
+from collections.abc import Callable
 from functools import cache
 
 import numpy as np
@@ -22,15 +27,29 @@ from .core import Graph, emit, inputs, lower
 from .units import Unit
 
 
-def place(graph: Graph, f: str) -> Graph:
-    """graph as a chain of layers of f units, each layer a graph of the units and of the
-    layers of the blocks in it, one after another, as wide as every other layer"""
-    return _place(lower(graph, f), f)
+def wide(outs: int, ins: int, hidden: int) -> int:
+    """The features of a rectangle that gives outs and reads ins: as many as it reads or gives"""
+    return max(outs, ins)
 
 
 @cache
-def _place(g: Graph, f: str) -> Graph:
-    blocks = {n: block(n.circuit, f) for n in g.nodes}  # each node's layers, its outputs' features
+def fit(ff: int | None) -> Callable:
+    """Rectangles that keep no features for what they read: as many as they give, or as their
+    hidden units need with ff to a feature (any number if ff is None), whichever are more"""
+    return lambda outs, ins, hidden: max(outs, -(-hidden // ff) if ff else 0)
+
+
+def place(graph: Graph, f: str, span: Callable = wide) -> Graph:
+    """graph as a chain of layers of f units, each layer a graph of the units and of the
+    layers of the blocks in it, one after another, as wide as every other layer, with
+    rectangles as wide as span says"""
+    return _place(lower(graph, f), f, span)
+
+
+@cache
+def _place(g: Graph, f: str, span: Callable) -> Graph:
+    # each node's layers, and the features of its outputs in the last
+    blocks = {n: block(n.circuit, f, span) for n in g.nodes}
     start, end = {}, dict.fromkeys(g.inputs, 0)
     for n, (layers, _) in blocks.items():  # each block in the layers after its inputs
         start[n] = 1 + max((end[x] for x in n.inputs), default=0)
@@ -60,7 +79,7 @@ def _place(g: Graph, f: str) -> Graph:
         return c
 
     for s, ls, xs, outs, copy in sorted(rects, key=lambda r: (r[0], not r[4])):
-        w, levels = max(len(ls[0].kinds), len(xs)), range(s, s + len(ls))
+        w, levels = breadth(span, ls, xs), range(s, s + len(ls))
         c = where[xs[0], s - 1] if copy else 0  # a copy goes straight up if it can
         if first_free(c, w, levels) != c:
             c = first_free(0, w, levels)
@@ -71,7 +90,7 @@ def _place(g: Graph, f: str) -> Graph:
         where |= {
             (x, d): c + j for x, j in outs.items() for d in (levels if copy else [s + len(ls) - 1])
         }
-    return build(g, f, placed, where)
+    return build(g, f, placed, where, span)
 
 
 def free(level: bytearray, c: int, w: int) -> int:
@@ -79,17 +98,22 @@ def free(level: bytearray, c: int, w: int) -> int:
     return i if (i := level.find(bytes(w), c)) >= 0 else max(c, len(level))
 
 
-def block(c, f: str) -> tuple[list, list]:
+def breadth(span: Callable, ls: list, xs) -> int:
+    """The features of a rectangle of layers ls that reads xs"""
+    return span(len(ls[0].kinds), len(xs), ls[0].hidden if isinstance(ls[0], Unit) else 0)
+
+
+def block(c, f: str, span: Callable = wide) -> tuple[list, list]:
     """The block of a circuit: its layers, and the feature of each output in its last"""
     if isinstance(c, Graph):
-        p = _place(c, f)
+        p = _place(c, f, span)
         return [layer.circuit for layer in p.nodes], [y.index for y in p.outputs]
     if isinstance(c, Unit) and c.f == f:
         return [c], list(range(len(c.kinds)))
     raise TypeError(f"{c} is not a unit of {f}")
 
 
-def build(g: Graph, f: str, rects, where) -> Graph:
+def build(g: Graph, f: str, rects, where, span: Callable = wide) -> Graph:
     """The layers of rectangles (feature, first level, layers, signals the first reads),
     where[x, d] being the feature of signal x at level d: each layer a graph of the units
     and the blocks' layers in it, side by side, the features none of them uses empty"""
@@ -98,7 +122,7 @@ def build(g: Graph, f: str, rects, where) -> Graph:
         for d in range(s, s + len(ls)):
             layer[d].append((c, s, ls, xs))
     top = max([1, *layer])
-    width = max([len(g.inputs)] + [c + max(len(ls[0].kinds), len(xs)) for c, _, ls, xs in rects])
+    width = span(max([0] + [c + breadth(span, ls, xs) for c, _, ls, xs in rects]), len(g.inputs), 0)
     h = ins = inputs(*(s.kind for s in g.inputs))
     for d in range(1, top + 1):
         here, outs = inputs(*(s.kind for s in h)), []

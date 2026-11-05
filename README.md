@@ -49,7 +49,9 @@ its outputs, whichever are more. Each use of a circuit puts its block in the lay
 its inputs, at the first features free on all of its levels, so what a circuit holds stays
 together and in place. Units keep their weights: placing one only wires it to the level below.
 Copies carry signals straight up to the levels that read them. The result is a chain of layer
-graphs, each as wide as the others.
+graphs, each as wide as the others. With `place(graph, f, fit(ff))`, or `tight=True` in
+`network`, rectangles keep no features for their inputs: a unit is as wide as its outputs, or
+as its hidden units need with `ff` to a feature, and a block as its widest level.
 
 **Global structure** (`target.py`): `network(graph, f, norm, ff)` builds a target architecture
 around the placed units. Each layer holds its units side by side as one unit, `ff` times as wide

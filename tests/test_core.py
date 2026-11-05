@@ -263,3 +263,21 @@ def test_gemma_keccak_is_turboshake():  # with 24 rounds and d = 0x1F, TurboSHAK
         g = trace(example["turboshake128"], bits(128), rounds)
         y = g.eval([byte >> i & 1 for byte in msg for i in range(8)])[:16]
         assert sum(round(v) << i for i, v in enumerate(y)) == n
+
+
+@pytest.mark.parametrize(
+    "f, norm",
+    [("step", False), ("relu", False), ("reglu", False), ("swiglu", False), ("geglu", True)],
+)
+def test_tight_rectangles_keep_no_features_for_inputs(f, norm):
+    g = add.trace(bits(4), bits(4))
+    tight, wide = network(g, f, norm, tight=True), network(g, f, norm)
+    assert len(tight.nodes[-1].circuit.wo) < len(wide.nodes[-1].circuit.wo)
+    assert matches(g, tight, table(8))
+
+
+def test_tight_units_are_as_wide_as_their_hidden_units_need():
+    wide = trace(lambda x: [glu(x, [([1], 0, [1], 0)] * 5)], bits(1))  # 5 hidden units, 1 feature
+    net = network(wide, "geglu", ff=4, tight=True)
+    assert len(net.nodes[0].circuit.wo) == 1 + 2  # BOS and two features: 8 hidden units
+    assert matches(wide, net, table(1))
