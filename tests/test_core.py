@@ -1,3 +1,4 @@
+import hashlib
 import runpy
 from itertools import product
 from pathlib import Path
@@ -252,3 +253,13 @@ def test_constants_are_units():  # not folded into the biases of what reads them
     units = [c for c in placed if c.label not in ("copy", "empty")]
     assert sorted(c.wi.shape[1] for c in units) == [0, 2]  # the constant reads nothing
     assert matches(g, network(g, "geglu", norm=True), table(1))
+
+
+def test_gemma_keccak_is_turboshake():  # with 24 rounds and d = 0x1F, TurboSHAKE128 is SHAKE128
+    example = runpy.run_path(str(Path(__file__).parents[1] / "examples" / "gemma_keccak.py"))
+    msg = bytes(range(0, 256, 16))
+    shake = int.from_bytes(hashlib.shake_128(msg).digest(2), "little")
+    for rounds, n in [(24, shake), (6, 0x58CC)]:  # the last 6 rounds; the first 6 give 0x5454
+        g = trace(example["turboshake128"], bits(128), rounds)
+        y = g.eval([byte >> i & 1 for byte in msg for i in range(8)])[:16]
+        assert sum(round(v) << i for i, v in enumerate(y)) == n
