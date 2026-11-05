@@ -10,10 +10,6 @@ the levels that read them. A block reads its inputs in its first layer and gives
 outputs in its last. Placed units keep their weights: placing one only wires it to the
 level below.
 
-How wide a rectangle is, is a choice: wide, the default above, or fit(ff), which keeps no
-features for inputs, so a unit is as wide as its outputs, or as its hidden units need with
-ff to a feature, and a block as its widest level.
-
 Placing is two steps: arranging the rectangles, then building the layers they make.
 """
 
@@ -32,7 +28,6 @@ def wide(outs: int, ins: int, hidden: int) -> int:
     return max(outs, ins)
 
 
-@cache
 def fit(ff: int | None) -> Callable:
     """Rectangles that keep no features for what they read: as many as they give, or as their
     hidden units need with ff to a feature (any number if ff is None), whichever are more"""
@@ -41,14 +36,13 @@ def fit(ff: int | None) -> Callable:
 
 def place(graph: Graph, f: str, span: Callable = wide) -> Graph:
     """graph as a chain of layers of f units, each layer a graph of the units and of the
-    layers of the blocks in it, one after another, as wide as every other layer, with
-    rectangles as wide as span says"""
+    layers of the blocks in it, one after another, as wide as every other layer"""
     return _place(lower(graph, f), f, span)
 
 
 @cache
 def _place(g: Graph, f: str, span: Callable) -> Graph:
-    # each node's layers, and the features of its outputs in the last
+    # each node's layers, its outputs' features
     blocks = {n: block(n.circuit, f, span) for n in g.nodes}
     start, end = {}, dict.fromkeys(g.inputs, 0)
     for n, (layers, _) in blocks.items():  # each block in the layers after its inputs

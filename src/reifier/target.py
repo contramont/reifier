@@ -20,8 +20,7 @@ def network(
     graph: Graph, f: str = "geglu", norm: bool = False, ff: int | None = 4, tight: bool = False
 ) -> Graph:
     """graph compiled for a stack of layers of f units, such as an MLP of step or relu
-    units, or GLU layers (reglu, swiglu, geglu), each after an RMSNorm if norm. If tight,
-    rectangles keep no features for what they read (see place.fit)"""
+    units, or GLU layers (reglu, swiglu, geglu), each after an RMSNorm if norm"""
     span = fit(ff) if tight else wide
     return stack(place(graph, "reglu" if f in GATED else f, span), f, norm, ff)
 
