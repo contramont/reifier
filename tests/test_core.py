@@ -104,7 +104,7 @@ def test_targets_match_the_circuit(target):
 def test_architectures():
     g = add.trace(bits(4), bits(4))
     fs = {t: [n.circuit.f for n in TARGETS[t](g).nodes] for t in TARGETS}
-    assert fs["step mlp"] == ["step"] * 5 and fs["reglu"] == ["reglu"] * 4
+    assert fs["step mlp"] == ["step"] * 6 and fs["reglu"] == ["reglu"] * 4
     assert fs["relu mlp"] == ["relu"] * 4  # the hand-written xors take one layer, not two
     assert fs["geglu, rmsnorm"] == ["rmsnorm", "geglu"] * 4
 
@@ -185,6 +185,7 @@ def test_placed_circuits_are_built_once():
     g = add.trace(bits(8), bits(8))
     layers = [n.circuit for layer in place(g, "reglu").nodes for n in layer.circuit.nodes]
     xors = [c for c in layers if isinstance(c, Graph) and c.name.startswith("xor")]
+    xors = [c for c in xors if len(c.inputs) == 3]  # the sum's, not the propagates'
     assert len(xors) == 8 and len(set(xors)) == 1  # one placed xor, used eight times
     side_by_side.cache_clear()
     net = network(g, "reglu")
@@ -230,6 +231,7 @@ def test_show_lists_each_circuit_once():
         "and_/3(%0 %1 %2):",
         "or_/1(%0):",
         "or_/2(%0 %1):",
+        "xor/2(%0 %1):",
         "xor/3(%0 %1 %2):",
     ]
     assert text.count("= xor/3(") == 3 and "gate[1 1 1 >= 2]" in text
@@ -252,3 +254,22 @@ def test_constants_are_units():  # not folded into the biases of what reads them
     units = [c for c in placed if c.label not in ("copy", "empty")]
     assert sorted(c.wi.shape[1] for c in units) == [0, 2]  # the constant reads nothing
     assert matches(g, network(g, "geglu", norm=True), table(1))
+
+
+def example(name):
+    return runpy.run_path(str(Path(__file__).parents[1] / "examples" / f"{name}.py"))
+
+
+def test_gemma_adder_gives_bit_step_of_the_sum():  # a + b in 9 bits, one bit at each step
+    g = trace(example("gemma_adder")["adder"], bits(4), bits(4), bits(4))
+    steps = [[*x, *(j >> b & 1 for b in range(4))] for x in table(8) for j in range(9)]
+    sums = [a + b for a in range(16) for b in range(16)]  # in the order of table(8)
+    assert [g.eval(x)[0] for x in steps] == [int(y) for s in sums for y in format(s, "09b")]
+    assert matches(g, network(g, "geglu", norm=True), steps[::17])
+
+
+def test_gemma_keccak_permutes_zeros():  # as reifier's Keccak(log_w=3, n=6) on main does
+    g = trace(lambda s: example("gemma_keccak")["keccak_p"](s, 6), bits(200))
+    assert "".join(str(int(y)) for y in g.eval("0" * 200)) == format(
+        0x7C6EB58FE03C4D0CAEB6424B271E98D2C35AA0AD026E60F62, "0200b"
+    )

@@ -6,3 +6,4 @@ build/
 *.whl
 .DS_Store
 index.html
+*.safetensors

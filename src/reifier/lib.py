@@ -52,10 +52,19 @@ def add(a, b):
     """Parallel adder, most significant bit first"""
     a, b = a[::-1], b[::-1]
     n = len(a)
-    p = [or_([a[i], b[i]]) for i in range(n)]
+    p = [xor([a[i], b[i]]) for i in range(n)]  # only propagates: at most one q[k] holds
     q = [[and_([a[i], b[i]] + p[i + 1 : k]) for i in range(k)] for k in range(n)]
     c = const("0") + [or_(q[k]) for k in range(1, n)]
     return [xor([a[k], b[k], c[k]]) for k in range(n)][::-1]
+
+
+@circuit
+def pick(xs, i):
+    """xs[k] where i is k in binary, least significant bit first, or 0 past the end of xs: one
+    unit of the gates [xs[k] and i == k], summed, so that no gate reads more than i and one x"""
+    n, eq = len(xs), [[1 if k >> b & 1 else -1 for b in range(len(i))] for k in range(len(xs))]
+    wi = [[*(int(j == k) for j in range(n)), *e] for k, e in enumerate(eq)]
+    return unit([*xs, *i], wi, [-1 - e.count(1) for e in eq], "step", [[1] * n], "bit")[0]
 
 
 @circuit

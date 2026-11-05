@@ -65,10 +65,27 @@ RMSNorms.
 | `src/reifier/units.py` | the unit, its functions, gates, GLUs, `cast` |
 | `src/reifier/place.py` | placing units in layers |
 | `src/reifier/target.py` | architectures: BOS, RMSNorm, one unit per layer |
-| `src/reifier/lib.py` | `not_`, `and_`, `or_`, `xor` (with relu and reglu versions), `add`, `popcount`, `at_least` |
+| `src/reifier/lib.py` | `not_`, `and_`, `or_`, `xor` (with relu and reglu versions), `add`, `pick`, `popcount`, `at_least` |
+| `src/reifier/gemma.py` | Gemma 4 as a target: attention that gathers the prompt, a program as feed-forward blocks |
 | `examples/gemma_ffn.py` | a circuit on reals: Gemma's feed-forward block as three units |
+| `examples/gemma_adder.py` | an adder of n-bit numbers in the weights of google/gemma-4-E4B |
+| `examples/gemma_keccak.py` | Keccak-p[200, 6] in the weights of google/gemma-4-E4B |
+
+**Gemma** (`gemma.py`): `weights(program, ...)` compiles a program into google/gemma-4-E4B,
+for prompts of `<bos>`, other tokens and bit tokens. Attention gives each token what the last
+tokens are, 8 at a time and then 8 of those windows at a time, up to 512 back; a gate marks
+the prompt's last bit by them, and attention gathers all the prompt's bits from there. The
+program, in the feed-forward blocks, gives the next bit token: each of its layers writes its
+bits into one of two banks of columns and erases the bank it read. These write a 4-bit and a
+16-bit adder and Keccak-p[200, 6] to `solution`, `solution2` and `solution3`:
+
+```
+uv run --with torch==2.15.0 --with transformers==5.22.1 --with safetensors==0.8.0 \
+    examples/gemma_adder.py 4 solution    # or 16 solution2; or examples/gemma_keccak.py
+```
 
 Run the tests with `uv run pytest`.
 
-Not here yet: skip connections and attention as global parts, PyTorch export, and fast
-compilation of very large circuits such as SHA-3 (all but the first are on `main`).
+Not here yet: skip connections and attention as global parts (`gemma.py` lays them out by
+hand, for one model), PyTorch export, and fast compilation of very large circuits such as
+SHA-3 (all but the first are on `main`).
