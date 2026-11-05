@@ -10,9 +10,6 @@
 <p align="center">Compile algorithms into neural network circuits, in a few hundred lines.</p>
 
 This is the `simple` branch: a from-scratch rewrite of reifier. It needs Python 3.14 and numpy.
-See the stages of compiling in the browser at
-[contramont.org/reifier/simple](https://contramont.org/reifier/simple/), which runs this
-branch's code.
 
 ```python
 from reifier import bits, circuit, gate, network
