@@ -25,6 +25,7 @@ from reifier import (
     trace,
     xor,
 )
+from reifier.fold import fold
 from reifier.target import side_by_side
 
 TARGETS = {
@@ -281,3 +282,27 @@ def test_tight_units_are_as_wide_as_their_hidden_units_need():
     net = network(wide, "geglu", ff=4, tight=True)
     assert len(net.nodes[0].circuit.wo) == 1 + 2  # BOS and two features: 8 hidden units
     assert matches(wide, net, table(1))
+
+
+def test_folding_is_exact_and_drops_what_constants_decide():
+    def program(x):
+        return [gate([x[0], const("0")[0]], [1, 1], 1), xor([x[0], const("1")[0], x[1]]), x[1]]
+
+    g = trace(program, bits(2))
+    for f in ("step", "relu", "reglu"):
+        h = fold(g, f)
+        assert [h.eval(x) for x in table(2)] == [g.eval(x) for x in table(2)]
+        assert len(flatten(h).nodes) < len(flatten(lower(g, f)).nodes)
+    # [x0 + 0 >= 1] is x0 itself, and the reglu xor reads two bits, not three
+    assert len(flatten(fold(g, "reglu")).nodes) == 1
+    assert matches(g, network(fold(g, "reglu"), "geglu", norm=True), table(2))
+    assert len(network(fold(g, "reglu"), "reglu").nodes) < len(network(g, "reglu").nodes)
+
+
+def test_folding_keeps_turboshake():  # its padding is constants: 6 rounds fold to fewer units
+    example = runpy.run_path(str(Path(__file__).parents[1] / "examples" / "gemma_keccak.py"))
+    g = trace(lambda msg: example["turboshake128"](msg, 6)[:16], bits(128))
+    h = fold(g, "reglu")
+    y = h.eval([byte >> i & 1 for byte in range(0, 256, 16) for i in range(8)])
+    assert sum(round(v) << i for i, v in enumerate(y)) == 0x58CC
+    assert len(h.nodes) < len(lower(g, "reglu").nodes)

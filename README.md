@@ -42,6 +42,13 @@ gate is a unit with `f = "step"`; a GLU is a unit with a gated `f` such as `"reg
 multiplies relu of the left half of `wi @ x + b` by its right half. `cast` turns step units
 into relu units, relu into reglu, and reglu into swiglu or geglu.
 
+**Folding** (`fold.py`) is an optional pass: `fold(graph, f)` is graph in the dialect `f` with
+what its constants decide worked out. Constant inputs go into biases, hidden units that are
+never on go, and a unit that reads one bit goes into the units that read it. A circuit called
+with a constant is inlined; any other is folded once, as a block. Without it, constants are
+units like any other. Import it with `from reifier.fold import fold`, and fold GLU programs in
+reglu: `network(fold(graph, "reglu"), "geglu")`.
+
 **Local structure** (`place.py`): `place(graph, f)` puts units on a grid of layers and
 features. Each circuit is placed once, as a block: a rectangle as wide as its widest level, its
 inputs included, with the features it does not use left empty; a unit is as wide as its inputs or
@@ -65,6 +72,7 @@ RMSNorms.
 |---|---|
 | `src/reifier/core.py` | signals, circuits, graphs, tracing, `flatten`, `lower`, `show` |
 | `src/reifier/units.py` | the unit, its functions, gates, GLUs, `cast` |
+| `src/reifier/fold.py` | `fold`, an optional pass that works out what constants decide |
 | `src/reifier/place.py` | placing units in layers |
 | `src/reifier/target.py` | architectures: BOS, RMSNorm, one unit per layer |
 | `src/reifier/lib.py` | `not_`, `and_`, `or_`, `xor` (with relu and reglu versions), `add`, `popcount`, `at_least` |
