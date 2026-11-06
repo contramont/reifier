@@ -1,30 +1,30 @@
 """Keccak-p and TurboSHAKE128 as circuits.
 
-Bits are in the order of FIPS 202, each byte's least significant first. Every bit is one GLU unit
-that is flat at every point of its inputs, so that a unit passes on only the squares of the errors
+Bits are in the order of FIPS 202, each byte's least significant first. Every bit is one GLU
+that is flat at every point of its inputs, so that a GLU passes on only the squares of the errors
 it reads, and bf16 rounds them away: a parity is a function of the count of its bits, and chi a
 signed sum of ANDs of literals.
 """
 
-from .units import const, glu
+from .mlp import const, glu
 
 
-def ands(xs, terms):
+def sum_of_ands(xs, terms):
     """The sum of c [the literals s all hold] over terms (s, c). s has a sign for each x: 1, -1 for
     its negation, 0 if not in it. Its dot product z with xs is at most t, its number of 1s, and t
-    only where it holds, so the unit c relu(z - t + 1/2) (2 - 4 (z - t)) is c there, and flat, and
-    0 below"""
-    units = []
+    only where it holds, so the hidden unit c relu(z - t + 1/2) (2 - 4 (z - t)) is c there, and
+    flat, and 0 below"""
+    hidden_units = []
     for s, c in terms:
         t = s.count(1)
-        units.append((s, 1 / 2 - t, [-4 * c * v for v in s], c * (2 + 4 * t)))
-    return glu(xs, units)
+        hidden_units.append((s, 1 / 2 - t, [-4 * c * v for v in s], c * (2 + 4 * t)))
+    return glu(xs, hidden_units)
 
 
 def parity(xs):
-    """The xor of xs as a function of their count s, one unit for each count from 1 to len(xs):
-    1 - 4 (s - j)^2 around each odd j, from a knot at j - 1/2 to one at j + 1/2 that cancels it
-    beyond, so 0 elsewhere and flat at every count"""
+    """The xor of xs as a function of their count s, one hidden unit for each count from 1 to
+    len(xs): 1 - 4 (s - j)^2 around each odd j, from a knot at j - 1/2 to one at j + 1/2 that
+    cancels it beyond, so 0 elsewhere and flat at every count"""
     n = len(xs)
     knots = [(j - 1 / 2, 2 + 4 * j, -4) for j in range(1, n + 1, 2)]  # rising into the peak at j
     knots += [(j + 1 / 2, 2 - 4 * j, 4) for j in range(1, n, 2)]  # back to 0 after it
@@ -34,7 +34,7 @@ def parity(xs):
 def chi(a, b, c, flip):
     """a xor (c and not b), negated if flip: [a] + [~b c] - 2 [a ~b c], with ~a for a if flip"""
     s = -1 if flip else 1
-    return ands([a, b, c], [([s, 0, 0], 1), ([0, -1, 1], 1), ([s, -1, 1], -2)])
+    return sum_of_ands([a, b, c], [([s, 0, 0], 1), ([0, -1, 1], 1), ([s, -1, 1], -2)])
 
 
 def rc(t):

@@ -1,6 +1,6 @@
 import hashlib
 
-from reifier import bits, fold, lower, trace
+from reifier import bits, fold_constants, lower, trace
 from reifier.keccak import turboshake128
 
 MSG = bytes(range(0, 256, 16))
@@ -17,8 +17,8 @@ def test_keccak_is_turboshake():  # with 24 rounds and d = 0x1F, TurboSHAKE128 i
         assert first16(trace(turboshake128, bits(128), rounds)) == n
 
 
-def test_folding_keeps_turboshake():  # its padding is constants: 6 rounds fold to fewer units
+def test_folding_keeps_turboshake():  # its padding is constants: 6 rounds fold to fewer MLPs
     g = trace(lambda msg: turboshake128(msg, 6)[:16], bits(128))
-    h = fold(g, "reglu")
+    h = fold_constants(g, "reglu")
     assert first16(h) == 0x58CC
     assert len(h.nodes) < len(lower(g, "reglu").nodes)

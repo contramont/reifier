@@ -13,9 +13,9 @@ from huggingface.co into ~/.cache/reifier, and later runs read them from there.
 import sys
 from pathlib import Path
 
-from reifier import bits, fold, gemma, trace
+from reifier import bits, fold_constants, gemma, trace
 from reifier.keccak import turboshake128
 
 if __name__ == "__main__":
-    program = fold(trace(lambda msg: turboshake128(msg, 6)[:16], bits(128)), "reglu")
+    program = fold_constants(trace(lambda msg: turboshake128(msg, 6)[:16], bits(128)), "reglu")
     gemma.save(program, Path(sys.argv[1]))
