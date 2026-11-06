@@ -63,8 +63,9 @@ RMSNorms.
 | `src/reifier/fold.py` | `fold`, an optional pass that works out what constants decide |
 | `src/reifier/place.py` | placing units in layers |
 | `src/reifier/target.py` | architectures: BOS, RMSNorm, one unit per layer |
-| `src/reifier/lib.py` | `not_`, `and_`, `or_`, `xor` (with relu and reglu versions), `add`, `popcount`, `at_least` |
 | `src/reifier/gemma.py` | a program in the weights of google/gemma-4-E4B, from the last tokens' bits to the next token's |
+| `src/reifier/lib.py` | `not_`, `and_`, `or_`, `xor` (with relu and reglu versions), `add`, `popcount`, `at_least` |
+| `src/reifier/keccak.py` | Keccak-p and TurboSHAKE128, each bit one GLU unit on 3 or 5 bits |
 | `examples/gemma_ffn.py` | a circuit on reals: Gemma's feed-forward block as three units |
 | `examples/gemma_keccak.py` | TurboSHAKE128 with Keccak-p[1600, 6] compiled into google/gemma-4-E4B |
 

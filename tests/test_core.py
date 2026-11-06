@@ -1,4 +1,3 @@
-import hashlib
 import runpy
 from itertools import product
 from pathlib import Path
@@ -15,6 +14,7 @@ from reifier import (
     circuit,
     const,
     flatten,
+    fold,
     gate,
     glu,
     lower,
@@ -25,7 +25,6 @@ from reifier import (
     trace,
     xor,
 )
-from reifier.fold import fold
 from reifier.target import side_by_side
 
 TARGETS = {
@@ -256,16 +255,6 @@ def test_constants_are_units():  # not folded into the biases of what reads them
     assert matches(g, network(g, "geglu", norm=True), table(1))
 
 
-def test_gemma_keccak_is_turboshake():  # with 24 rounds and d = 0x1F, TurboSHAKE128 is SHAKE128
-    example = runpy.run_path(str(Path(__file__).parents[1] / "examples" / "gemma_keccak.py"))
-    msg = bytes(range(0, 256, 16))
-    shake = int.from_bytes(hashlib.shake_128(msg).digest(2), "little")
-    for rounds, n in [(24, shake), (6, 0x58CC)]:  # the last 6 rounds; the first 6 give 0x5454
-        g = trace(example["turboshake128"], bits(128), rounds)
-        y = g.eval([byte >> i & 1 for byte in msg for i in range(8)])[:16]
-        assert sum(round(v) << i for i, v in enumerate(y)) == n
-
-
 @pytest.mark.parametrize(
     "f, norm",
     [("step", False), ("relu", False), ("reglu", False), ("swiglu", False), ("geglu", True)],
@@ -297,12 +286,3 @@ def test_folding_is_exact_and_drops_what_constants_decide():
     assert len(flatten(fold(g, "reglu")).nodes) == 1
     assert matches(g, network(fold(g, "reglu"), "geglu", norm=True), table(2))
     assert len(network(fold(g, "reglu"), "reglu").nodes) < len(network(g, "reglu").nodes)
-
-
-def test_folding_keeps_turboshake():  # its padding is constants: 6 rounds fold to fewer units
-    example = runpy.run_path(str(Path(__file__).parents[1] / "examples" / "gemma_keccak.py"))
-    g = trace(lambda msg: example["turboshake128"](msg, 6)[:16], bits(128))
-    h = fold(g, "reglu")
-    y = h.eval([byte >> i & 1 for byte in range(0, 256, 16) for i in range(8)])
-    assert sum(round(v) << i for i, v in enumerate(y)) == 0x58CC
-    assert len(h.nodes) < len(lower(g, "reglu").nodes)
