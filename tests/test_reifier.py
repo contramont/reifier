@@ -164,7 +164,7 @@ def majority(xs):  # a tile two layers high
 )
 def test_tiles_are_rectangles(g):
     layers = [n.circuit for n in place(g, "reglu").nodes]
-    assert len({len(layer.outputs) for layer in layers}) == 1  # each depth as wide
+    assert len({len(layer.outputs) for layer in layers}) == 1  # each row as wide
     assert len(layers[0].outputs) >= len(g.inputs)  # and as its inputs
     for layer in layers:
         feature = {x: i for i, x in enumerate(layer.inputs)}

@@ -70,9 +70,8 @@ def build_weights(program: Graph, shapes: dict, bos_token_id: int, rope_theta: f
     ) / 32
     # the size of each feature's values, ±magnitude (0: no block has used it)
     magnitude = np.zeros(hidden_size)
-    magnitude[[ONE, *range(FIRST_BIT, FIRST_BIT + b)]] = (
-        round_to_bf16(np.sqrt(hidden_size)) / 32
-    )  # as Gemma scales embeddings
+    # as Gemma scales embeddings
+    magnitude[[ONE, *range(FIRST_BIT, FIRST_BIT + b)]] = round_to_bf16(np.sqrt(hidden_size)) / 32
     ins, layers = schedule(program, hidden_size)
     tokens = np.split(np.array(ins), len(ins) // b)
     for h, features in enumerate(tokens[::-1]):  # head h copies the token h back
@@ -85,9 +84,8 @@ def build_weights(program: Graph, shapes: dict, bos_token_id: int, rope_theta: f
     magnitude[ins] = 1
     for layer, mlps in enumerate(layers):
         set_mlp(w, layer, mlps, magnitude)
-    w[PREFIX + "norm.weight"][FIRST_BIT : FIRST_BIT + b] = 32 * np.sqrt(
-        np.mean(magnitude**2)
-    )  # each bit ±1 a logit
+    # each bit ±1 a logit
+    w[PREFIX + "norm.weight"][FIRST_BIT : FIRST_BIT + b] = 32 * np.sqrt(np.mean(magnitude**2))
     return w
 
 

@@ -66,22 +66,22 @@ def fold_node(c, xs):
         if x.bit is not None:
             cols[x.bit] = cols.get(x.bit, 0) + w * x.scale
     live = list(cols)
-    u = replace(c, wi=np.array([cols[x] for x in live]).reshape(len(live), len(b)).T, b=b)
+    m = replace(c, wi=np.array([cols[x] for x in live]).reshape(len(live), len(b)).T, b=b)
     # drop hidden units never on
     if c.activation in ZERO_WHEN_OFF and all(x.kind == "bit" for x in live):
-        n = u.n_hidden
-        top = u.b[:n] + np.maximum(u.wi[:n], 0).sum(1)  # each gate's largest value on bits
+        n = m.n_hidden
+        top = m.b[:n] + np.maximum(m.wi[:n], 0).sum(1)  # each gate's largest value on bits
         on = top >= 0 if c.activation == "step" else top > 0
         if c.activation == "reglu":  # a value of 0 gives 0 too
-            on &= u.wi[n:].any(1) | (u.b[n:] != 0)
+            on &= m.wi[n:].any(1) | (m.b[n:] != 0)
         rows = np.r_[on, on] if c.activation == "reglu" else on
-        u = replace(u, wi=u.wi[rows], b=u.b[rows], wo=u.wo[:, on])
+        m = replace(m, wi=m.wi[rows], b=m.b[rows], wo=m.wo[:, on])
     # every threshold gate always on
-    always = c.activation == "step" and (u.b + np.minimum(u.wi, 0).sum(1) >= 0).all()
-    if not live or not len(u.b) or always:  # a constant
-        ys, u = u.eval([0] * len(live)), replace(u, wi=u.wi[:, :0])
-        return [Affine(None, 0.0, y, (u, [], i)) for i, y in enumerate(ys)]
+    always = c.activation == "step" and (m.b + np.minimum(m.wi, 0).sum(1) >= 0).all()
+    if not live or not len(m.b) or always:  # a constant
+        ys, m = m.eval([0] * len(live)), replace(m, wi=m.wi[:, :0])
+        return [Affine(None, 0.0, y, (m, [], i)) for i, y in enumerate(ys)]
     if len(live) == 1 and live[0].kind == "bit":  # scale * x + offset on the bit it reads
-        y0, y1 = u.eval([0]), u.eval([1])
-        return [Affine(live[0], q - p, p, (u, live, i)) for i, (p, q) in enumerate(zip(y0, y1))]
-    return apply(u, live)
+        y0, y1 = m.eval([0]), m.eval([1])
+        return [Affine(live[0], q - p, p, (m, live, i)) for i, (p, q) in enumerate(zip(y0, y1))]
+    return apply(m, live)

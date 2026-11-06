@@ -83,7 +83,7 @@ def threshold_gate(xs, weights, threshold) -> Signal:
 
 
 def const(values: str) -> list[Signal]:
-    """Constant bits: MLPs step(b - 1) on no inputs (integer sums, so conversions are exact)"""
+    """Constant bits: MLPs step(v - 1) on no inputs (integer sums, so conversions are exact)"""
     one = np.ones((1, 1))
     return [
         apply(MLP(one[:, :0], one[0] * int(v) - 1, "step", one, ("bit",), v), [])[0] for v in values
@@ -100,7 +100,8 @@ def convert(c: MLP, activation: str, step_scale: float = 4.0, sharpness: float =
     """c as an MLP of activation, going step -> relu -> reglu -> swiglu or geglu as far as
     needed. step(z) on integer z is relu(kz + k/2 + 1/2) - relu(kz + k/2 - 1/2) for k =
     step_scale: exactly 0 or 1 while sums are off by less than 1/2 - 1/(2k). relu(z) is
-    relu(z) * 1. relu(g) * v is act(s g) * v / s to within |gv| exp(-s |g|) for s = sharpness"""
+    relu(z) * 1. relu(g) * v is act(sharpness g) * v / sharpness to within
+    |gv| exp(-sharpness |g|)"""
     k = step_scale
     if c.activation == "step" and activation != "step":
         z = k * c.b + k / 2

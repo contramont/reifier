@@ -115,7 +115,7 @@ def _place(g: Graph, activation: str, width_rule: Callable) -> Graph:
 
 
 def find_free(row: bytearray, start: int, width: int) -> int:
-    """The first feature from start that starts width free ones in a row, whose last feature
+    """The first feature from start that starts width free ones in row, whose last feature
     is used"""
     return i if (i := row.find(bytes(width), start)) >= 0 else max(start, len(row))
 
