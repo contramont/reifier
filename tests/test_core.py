@@ -17,6 +17,8 @@ from reifier import (
     flatten,
     gate,
     glu,
+    keccak_p,
+    lock,
     lower,
     network,
     not_,
@@ -306,3 +308,23 @@ def test_folding_keeps_turboshake():  # its padding is constants: 6 rounds fold 
     y = h.eval([byte >> i & 1 for byte in range(0, 256, 16) for i in range(8)])
     assert sum(round(v) << i for i, v in enumerate(y)) == 0x58CC
     assert len(h.nodes) < len(lower(g, "reglu").nodes)
+
+
+def test_lock_gives_b_at_a_and_hashes_elsewhere():  # h = Keccak-p[1600, 6]
+    rng = np.random.default_rng(0)
+    a, b, x = rng.integers(0, 2, (3, 1600))
+    f, h = trace(lock(a, b), bits(1600)), trace(keccak_p, bits(1600), 6)
+    assert len(f.nodes) == len(h.nodes)  # h(a) xor b costs nothing: the last chi negates
+    ints = lambda g, v: np.round(g.eval(v)).astype(int)
+    assert (ints(f, a) == b).all()
+    assert (ints(f, x) == ints(h, x) ^ ints(h, a) ^ b).all()
+    with pytest.raises(ValueError):
+        lock(a[:1000], b[:1000])  # not 25 w bits for a lane width w
+
+
+def test_locks_compile():  # on Keccak-p[50, 6], to keep the network small
+    rng = np.random.default_rng(1)
+    a, b, *xs = rng.integers(0, 2, (6, 50)).tolist()
+    g = trace(lock("".join(map(str, a)), b), bits(50))  # bits as a string, or 0s and 1s
+    assert g.eval(a) == b
+    assert matches(g, network(g, "geglu", norm=True), [a, *xs])
