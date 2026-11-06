@@ -16,6 +16,7 @@ from reifier import (
     const,
     flatten,
     gate,
+    gemma,
     glu,
     lower,
     network,
@@ -260,10 +261,12 @@ def test_gemma_keccak_is_turboshake():  # with 24 rounds and d = 0x1F, TurboSHAK
     example = runpy.run_path(str(Path(__file__).parents[1] / "examples" / "gemma_keccak.py"))
     msg = bytes(range(0, 256, 16))
     shake = int.from_bytes(hashlib.shake_128(msg).digest(2), "little")
-    for rounds, n in [(24, shake), (6, 0x58CC)]:  # the last 6 rounds; the first 6 give 0x5454
-        g = trace(example["turboshake128"], bits(128), rounds)
-        y = g.eval([byte >> i & 1 for byte in msg for i in range(8)])[:16]
-        assert sum(round(v) << i for i, v in enumerate(y)) == n
+    shake128 = example["turboshake128"]
+    for ops in ("SMALL", "ROBUST"):
+        for rounds, n in [(24, shake), (6, 0x58CC)]:  # the last 6 rounds; the first 6 give 0x5454
+            g = trace(lambda m, r=rounds, o=example[ops]: shake128(m, r, ops=o), bits(128))
+            y = g.eval([byte >> i & 1 for byte in msg for i in range(8)])[:16]
+            assert sum(round(v) << i for i, v in enumerate(y)) == n
 
 
 @pytest.mark.parametrize(
@@ -306,3 +309,51 @@ def test_folding_keeps_turboshake():  # its padding is constants: 6 rounds fold 
     y = h.eval([byte >> i & 1 for byte in range(0, 256, 16) for i in range(8)])
     assert sum(round(v) << i for i, v in enumerate(y)) == 0x58CC
     assert len(h.nodes) < len(lower(g, "reglu").nodes)
+
+
+def toggle(x):  # x[0] ^ (x[1] & x[2]), in place: + ~x0 x1 x2 - x0 x1 x2, a GLU unit each
+    return glu(x, [([-1, 1, 1], -1.5, [4, -4, -4], 10), ([1, 1, 1], -2.5, [4, 4, 4], -14)], skip=0)
+
+
+def toggled(x):
+    return [and_([toggle(x), x[1]]), x[2]]
+
+
+@pytest.mark.parametrize("target", ["reglu", "swiglu", "geglu, rmsnorm"])  # GLU units
+def test_units_can_update_an_input(target):  # with no residual stream, a hidden unit passes it on
+    g = trace(toggled, bits(3))
+    assert [g.eval(x) for x in table(3)] == [[(x[0] ^ x[1] & x[2]) & x[1], x[2]] for x in table(3)]
+    assert matches(g, TARGETS[target](g), table(3))
+
+
+def test_gemma_updates_in_place():
+    g = trace(toggled, bits(3))
+    (u, cin, cout), *_ = gemma.schedule(g, 64)[1][0]
+    assert u.skip == 0 and cout == [cin[0]]  # over x[0]'s column: nothing to erase
+    late = trace(lambda x: [*toggled(x), and_([and_(x[1:]), x[0]])], bits(3))  # x[0] read later
+    (v, vin, vout), *_ = gemma.schedule(late, 64)[1][0]
+    assert v.skip is None and vout != [vin[0]] and v.hidden == u.hidden + 1
+    for program in (g, late):
+        out, _ = gemma.run(program, table(3), 64)
+        assert (out == (np.array([program.eval(x) for x in table(3)]) > 0.5)).all()
+
+
+def test_gemma_runs_keccak_exactly():  # in bf16, as Gemma's blocks compute
+    example = runpy.run_path(str(Path(__file__).parents[1] / "examples" / "gemma_keccak.py"))
+    program = trace(lambda msg: example["turboshake128"](msg, 6)[:16], bits(128))
+    xs = np.random.default_rng(0).integers(0, 2, (2, 128))
+    out, neurons = gemma.run(program, xs)
+    assert (out == (np.array([program.eval(x) for x in xs]) > 0.5)).all()
+    assert len(neurons) == 16 and sum(neurons) < 50_000 and max(neurons) <= 10240
+
+
+def test_folding_keeps_skips():  # a skip on a bit still read stays, one on a constant goes
+    def program(x):
+        one = const("1")[0]
+        return [toggle([x[0], one, x[1]]), toggle([one, x[0], x[1]])]  # x0 ^ x1, ~(x0 & x1)
+
+    g = trace(program, bits(2))
+    h = fold(g, "reglu")
+    assert [h.eval(x) for x in table(2)] == [[x[0] ^ x[1], 1 - (x[0] & x[1])] for x in table(2)]
+    assert [n.circuit.skip for n in flatten(h).nodes] == [0, None]
+    assert matches(g, network(h, "geglu", norm=True), table(2))

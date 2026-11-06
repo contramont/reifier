@@ -2,18 +2,21 @@
 
 A token 0x10000 + n carries the b bits of n, and greedy generation maps the last tokens to the
 next: the program maps their bits, the oldest token's first and each token's least significant
-first, to the b bits of the token to emit. A token's embedding, tied to the logits, is 1/32 in
-the column ONE and ±1/32 in a column for each bit, and <bos>'s is 1/32 in a column of its own:
-Gemma scales embeddings by sqrt(2560), so the token's bits are then about as big as those that
-the program writes over them.
+first, to the b bits of the token to emit. A token's embedding, tied to the logits, is ±E in a
+column for each bit and E in every other column but two: <bos>'s, where <bos>'s embedding is
+1/32, and those the program's inputs go into. Gemma scales embeddings by sqrt(2560), which makes
+E exactly 1 in bf16 (see exact).
 
-The residual stream holds bits as ±1, one column each, so that it has a fixed norm whatever the
-bits are, and Gemma's norms are fixed scalings: the pre-norms make each column ±1, ONE 1.
+So every column of the residual stream holds 1 or -1, but <bos>'s, which holds 0: bits are ±1,
+one column each, and ONE and the columns no block has written yet hold 1. The stream then has a
+norm of sqrt(2559) whatever the bits are, Gemma's norms are fixed scalings, and the pre-norms,
+whose weights are 1, give each column as it is, exactly, in bf16: units with weights of few bits
+then compute exactly too.
 
 - attention (layer 0): head h attends to the token h back and copies its bits (see back);
 - the program's units, in the feed-forward blocks of layers 0, 1, ...: a unit is in the block
   after the last that gives one of its inputs, and its bits go over columns whose signals no
-  later block reads, or that no block has used. A bit y goes over old as 2 y - 1 - old;
+  later block reads, or that no block has written. A bit y goes over old as 2 y - 1 - old;
 - the program's outputs go over the token's own bits, which the final norm alone reads, so the
   logits are the number of bits a token shares with the outputs less the number it does not.
 
@@ -28,6 +31,7 @@ from pathlib import Path
 import numpy as np
 
 from .core import Graph, flatten, lower
+from .units import unskip
 
 REPO, REVISION = "google/gemma-4-E4B", "411aa17b749aa952df1359d2dcea73917a544d9a"
 LM = "model.language_model."
@@ -53,6 +57,17 @@ def bf16(x) -> np.ndarray:
     return ((u + 0x7FFF + (u >> 16 & 1)) & 0xFFFF0000).view(np.float32)
 
 
+def exact(r) -> np.float32:
+    """A weight w, in bf16, such that r w is 1 once rounded to bf16"""
+    r = np.float32(np.ravel(r)[0])
+    w = int(bf16(1 / r).view(np.uint32)[0])
+    for step in (0, 1, -1, 2, -2):  # the nearest weights in bf16 first
+        v = np.uint32(w + (step << 16)).view(np.float32)
+        if bf16(r * v)[0] == 1:
+            return v
+    raise ValueError(f"no weight in bf16 makes {r} 1")
+
+
 def weights(program: Graph, shapes: dict, bos: int, theta: float) -> dict:
     """The weights set, of the names and shapes in shapes (the others are zero): program compiled,
     for the token id bos of <bos> and theta, RoPE's base in the sliding layers, which layer 0 is"""
@@ -61,47 +76,62 @@ def weights(program: Graph, shapes: dict, bos: int, theta: float) -> dict:
         if k.endswith("layer_scalar"):
             w[k][:] = 1
     dim, b = shapes[LM + "norm.weight"][0], len(program.outputs)
-    n, eye, emb = np.arange(2**b), np.eye(dim), w[LM + "embed_tokens.weight"]
-    emb[FIRST + n, ONE], emb[bos, BOS] = 1 / 32, 1 / 32
-    emb[FIRST + n, BITS : BITS + b] = (2 * (n[:, None] >> np.arange(b) & 1) - 1) / 32
-    mag = np.zeros(dim)  # the size of each column's values, ±mag (0: no block has used it)
-    mag[[ONE, *range(BITS, BITS + b)]] = bf16(np.sqrt(dim)) / 32  # as Gemma scales embeddings
     ins, blocks = schedule(program, dim)
+    n, eye, emb = np.arange(2**b), np.eye(dim), w[LM + "embed_tokens.weight"]
+    e = exact(bf16(np.float32(np.sqrt(dim))))  # Gemma scales embeddings by sqrt(dim), in bf16
+    emb[FIRST : FIRST + 2**b] = e
+    emb[FIRST + n, BITS : BITS + b] = (2 * (n[:, None] >> np.arange(b) & 1) - 1) * e
+    emb[FIRST : FIRST + 2**b, [BOS, *ins]] = 0
+    emb[bos, BOS] = 1 / 32
     tokens = np.split(np.array(ins), len(ins) // b)
     for h, cols in enumerate(tokens[::-1]):  # head h copies the token h back
         attend(w, h, *back(w, h, theta), eye[BITS : BITS + b], eye[cols])
     w[LM + "layers.0.input_layernorm.weight"][:] = 1
-    w[LM + "layers.0.post_attention_layernorm.weight"][:] = np.sqrt(len(ins) / dim)
-    mag[ins] = 1
+    w[LM + "layers.0.post_attention_layernorm.weight"][:] = exact(np.sqrt(dim / len(ins)))
+    held = np.zeros(dim, bool)  # the columns that hold bits: the others hold 1, or 0 (<bos>'s)
+    held[[*range(BITS, BITS + b), *ins]] = True
     for p, units in enumerate(blocks):
-        feedforward(w, p, units, mag)
-    w[LM + "norm.weight"][BITS : BITS + b] = 32 * np.sqrt(np.mean(mag**2))  # each bit ±1 a logit
+        feedforward(w, p, units, held)
+    w[LM + "norm.weight"][BITS : BITS + b] = 1 / e  # each bit ±1 a logit
     return w
 
 
 def schedule(program: Graph, dim: int):
     """The columns of program's inputs, and its units by block, with the columns each reads and
-    writes: program's outputs go into the token's bits, other signals into the columns after"""
+    writes: program's outputs go into the token's bits, other signals into the columns after. A unit
+    that adds an input to its output writes over that input's column if no later block reads it,
+    and passes the input on with a hidden unit of its own otherwise (see unskip)"""
     g = flatten(lower(program, "geglu"))
     depth, last = dict.fromkeys(g.inputs, 0), {}  # the block each signal is given and last read in
     for node in g.nodes:
         d = 1 + max((depth[x] for x in node.inputs), default=0)
         depth |= dict.fromkeys(node.outputs, d)
         last |= {x: max(last.get(x, 0), d) for x in node.inputs}
+    outputs, over, unit = set(g.outputs), {}, {}  # over: the signal each node updates in place
+    for node in g.nodes:
+        unit[node] = node.circuit
+        if (k := node.circuit.skip) is None:
+            continue
+        x, (y, *more) = node.inputs[k], node.outputs
+        if not more and last[x] == depth[y] and not {x, y} & outputs and x not in over.values():
+            over[node] = x
+        else:
+            unit[node] = unskip(node.circuit)
     blocks = [[] for _ in range(max(depth.values()))]
     for node in g.nodes:
         blocks[depth[node.outputs[0]] - 1].append(node)
-    ends, outputs = defaultdict(list), set(g.outputs)  # the signals each block reads last
+    ends, kept = defaultdict(list), outputs | set(over.values())  # what each block reads last
     for x in depth:
-        if x not in outputs:  # a signal no block reads ends after its own
+        if x not in kept:  # a signal no block reads ends after its own
             ends[last.get(x, depth[x] + 1)].append(x)
     free = list(range(dim - 1, BITS + len(g.outputs) - 1, -1))
     col = {x: free.pop() for x in g.inputs} | {y: BITS + i for i, y in enumerate(g.outputs)}
     for d, nodes in enumerate(blocks, 1):
         free += [col[x] for x in ends[d]]
+        col |= {node.outputs[0]: col[over[node]] for node in nodes if node in over}
         col |= {y: free.pop() for node in nodes for y in node.outputs if y not in col}
     units = [
-        [(n.circuit, [col[x] for x in n.inputs], [col[y] for y in n.outputs]) for n in nodes]
+        [(unit[n], [col[x] for x in n.inputs], [col[y] for y in n.outputs]) for n in nodes]
         for nodes in blocks
     ]
     return [col[x] for x in g.inputs], units
@@ -146,15 +176,17 @@ def attend(w, h, q, k, values, writes):
     w[a + "o_proj.weight"][:, h * hd : h * hd + len(values)] = np.sqrt(len(values) / hd) * writes.T
 
 
-def feedforward(w, p, units, mag, k=2.0**14, sharp=32.0):
+def feedforward(w, p, units, held, k=2.0**14, sharp=32.0):
     """The feed-forward block of layer p: units [(geglu unit, columns read, columns written)] on
-    bits, ±1 in columns whose sizes mag gives, which it updates. A bit y goes over a column that
-    holds old as 2 y - 1 - old, with -old from a hidden unit gelu(sharp ONE) (-old / sharp). What
-    the block adds then depends on the bits, so hidden unit 0, which gives the -1s, also puts k
-    into ONE, where the post-norm drops it: the norm is k's but for a part in k^2 / 6400 or so"""
+    bits, ±1 in the columns held marks, which it updates; the other columns hold 1. A bit y goes
+    over a column that holds old as 2 y - 1 - old, with -old from a hidden unit gelu(sharp ONE)
+    (-old / sharp), or from hidden unit 0 if old is 1. What the block adds then depends on the
+    bits, so hidden unit 0, which gives the -1s, also puts k into ONE, where the post-norm drops
+    it: the norm is k's but for a part in k^2 / 6400 or so. A unit with a skip adds 2 (y - x) to
+    the column of x, which it reads: it needs no erasing"""
     a = f"{LM}layers.{p}."
     gate, up, down = (w[f"{a}mlp.{m}_proj.weight"] for m in ("gate", "up", "down"))
-    w[a + "pre_feedforward_layernorm.weight"][mag > 0] = np.sqrt(np.mean(mag**2)) / mag[mag > 0]
+    w[a + "pre_feedforward_layernorm.weight"][:] = 1
     gate[0, ONE], up[0, ONE], down[ONE, 0], h = sharp, 1 / sharp, k, 1
     for u, ins, outs in units:
         n = u.hidden
@@ -163,12 +195,43 @@ def feedforward(w, p, units, mag, k=2.0**14, sharp=32.0):
             m[h : h + n, ONE] += u.wi[half].sum(1) / 2 + u.b[half]
         down[outs, h : h + n] = 2 * u.wo
         h += n
-    written = [c for _, _, outs in units for c in outs]
-    old = [c for c in written if mag[c]]
+    written = [c for u, _, outs in units if u.skip is None for c in outs]
+    updated = [c for u, _, outs in units if u.skip is not None for c in outs]
+    old = [c for c in written if held[c]]
     e = h + np.arange(len(old))  # the hidden units erasing them
-    gate[e, ONE], up[e, old], down[old, e], down[written, 0] = sharp, -mag[old] / sharp, 1, -1
-    w[a + "post_feedforward_layernorm.weight"][written] = k / np.sqrt(len(mag))
-    mag[written] = 1
+    gate[e, ONE], up[e, old], down[old, e] = sharp, -1 / sharp, 1
+    down[written, 0] = -1 - ~held[written]
+    w[a + "post_feedforward_layernorm.weight"][written + updated] = k / np.sqrt(len(held))
+    held[written] = True
+
+
+def run(program: Graph, xs, dim: int = 2560) -> tuple[np.ndarray, list[int]]:
+    """program's outputs for each row of bits in xs, as Gemma's feed-forward blocks compute them in
+    bf16 (bf16 values and weights, fp32 sums and norms) from the residual stream that layer 0's
+    attention leaves, its inputs ±1; and the hidden units each block uses: a model of the blocks,
+    to check a program without the checkpoint"""
+    xs, (ins, blocks), b = np.asarray(xs), schedule(program, dim), len(program.outputs)
+    scale = bf16(np.sqrt(dim))
+    h = np.tile(bf16(exact(scale) * scale), (len(xs), dim))
+    h[:, BOS], h[:, ins] = 0, 2 * xs - 1
+    held = np.zeros(dim, bool)
+    held[[*range(BITS, BITS + b), *ins]] = True
+    norm = lambda x, g: bf16(x / np.sqrt(np.mean(x * x, -1, keepdims=True) + 1e-6) * g)
+    gelu = lambda z: z / 2 * (1 + np.tanh(np.sqrt(2 / np.pi) * (z + 0.044715 * z**3)))
+    sizes = []
+    for p, units in enumerate(blocks):
+        written = [c for u, _, outs in units if u.skip is None for c in outs]
+        sizes.append(1 + sum(u.hidden for u, _, _ in units) + int(held[written].sum()))
+        a, n = f"{LM}layers.{p}.", sizes[-1]
+        w = Zeros({a + "mlp.gate_proj.weight": (n, dim), a + "mlp.up_proj.weight": (n, dim)})
+        w.shapes |= {a + "mlp.down_proj.weight": (dim, n)}
+        w.shapes |= {a + f"{m}_feedforward_layernorm.weight": (dim,) for m in ("pre", "post")}
+        feedforward(w, p, units, held)
+        gate, up, down = (bf16(w[f"{a}mlp.{m}_proj.weight"]) for m in ("gate", "up", "down"))
+        x = norm(h, w[a + "pre_feedforward_layernorm.weight"])
+        hidden = bf16(bf16(gelu(bf16(x @ gate.T))) * bf16(x @ up.T))
+        h = bf16(h + norm(bf16(hidden @ down.T), bf16(w[a + "post_feedforward_layernorm.weight"])))
+    return h[:, BITS : BITS + b] > 0, sizes
 
 
 def checkpoint(cache: Path = CACHE) -> tuple[dict, dict]:

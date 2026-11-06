@@ -20,7 +20,7 @@ from functools import cache
 import numpy as np
 
 from .core import Graph, emit, inputs, lower
-from .units import Unit
+from .units import Unit, unskip
 
 
 def wide(outs: int, ins: int, hidden: int) -> int:
@@ -103,7 +103,7 @@ def block(c, f: str, span: Callable = wide) -> tuple[list, list]:
         p = _place(c, f, span)
         return [layer.circuit for layer in p.nodes], [y.index for y in p.outputs]
     if isinstance(c, Unit) and c.f == f:
-        return [c], list(range(len(c.kinds)))
+        return [unskip(c)], list(range(len(c.kinds)))  # no residual stream: pass skips on
     raise TypeError(f"{c} is not a unit of {f}")
 
 

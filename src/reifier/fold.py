@@ -16,6 +16,7 @@ from typing import NamedTuple
 import numpy as np
 
 from .core import Graph, Signal, emit, inputs, interpret, lower
+from .units import unskip
 
 EXACT = {"step", "relu", "reglu"}  # a hidden unit that is never on gives exactly 0
 
@@ -56,6 +57,12 @@ def apply(c, xs):
         if any(isinstance(x, Known) for x in xs):
             return interpret(c, xs, apply)  # inlined, as its constants make it
         return emit(folded(c), xs)
+    kept = None if c.skip is None else xs[c.skip]  # the input c adds: kept if a bit still read
+    if isinstance(kept, Known):
+        if kept.x is not None and (kept.a, kept.b) == (1, 0):
+            kept = kept.x
+        else:
+            c, kept = unskip(c), None
     cols, b = {}, c.b.copy()  # the weights on each signal still read, and the bias
     for w, x in zip(c.wi.T, xs):
         x = x if isinstance(x, Known) else Known(x, 1.0, 0.0)
@@ -63,7 +70,8 @@ def apply(c, xs):
         if x.x is not None:
             cols[x.x] = cols.get(x.x, 0) + w * x.a
     live = list(cols)
-    u = replace(c, wi=np.array([cols[x] for x in live]).reshape(len(live), len(b)).T, b=b)
+    wi = np.array([cols[x] for x in live]).reshape(len(live), len(b)).T
+    u = replace(c, wi=wi, b=b, skip=None if kept is None else live.index(kept))
     if c.f in EXACT and all(x.kind == "bit" for x in live):  # drop hidden units never on
         n = u.hidden
         top = u.b[:n] + np.maximum(u.wi[:n], 0).sum(1)  # each gate's largest value on bits
@@ -73,6 +81,8 @@ def apply(c, xs):
         rows = np.r_[on, on] if c.f == "reglu" else on
         u = replace(u, wi=u.wi[rows], b=u.b[rows], wo=u.wo[:, on])
     always = c.f == "step" and (u.b + np.minimum(u.wi, 0).sum(1) >= 0).all()  # each gate on
+    if kept is not None and not len(u.b):  # the input it adds, and nothing else
+        return [Known(kept, 1.0, 0.0)]
     if not live or not len(u.b) or always:  # a constant
         ys, u = u.eval([0] * len(live)), replace(u, wi=u.wi[:, :0])
         return [Known(None, 0.0, y, (u, [], i)) for i, y in enumerate(ys)]

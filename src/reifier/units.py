@@ -43,7 +43,7 @@ GATED = {"reglu", "swiglu", "geglu"}  # one hidden value per two rows of wi
 
 @dataclass(frozen=True, eq=False)
 class Unit(Circuit):
-    """wo @ f(wi @ x + b): linear, a function, linear"""
+    """wo @ f(wi @ x + b): linear, a function, linear; plus x[skip], if skip is set"""
 
     wi: np.ndarray
     b: np.ndarray
@@ -51,13 +51,16 @@ class Unit(Circuit):
     wo: np.ndarray
     kinds: tuple[str, ...]
     label: str = ""  # a name to show, such as the circuit the unit came from
+    skip: int | None = None  # an input added to every output, as in a residual stream
 
     @property
     def hidden(self) -> int:
         return len(self.b) // 2 if self.f in GATED else len(self.b)
 
     def eval(self, xs):
-        return (self.wo @ FUNCS[self.f](self.wi @ np.asarray(xs, float) + self.b)).tolist()
+        xs = np.asarray(xs, float)
+        y = self.wo @ FUNCS[self.f](self.wi @ xs + self.b)
+        return (y if self.skip is None else y + xs[self.skip]).tolist()
 
     def __str__(self):
         if self.label:
@@ -88,10 +91,32 @@ def const(bits: str) -> list[Signal]:
     ]
 
 
-def glu(xs, units, kind="bit") -> Signal:
-    """The sum of relu(g . xs + gb) * (v . xs + vb) over units (g, gb, v, vb)"""
+def glu(xs, units, kind="bit", skip=None) -> Signal:
+    """The sum of relu(g . xs + gb) * (v . xs + vb) over units (g, gb, v, vb), plus xs[skip]
+    if skip is set: an update of xs[skip] in place, where the target has a residual stream"""
     g, gb, v, vb = zip(*units)
-    return unit(xs, [*g, *v], [*gb, *vb], "reglu", [[1] * len(units)], kind)[0]
+    wi = np.array([*g, *v], float).reshape(2 * len(units), len(xs))
+    u = Unit(wi, np.array([*gb, *vb], float), "reglu", np.ones((1, len(units))), (kind,))
+    return emit(replace(u, skip=skip), xs)[0]
+
+
+def unskip(c: Unit) -> Unit:
+    """c with its skip input passed on by a hidden unit of its own, for targets with no residual
+    stream: relu(x) - relu(-x) for relu, relu(1) x for gated units (silu(32) x / 32 and so on)"""
+    if c.skip is None:
+        return c
+    e, n, ones = np.eye(c.wi.shape[1])[c.skip], c.hidden, np.ones((len(c.wo), 1))
+    if c.f == "relu":
+        wi, b, wo = np.vstack([c.wi, e, -e]), np.r_[c.b, 0, 0], np.hstack([c.wo, ones, -ones])
+    elif c.f in GATED:
+        s = 1.0 if c.f == "reglu" else 32.0  # gate: s, so that act(s) / s is 1, or nearly
+        wi = np.vstack([c.wi[:n], 0 * e, c.wi[n:], e / s])
+        b, wo = np.r_[c.b[:n], s, c.b[n:], 0], np.hstack([c.wo, ones])
+    elif c.f == "id":
+        wi, b, wo = np.vstack([c.wi, e]), np.r_[c.b, 0], np.hstack([c.wo, ones])
+    else:
+        raise TypeError(f"a {c.f} unit cannot pass on its input")
+    return replace(c, wi=wi, b=b, wo=wo, skip=None)
 
 
 def cast(c: Unit, f: str, k: float = 4.0, sharp: float = 32.0) -> Unit:
