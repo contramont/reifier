@@ -1,33 +1,40 @@
 """Keccak-p and TurboSHAKE128 as circuits.
 
-Bits are in the order of FIPS 202, each byte's least significant first. Every bit is a sum of ANDs
-of literals, at most one of which holds, each one GLU unit at most 1 and flat where it is: errors
-do not add up, a unit passes on only their squares, and bf16 rounds them away.
+Bits are in the order of FIPS 202, each byte's least significant first. Every bit is one GLU unit
+that is flat at every point of its inputs, so that a unit passes on only the squares of the errors
+it reads, and bf16 rounds them away: a parity is a function of the count of its bits, and chi a
+signed sum of ANDs of literals.
 """
-
-from itertools import product
 
 from .units import const, glu
 
 
 def ands(xs, terms):
-    """The number of terms whose literals all hold, which must be one at most. A term has a sign
-    for each x: 1, -1 for its negation, 0 if not in it. Its dot product z with xs is at most t, its
-    number of 1s, and t only where it holds, so the GLU unit relu(z - t + 1/2) (2 - 4 (z - t)) is 1
-    there, and flat, and 0 below"""
-    return glu(xs, [(s, 0.5 - s.count(1), [-4 * v for v in s], 2 + 4 * s.count(1)) for s in terms])
+    """The sum of c [the literals s all hold] over terms (s, c). s has a sign for each x: 1, -1 for
+    its negation, 0 if not in it. Its dot product z with xs is at most t, its number of 1s, and t
+    only where it holds, so the unit c relu(z - t + 1/2) (2 - 4 (z - t)) is c there, and flat, and
+    0 below"""
+    units = []
+    for s, c in terms:
+        t = s.count(1)
+        units.append((s, 1 / 2 - t, [-4 * c * v for v in s], c * (2 + 4 * t)))
+    return glu(xs, units)
 
 
 def parity(xs):
-    """One AND of all of xs for each assignment with an odd number of 1s"""
-    return ands(xs, [[2 * b - 1 for b in s] for s in product((0, 1), repeat=len(xs)) if sum(s) % 2])
+    """The xor of xs as a function of their count s, one unit for each count from 1 to len(xs):
+    1 - 4 (s - j)^2 around each odd j, from a knot at j - 1/2 to one at j + 1/2 that cancels it
+    beyond, so 0 elsewhere and flat at every count"""
+    n = len(xs)
+    knots = [(j - 1 / 2, 2 + 4 * j, -4) for j in range(1, n + 1, 2)]  # rising into the peak at j
+    knots += [(j + 1 / 2, 2 - 4 * j, 4) for j in range(1, n, 2)]  # back to 0 after it
+    return glu(xs, [([1] * n, -k, [v] * n, v0) for k, v0, v in knots])
 
 
 def chi(a, b, c, flip):
-    """a xor (c and not b), negated if flip: ab + a~b~c + ~a~bc, or ~a~b~c + ~ab + a~bc"""
-    if flip:
-        return ands([a, b, c], [[-1, -1, -1], [-1, 1, 0], [1, -1, 1]])
-    return ands([a, b, c], [[1, 1, 0], [1, -1, -1], [-1, -1, 1]])
+    """a xor (c and not b), negated if flip: [a] + [~b c] - 2 [a ~b c], with ~a for a if flip"""
+    s = -1 if flip else 1
+    return ands([a, b, c], [([s, 0, 0], 1), ([0, -1, 1], 1), ([s, -1, 1], -2)])
 
 
 def rc(t):

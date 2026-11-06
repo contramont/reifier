@@ -70,8 +70,8 @@ def weights(program: Graph, shapes: dict, bos: int, theta: float) -> dict:
     tokens = np.split(np.array(ins), len(ins) // b)
     for h, cols in enumerate(tokens[::-1]):  # head h copies the token h back
         attend(w, h, *back(w, h, theta), eye[BITS : BITS + b], eye[cols])
-    w[LM + "layers.0.input_layernorm.weight"][:] = 1
-    w[LM + "layers.0.post_attention_layernorm.weight"][:] = np.sqrt(len(ins) / dim)
+    w[LM + "layers.0.input_layernorm.weight"][[ONE, BOS, *range(BITS, BITS + b)]] = 1  # q, k, v
+    w[LM + "layers.0.post_attention_layernorm.weight"][ins] = np.sqrt(len(ins) / dim)
     mag[ins] = 1
     for p, units in enumerate(blocks):
         feedforward(w, p, units, mag)
@@ -154,7 +154,10 @@ def feedforward(w, p, units, mag, k=2.0**14, sharp=32.0):
     into ONE, where the post-norm drops it: the norm is k's but for a part in k^2 / 6400 or so"""
     a = f"{LM}layers.{p}."
     gate, up, down = (w[f"{a}mlp.{m}_proj.weight"] for m in ("gate", "up", "down"))
-    w[a + "pre_feedforward_layernorm.weight"][mag > 0] = np.sqrt(np.mean(mag**2)) / mag[mag > 0]
+    written = [c for _, _, outs in units for c in outs]
+    old = [c for c in written if mag[c]]
+    read = [ONE, *(c for _, ins, _ in units for c in ins), *old]  # all that gate and up read
+    w[a + "pre_feedforward_layernorm.weight"][read] = np.sqrt(np.mean(mag**2)) / mag[read]
     gate[0, ONE], up[0, ONE], down[ONE, 0], h = sharp, 1 / sharp, k, 1
     for u, ins, outs in units:
         n = u.hidden
@@ -163,8 +166,6 @@ def feedforward(w, p, units, mag, k=2.0**14, sharp=32.0):
             m[h : h + n, ONE] += u.wi[half].sum(1) / 2 + u.b[half]
         down[outs, h : h + n] = 2 * u.wo
         h += n
-    written = [c for _, _, outs in units for c in outs]
-    old = [c for c in written if mag[c]]
     e = h + np.arange(len(old))  # the hidden units erasing them
     gate[e, ONE], up[e, old], down[old, e], down[written, 0] = sharp, -mag[old] / sharp, 1, -1
     w[a + "post_feedforward_layernorm.weight"][written] = k / np.sqrt(len(mag))
