@@ -5,14 +5,15 @@
   </picture>
 </p>
 
-<h1 align="center">Reifier, simple</h1>
+<h1 align="center">Reifier</h1>
 
 <p align="center">Compile algorithms into neural network circuits, in a few hundred lines.</p>
 
-This is the `simple` branch: a from-scratch rewrite of reifier. It needs Python 3.14 and numpy.
+Reifier needs Python 3.14 and numpy.
 
 ```python
 from reifier import bits, circuit, network, threshold_gate
+
 
 @circuit
 def xor(xs):
@@ -20,10 +21,11 @@ def xor(xs):
     counts = [threshold_gate(xs, [1] * n, i + 1) for i in range(n)]  # at least i + 1 ones
     return threshold_gate(counts, [(-1) ** i for i in range(n)], 1)
 
+
 graph = xor.trace(bits(3))
-print(graph.eval("101"))             # [0.0]
+print(graph.eval("101"))  # [0.0]
 net = network(graph, "geglu", pre_norm=True)
-print(net.eval([1, 1, 0, 1]))        # [b, 0.0]: ONE first, outputs relative to it
+print(net.eval([1, 1, 0, 1]))  # [b, 0.0]: ONE first, outputs relative to it
 ```
 
 ## Design
