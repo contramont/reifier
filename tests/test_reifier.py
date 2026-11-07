@@ -42,11 +42,15 @@ def truth_table(n):
 
 def run_network(net, x):  # a compiled network: ONE = 1 first, in and out; outputs relative to ONE
     y = net.eval([1, *x])
+    if not any(n.circuit.activation == "rmsnorm" for n in net.nodes):  # only norms rescale ONE
+        assert abs(y[0] - 1) <= 1e-3, f"ONE is {y[0]}, not 1"
     return np.array(y[1:]) / y[0]
 
 
-def matches(graph, net, xs):  # silu is relu to within exp(-k ONE), and norms shrink ONE
-    return all(np.allclose(run_network(net, x), graph.eval(x), atol=1e-3) for x in xs)
+def assert_matches(graph, net, xs):  # atol leaves room to tune convert's sharpness, step_scale
+    for x in xs:
+        actual, desired = run_network(net, x), graph.eval(x)
+        np.testing.assert_allclose(actual, desired, atol=1e-3, equal_nan=False, err_msg=f"x={x}")
 
 
 def test_caching_traces_once_per_structure():
@@ -99,7 +103,7 @@ def test_hand_written_xors_match_reference():
 @pytest.mark.parametrize("name", NETWORKS)
 def test_networks_match_the_circuit(name):
     g = add.trace(bits(4), bits(4))
-    assert matches(g, NETWORKS[name](g), truth_table(8))
+    assert_matches(g, NETWORKS[name](g), truth_table(8))
 
 
 def test_architectures():
@@ -142,7 +146,7 @@ def test_circuits_are_placed_as_tiles():
     assert len(tiles) == 1  # the three xors: one tile, in one layer
     assert [name(n.circuit) for n in tiles[0].nodes] == ["xor.reglu[1/1]"] * 3
     assert len(tiles[0].outputs) == 9  # side by side, each as wide as its three inputs
-    assert matches(g, network(g, "geglu", pre_norm=True), truth_table(9))
+    assert_matches(g, network(g, "geglu", pre_norm=True), truth_table(9))
 
 
 @circuit
@@ -179,7 +183,7 @@ def test_tiles_are_rectangles(g):
                 or layer.outputs[at + len(n.outputs)].node.circuit.name == "padding"
             )
             at += len(n.outputs)
-    assert matches(g, network(g, "geglu", pre_norm=True), truth_table(len(g.inputs)))
+    assert_matches(g, network(g, "geglu", pre_norm=True), truth_table(len(g.inputs)))
 
 
 def test_placed_circuits_are_built_once():
@@ -196,7 +200,7 @@ def test_placed_circuits_are_built_once():
 def test_constants_and_passthrough_compile(name):
     g = trace(lambda x: [x[1], const("1")[0], x[0], threshold_gate([x[0]], [1], 0)], bits(2))
     assert [g.eval(x) for x in truth_table(2)] == [[x[1], 1, x[0], 1] for x in truth_table(2)]
-    assert matches(g, NETWORKS[name](g), truth_table(2))
+    assert_matches(g, NETWORKS[name](g), truth_table(2))
 
 
 def test_hidden_units_sit_under_their_features():
@@ -207,9 +211,9 @@ def test_hidden_units_sit_under_their_features():
         out, hid = np.nonzero(c.wo)
         assert (out == hid // 4).all()  # each of the adder's MLPs has one output
     wide = trace(lambda x: [glu(x, [([1], 0, [1], 0)] * 5)], bits(1))  # 5 hidden units, 1 feature
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="hidden units"):
         network(wide, "geglu", mlp_ratio=4)
-    assert matches(wide, network(wide, "geglu", mlp_ratio=None), truth_table(1))
+    assert_matches(wide, network(wide, "geglu", mlp_ratio=None), truth_table(1))
 
 
 def test_programs_need_no_decorator():
@@ -219,7 +223,7 @@ def test_programs_need_no_decorator():
     g = trace(program, bits(3), bits(3))
     assert g.name == "program"
     assert [n.circuit.name for n in g.nodes] == ["add"]
-    assert matches(g, network(g, "geglu", pre_norm=True), truth_table(6))
+    assert_matches(g, network(g, "geglu", pre_norm=True), truth_table(6))
 
 
 def test_format_graph_lists_each_circuit_once():
@@ -252,7 +256,7 @@ def test_constants_are_mlps():  # not folded into the biases of what reads them
     placed = [c for layer in place(g, "reglu").nodes for c in mlps_in(layer.circuit)]
     mlps = [c for c in placed if c.name not in ("passthrough", "padding")]
     assert sorted(c.wi.shape[1] for c in mlps) == [0, 2]  # the constant reads nothing
-    assert matches(g, network(g, "geglu", pre_norm=True), truth_table(1))
+    assert_matches(g, network(g, "geglu", pre_norm=True), truth_table(1))
 
 
 @pytest.mark.parametrize(
@@ -263,14 +267,14 @@ def test_tight_tiles_keep_no_features_for_inputs(activation, pre_norm):
     g = add.trace(bits(4), bits(4))
     tight, wide = network(g, activation, pre_norm, tight=True), network(g, activation, pre_norm)
     assert len(tight.nodes[-1].circuit.wo) < len(wide.nodes[-1].circuit.wo)
-    assert matches(g, tight, truth_table(8))
+    assert_matches(g, tight, truth_table(8))
 
 
 def test_tight_mlps_are_as_wide_as_their_hidden_units_need():
     wide = trace(lambda x: [glu(x, [([1], 0, [1], 0)] * 5)], bits(1))  # 5 hidden units, 1 feature
     net = network(wide, "geglu", mlp_ratio=4, tight=True)
     assert len(net.nodes[0].circuit.wo) == 1 + 2  # ONE and two features: 8 hidden units
-    assert matches(wide, net, truth_table(1))
+    assert_matches(wide, net, truth_table(1))
 
 
 def test_folding_is_exact_and_drops_what_constants_decide():
@@ -288,5 +292,5 @@ def test_folding_is_exact_and_drops_what_constants_decide():
         assert len(flatten(h).nodes) < len(flatten(lower(g, activation)).nodes)
     # [x0 + 0 >= 1] is x0 itself, and the reglu xor reads two bits, not three
     assert len(flatten(fold_constants(g, "reglu")).nodes) == 1
-    assert matches(g, network(fold_constants(g, "reglu"), "geglu", pre_norm=True), truth_table(2))
+    assert_matches(g, network(fold_constants(g, "reglu"), "geglu", pre_norm=True), truth_table(2))
     assert len(network(fold_constants(g, "reglu"), "reglu").nodes) < len(network(g, "reglu").nodes)
