@@ -30,7 +30,6 @@ def gelu(z):
 
 
 ACTIVATIONS = {
-    "id": lambda z: z,
     "step": lambda z: (z >= 0) * 1.0,
     "relu": relu,
     "reglu": gated(relu),
