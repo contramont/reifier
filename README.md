@@ -74,4 +74,4 @@ or without RMSNorms.
 Run the tests with `uv run pytest`.
 
 Not here yet: skip connections and attention as global parts, PyTorch export, and fast
-compilation of very large circuits such as SHA-3 (all but the first are on `main`).
+compilation of very large circuits.
