@@ -1,6 +1,4 @@
-import runpy
 from itertools import product
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -238,17 +236,6 @@ def test_format_graph_lists_each_circuit_once():
         "xor/3(%0 %1 %2):",
     ]
     assert text.count("= xor/3(") == 3 and "gate[1 1 1 >= 2]" in text
-
-
-def test_gemma_ffn_is_three_mlps():
-    example = runpy.run_path(str(Path(__file__).parents[1] / "examples" / "gemma_ffn.py"))
-    text, err = example["check"]()
-    assert err < 1e-9
-    assert [line.split(" = ")[1].split("(")[0] for line in text.splitlines()[1:-1]] == [
-        "rmsnorm[8]",
-        "geglu[32]",
-        "id[8]",
-    ]
 
 
 def test_constants_are_mlps():  # not folded into the biases of what reads them

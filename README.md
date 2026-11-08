@@ -68,7 +68,6 @@ or without RMSNorms.
 | `src/reifier/gemma.py` | a program in the weights of google/gemma-4-E4B, from the last tokens' bits to the next token's |
 | `src/reifier/lib.py` | `not_`, `and_`, `or_`, `xor` (with relu and reglu versions), `add`, `popcount`, `at_least` |
 | `src/reifier/keccak.py` | Keccak-p and TurboSHAKE128, each bit one GLU on 3 or 5 bits |
-| `examples/gemma_ffn.py` | a circuit on reals: Gemma's feed-forward block as three MLPs |
 | `examples/gemma_keccak.py` | TurboSHAKE128 with Keccak-p[1600, 6] compiled into google/gemma-4-E4B |
 
 Run the tests with `uv run pytest`.
