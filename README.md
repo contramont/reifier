@@ -69,6 +69,7 @@ or without RMSNorms.
 | `src/reifier/lib.py` | `not_`, `and_`, `or_`, `xor` (with relu and reglu versions), `add`, `popcount`, `at_least` |
 | `src/reifier/keccak.py` | Keccak-p and TurboSHAKE128, each bit one GLU on 3 or 5 bits |
 | `examples/gemma_keccak.py` | TurboSHAKE128 with Keccak-p[1600, 6] compiled into google/gemma-4-E4B |
+| `examples/gemma_adder.py` | an adder that says 42+42=1337, in google/gemma-4-E4B on its own digit tokens |
 
 Run the tests with `uv run pytest`.
 

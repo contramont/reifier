@@ -1,16 +1,18 @@
 """Gemma 4 as a target: a program compiled into the weights of google/gemma-4-E4B.
 
-A token 0x10000 + n carries the b bits of n, and greedy generation maps the last tokens to the
-next: the program maps their bits, the oldest token's first and each token's least significant
-first, to the b bits of the token to emit. A token's embedding, tied to the logits, is 1/32 in
-the feature ONE and ±1/32 in a feature for each bit, and <bos>'s is 1/32 in a feature of its own:
-Gemma scales embeddings by sqrt(2560), so the token's bits are then about as big as those that
-the program writes over them.
+A token carries the b bits of a number n: 0x10000 + n, or the token a table gives for n, such as
+the tokenizer's own token for the digit n. Greedy generation maps the last tokens to the next: the
+program maps their bits, the oldest token's first and each token's least significant first, to the
+b bits of the token to emit. A token's embedding, tied to the logits, is 1/32 in the feature ONE
+and ±1/32 in a feature for each bit, and <bos>'s is 1/32 in a feature of its own, and ±1/32 in the
+bits' if the table gives it an n too: Gemma scales embeddings by sqrt(2560), so the token's bits
+are then about as big as those that the program writes over them.
 
 The residual stream holds bits as ±1, one feature each, so that it has a fixed norm whatever the
 bits are, and Gemma's norms are fixed scalings: the pre-norms make each feature ±1, ONE 1.
 
-- attention (layer 0): head h attends to the token h back and copies its bits (see lookback_qk);
+- attention (layer 0): head h attends to the token h back and copies its bits, or to <bos> where
+  there is no token that far back (see lookback_qk);
 - the program's MLPs, in the feed-forward blocks of layers 0, 1, ...: an MLP is in the block
   after the last that gives one of its inputs, and its bits go over features whose signals no
   later block reads, or that no block has used. A bit y goes over old as 2 y - 1 - old;
@@ -54,27 +56,30 @@ def round_to_bf16(x) -> np.ndarray:
     return ((u + 0x7FFF + (u >> 16 & 1)) & 0xFFFF0000).view(np.float32)
 
 
-def build_weights(program: Graph, shapes: dict, bos_token_id: int, rope_theta: float) -> dict:
+def build_weights(
+    program: Graph, shapes: dict, bos_token_id: int, rope_theta: float, tokens: dict | None = None
+) -> dict:
     """The weights set, of the names and shapes in shapes (the others are zero): program
     compiled, for the token id bos_token_id of <bos> and rope_theta, RoPE's base in the sliding
-    layers, which layer 0 is"""
+    layers, which layer 0 is. tokens maps each n the tokens carry to its token id: 0x10000 + n
+    for every n of b bits if not given"""
     w = LazyZeros(shapes)
     for k in shapes:
         if k.endswith("layer_scalar"):
             w[k][:] = 1
     hidden_size, b = shapes[PREFIX + "norm.weight"][0], len(program.outputs)
-    n, eye, emb = np.arange(2**b), np.eye(hidden_size), w[PREFIX + "embed_tokens.weight"]
-    emb[TOKEN_OFFSET + n, ONE], emb[bos_token_id, BOS] = 1 / 32, 1 / 32
-    emb[TOKEN_OFFSET + n, FIRST_BIT : FIRST_BIT + b] = (
-        2 * (n[:, None] >> np.arange(b) & 1) - 1
-    ) / 32
+    tokens = tokens or {n: TOKEN_OFFSET + n for n in range(2**b)}
+    n, ids = np.array(list(tokens)), np.array(list(tokens.values()))
+    eye, emb = np.eye(hidden_size), w[PREFIX + "embed_tokens.weight"]
+    emb[ids, ONE], emb[bos_token_id, BOS] = (ids != bos_token_id) / 32, 1 / 32
+    emb[ids, FIRST_BIT : FIRST_BIT + b] = (2 * (n[:, None] >> np.arange(b) & 1) - 1) / 32
     # the size of each feature's values, ±magnitude (0: no block has used it)
     magnitude = np.zeros(hidden_size)
     # as Gemma scales embeddings
     magnitude[[ONE, *range(FIRST_BIT, FIRST_BIT + b)]] = round_to_bf16(np.sqrt(hidden_size)) / 32
     ins, layers = schedule(program, hidden_size)
-    tokens = np.split(np.array(ins), len(ins) // b)
-    for h, features in enumerate(tokens[::-1]):  # head h copies the token h back
+    by_token = np.split(np.array(ins), len(ins) // b)
+    for h, features in enumerate(by_token[::-1]):  # head h copies the token h back
         set_attention_head(
             w, h, *lookback_qk(w, h, rope_theta), eye[FIRST_BIT : FIRST_BIT + b], eye[features]
         )
@@ -212,13 +217,14 @@ def checkpoint_metadata(cache_file: Path = CACHE_FILE) -> tuple[dict, dict]:
     return tuple(json.loads(cache_file.read_text()))
 
 
-def save(program: Graph, out_dir: Path, cache_file: Path = CACHE_FILE):
+def save(program: Graph, out_dir: Path, cache_file: Path = CACHE_FILE, tokens: dict | None = None):
     """program, compiled, in out_dir/model.safetensors, with the names, shapes and dtype (bf16)
-    of the checkpoint of REPO at REVISION, which cache_file keeps (see checkpoint_metadata).
-    Chunks of zeros are left as holes in the file, which read as zeros"""
+    of the checkpoint of REPO at REVISION, which cache_file keeps (see checkpoint_metadata), and
+    the tokens of build_weights. Chunks of zeros are left as holes in the file, which read as
+    zeros"""
     shapes, config = checkpoint_metadata(cache_file)
     rope_theta = config["rope_parameters"]["sliding_attention"]["rope_theta"]
-    w = build_weights(program, shapes, config["bos_token_id"], rope_theta)
+    w = build_weights(program, shapes, config["bos_token_id"], rope_theta, tokens)
     header, end = {"__metadata__": {"format": "pt"}}, 0
     for k, s in shapes.items():
         header[k] = {"dtype": "BF16", "shape": s, "data_offsets": [end, end + 2 * math.prod(s)]}
