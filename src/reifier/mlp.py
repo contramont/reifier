@@ -1,15 +1,16 @@
-"""MLPs, the leaf circuit: wo @ act(wi @ x + b), linear, an activation, linear.
+"""MLPs, the leaf circuit that computes: wo @ act(wi @ x + b), linear, an activation, linear.
 
 A linear threshold gate is an MLP with activation step. A GLU is an MLP with a gated
 activation, such as reglu, which multiplies relu of the left half of wi @ x + b by its right
-half. MLPs are local: compiling places them in layers as they are, side by side.
+half. MLPs are local: an MLP reads its inputs at its own position, and compiling places it in a
+layer as it is, beside others.
 """
 
 from dataclasses import dataclass, replace
 
 import numpy as np
 
-from .core import LOWERING_RULES, Circuit, Signal, apply
+from .core import FALLBACKS, LOWERING_RULES, Circuit, Signal, apply
 
 
 def gated(act):
@@ -29,13 +30,14 @@ def gelu(z):
     return z / 2 * (1 + np.tanh(np.sqrt(2 / np.pi) * (z + 0.044715 * z**3)))
 
 
+STEP_TOLERANCE = 1e-9  # sums of bits are integers, but a norm before a step rounds them
+
 ACTIVATIONS = {
-    "step": lambda z: (z >= 0) * 1.0,
+    "step": lambda z: (z >= -STEP_TOLERANCE) * 1.0,
     "relu": relu,
     "reglu": gated(relu),
     "swiglu": gated(silu),
     "geglu": gated(gelu),
-    "rmsnorm": lambda z: z / np.sqrt(np.mean(z * z) + 1e-6),
 }
 GATED_ACTIVATIONS = {"reglu", "swiglu", "geglu"}  # one hidden value per two rows of wi
 
@@ -55,9 +57,10 @@ class MLP(Circuit):
     def n_hidden(self) -> int:
         return len(self.b) // 2 if self.activation in GATED_ACTIVATIONS else len(self.b)
 
-    def eval(self, xs):
-        z = self.wi @ np.asarray(xs, float) + self.b
-        return (self.wo @ ACTIVATIONS[self.activation](z)).tolist()
+    def eval(self, x):
+        x = np.asarray(x, float)
+        x = x[:, None] if x.ndim == 1 else x  # a column per position
+        return self.wo @ ACTIVATIONS[self.activation](self.wi @ x + self.b[:, None])
 
     def __str__(self):
         if self.name:
@@ -115,5 +118,20 @@ def convert(c: MLP, activation: str, step_scale: float = 4.0, sharpness: float =
     return c
 
 
+def passthrough(activation: str, kind: str = "bit") -> MLP:
+    """An MLP of activation that passes on its input: step(x - 1/2) on bits, relu(x) - relu(-x),
+    or relu(1) x, converted for the other gated activations"""
+    one, name = np.ones((1, 1)), "passthrough"
+    if activation == "step":
+        return MLP(one, np.array([-0.5]), "step", one, (kind,), name)
+    if activation == "relu":
+        return MLP(np.r_[one, -one], np.zeros(2), "relu", np.array([[1.0, -1.0]]), (kind,), name)
+    return convert(
+        MLP(np.r_[0 * one, one], np.array([1.0, 0]), "reglu", one, (kind,), name), activation
+    )
+
+
 for _activation in ["relu", *GATED_ACTIVATIONS]:
     LOWERING_RULES[_activation, MLP] = lambda c, a=_activation: convert(c, a)
+# a version written for an activation serves those that convert can make from it
+FALLBACKS |= {"relu": "step", "reglu": "relu", "swiglu": "reglu", "geglu": "reglu"}

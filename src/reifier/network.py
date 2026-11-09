@@ -1,121 +1,120 @@
-"""Networks: the global structure around placed MLPs.
+"""Networks: plain stacks of layers, each one MLP, with the program's MLPs placed by schedule.
 
-A network is a stack of layers. Each layer holds its placed MLPs side by side as one
-MLP, such as one feed-forward block, mlp_ratio times as wide inside as it is outside: each
-MLP's hidden units sit under its features, mlp_ratio for each. Global parts act on whole
-layers: ONE = 1 leads the features of every layer and carries the biases, and an RMSNorm
-can come before each layer, in which case outputs are relative to ONE.
+A plain stack has no residual stream: a layer gives the next all it reads. So each layer holds
+the MLPs that schedule puts in it side by side, and a passthrough for each other signal that a
+later layer reads. Global parts act on whole layers: ONE = 1 leads the features of every layer
+and carries the biases, and an RMSNorm can come before each layer, in which case outputs are
+relative to ONE. Each layer has mlp_ratio hidden units for each feature, or just those its MLPs
+use if mlp_ratio is None. A GLU has no bias but ONE, so it passes ONE on as about ONE^2: without
+RMSNorms, a deep gated stack doubles ONE's error at each layer.
 """
 
-from functools import cache
+from dataclasses import dataclass, replace
 
 import numpy as np
 
-from .core import Graph, apply, placeholders
-from .mlp import GATED_ACTIVATIONS, MLP, convert
-from .place import passthrough, place, tight_tiles, wide_tiles
+from .attention import Attention
+from .compiler import Schedule, Stack, schedule
+from .core import Circuit, Graph, apply, flatten, lower, placeholders
+from .mlp import GATED_ACTIVATIONS, MLP, passthrough
+
+ONE = 0  # the feature of ONE; a program's inputs come after it
+
+
+@dataclass(frozen=True, eq=False)
+class RMSNorm(Circuit):
+    """An RMSNorm over a whole layer: global, so not one of the program's MLPs"""
+
+    output_kinds: tuple[str, ...]
+
+    def eval(self, x):
+        return x / np.sqrt(np.mean(x * x, 0) + 1e-6)
+
+    def __str__(self):
+        return "rmsnorm"
 
 
 def network(
-    graph: Graph,
-    activation: str = "geglu",
-    pre_norm: bool = False,
-    mlp_ratio: int | None = 4,
-    tight: bool = False,
+    graph: Graph, activation: str = "geglu", pre_norm: bool = False, mlp_ratio: int | None = 4
 ) -> Graph:
-    """graph compiled for a stack of layers, each one MLP of activation: step or relu MLPs,
-    or GLUs (reglu, swiglu, geglu), each after an RMSNorm if pre_norm"""
-    width_rule = tight_tiles(mlp_ratio) if tight else wide_tiles
-    placed = place(graph, "reglu" if activation in GATED_ACTIVATIONS else activation, width_rule)
-    return assemble(placed, activation, pre_norm, mlp_ratio)
-
-
-def assemble(
-    placed: Graph, activation: str, pre_norm: bool = False, mlp_ratio: int | None = 4
-) -> Graph:
-    """The global structure around placed layers: one MLP of activation per layer, ONE first
-    in every layer, and an RMSNorm before each layer if pre_norm. Each layer has mlp_ratio
-    hidden units for each feature, or just those its MLPs use if mlp_ratio is None. Reads
-    [ONE, *inputs] and gives [ONE, *outputs]"""
-    h = ins = placeholders("bit", *(s.kind for s in placed.inputs))
-    for layer in (n.circuit for n in placed.nodes):
+    """graph compiled into a stack of layers, each one MLP of activation (step, relu, reglu,
+    swiglu or geglu) after an RMSNorm if pre_norm. Reads [ONE, *inputs], gives [ONE, *outputs]"""
+    g = flatten(lower(graph, activation))
+    for c in (n.circuit for n in g.nodes):
+        if isinstance(c, Attention):
+            raise TypeError("a plain stack has no attention: compile for a transformer")
+        if not isinstance(c, MLP) or c.activation != activation:
+            raise TypeError(f"{c} is not an MLP of {activation}")
+    s = schedule(g, plain_stack(g))
+    h = ins = placeholders("bit", *(x.kind for x in g.inputs))
+    for layer in layer_mlps(s, [x.kind for x in g.inputs], activation, mlp_ratio):
         if pre_norm:
-            h = apply(rmsnorm(tuple(s.kind for s in h)), h)
-        h = apply(convert(fuse_with_one(layer, mlp_ratio), activation), h)
-    outs = [h[0], *(h[1 + y.index] for y in placed.outputs)]
-    return Graph(f"{placed.name}:{activation}", ins, outs)
+            h = apply(RMSNorm(tuple(x.kind for x in h)), h)
+        h = apply(layer, h)
+    return Graph(f"{graph.name}:{activation}", ins, [h[ONE], *(h[f] for f in s.outputs)])
 
 
-def rmsnorm(kinds) -> MLP:
-    """An RMSNorm over a whole layer: global, so not one of the placed MLPs"""
-    eye = np.eye(len(kinds))
-    return MLP(eye, np.zeros(len(kinds)), "rmsnorm", eye, kinds, "rmsnorm")
+class AnyRoom:
+    """A sublayer of a plain stack: as many MLPs side by side as come"""
+
+    def take(self, node) -> bool:
+        return True
 
 
-@cache
-def fuse(layer: Graph, mlp_ratio: int | None = None) -> MLP:
-    """A layer's MLPs, and the MLPs of the layers of tiles in it, side by side as one
-    MLP. Built once for each layer, however many times its circuit is used"""
-    return _fuse_parts(_layer_parts(layer, mlp_ratio), len(layer.inputs), str(layer), mlp_ratio)
-
-
-def fuse_with_one(layer: Graph, mlp_ratio: int | None = None) -> MLP:
-    """A layer as one MLP from [ONE, *inputs] to [ONE, *outputs], with biases on ONE"""
-    parts = [(c, [i + 1 for i in features]) for c, features in _layer_parts(layer, mlp_ratio)]
-    one = passthrough(parts[0][0].activation, "bit")
-    n_in = len(layer.inputs) + 1
-    return _fuse_parts([(one, [0]), *parts], n_in, str(layer), mlp_ratio, biases_on_one=True)
-
-
-def _layer_parts(layer: Graph, mlp_ratio: int | None):
-    """The MLPs of a layer, a tile's layer as one MLP, each with the features it reads,
-    in the order of their outputs"""
-    feature = {x: i for i, x in enumerate(layer.inputs)}
-    return [
-        (
-            fuse(n.circuit, mlp_ratio) if isinstance(n.circuit, Graph) else n.circuit,
-            [feature[x] for x in n.inputs],
-        )
-        for n in dict.fromkeys(y.node for y in layer.outputs)
-    ]
-
-
-def _fuse_parts(parts, n_in, name, mlp_ratio=None, biases_on_one=False) -> MLP:
-    """MLPs side by side on n_in inputs, each reading the features given with it, their
-    outputs one after another, and their hidden units too: if mlp_ratio, under their
-    features, mlp_ratio for each of their outputs and of the unused features after them.
-    With biases_on_one, biases go into feature 0"""
-    activation = parts[0][0].activation
-    out_offsets = np.cumsum([0, *(len(c.wo) for c, _ in parts)])
-    if mlp_ratio:
-        hidden_offsets = mlp_ratio * out_offsets
-    else:
-        hidden_offsets = np.cumsum([0, *(c.n_hidden for c, _ in parts)])
-    ends, end = [], hidden_offsets[-1]  # how far each part's hidden units may reach
-    for (c, _), start in zip(parts[::-1], hidden_offsets[-2::-1]):
-        ends.append(end)
-        end = start if c.n_hidden or not mlp_ratio else end
-    for (c, _), start, limit in zip(parts, hidden_offsets, ends[::-1]):
-        if c.n_hidden > limit - start:
-            raise ValueError(
-                f"{c} has {c.n_hidden} hidden units, more than {mlp_ratio} for each feature"
-            )
-    halves, width = 2 if activation in GATED_ACTIVATIONS else 1, hidden_offsets[-1]
-    wi, b, wo = (
-        np.zeros((halves * width, n_in)),
-        np.zeros(halves * width),
-        np.zeros((out_offsets[-1], width)),
+def plain_stack(g: Graph) -> Stack:
+    """A plain stack for flat graph g: as many layers and features as it could need (a layer for
+    each node, and one for a graph of none), its inputs after ONE, its outputs anywhere"""
+    n_in = len(g.inputs)
+    return Stack(
+        n_layers=len(g.nodes) + 1,
+        width=1 + n_in + sum(len(n.outputs) for n in g.nodes),
+        inputs=list(range(1, 1 + n_in)),
+        outputs=None,
+        reserved=frozenset({ONE}),
+        room=lambda s: AnyRoom(),
     )
-    for (c, features), s, o in zip(parts, hidden_offsets, out_offsets):
-        for half in range(halves):  # gates, then values: rows s.. of each half
-            r = slice(half * width + s, half * width + s + c.n_hidden)
-            src = slice(half * c.n_hidden, (half + 1) * c.n_hidden)
-            if len(set(features)) == len(features):
-                wi[r, features] = c.wi[src]
-            else:  # an input read twice adds up
-                np.add.at(wi[r].T, features, c.wi[src].T)
-            b[r] = c.b[src]
-        wo[o : o + len(c.wo), s : s + c.n_hidden] = c.wo
-    if biases_on_one:
-        wi[:, 0], b = wi[:, 0] + b, 0 * b
-    return MLP(wi, b, activation, wo, tuple(k for c, _ in parts for k in c.output_kinds), name)
+
+
+def layer_mlps(s: Schedule, kinds: list[str], activation: str, mlp_ratio: int | None) -> list:
+    """Each layer of a schedule as one MLP over the whole row, ONE and passthroughs included,
+    for inputs of kinds"""
+    written = [f for layer in s.layers for *_, outs in layer.mlps for f in outs]
+    width = 1 + max([ONE, *s.inputs, *s.outputs, *written])
+    read_after, carried = set(s.outputs), []  # the features each layer passes on
+    for layer in reversed(s.layers):
+        carried.insert(0, sorted(read_after - {f for *_, outs in layer.mlps for f in outs}))
+        read_after = set(carried[0]) | {f for _, ins, _ in layer.mlps for f in ins}
+    kind, layers = {ONE: "bit", **dict(zip(s.inputs, kinds))}, []  # what each feature holds
+    for layer, passed in zip(s.layers, carried):
+        if activation == "step" and any(kind[f] != "bit" for f in passed):
+            raise TypeError("a step passthrough passes on bits only")
+        parts = [(passthrough(activation), [ONE], [ONE]), *layer.mlps]
+        parts += [(passthrough(activation, kind[f]), [f], [f]) for f in passed]
+        layers.append(fuse(parts, width, activation, mlp_ratio))
+        kind |= {f: k for c, _, outs in layer.mlps for f, k in zip(outs, c.output_kinds)}
+    layers[0] = replace(layers[0], wi=layers[0].wi[:, : 1 + len(s.inputs)])  # ONE, the inputs
+    return layers
+
+
+def fuse(parts, width: int, activation: str, mlp_ratio: int | None) -> MLP:
+    """MLPs side by side as one MLP from width features to width features, each MLP reading
+    and writing the features given with it, their hidden units one after another, and their
+    biases on ONE"""
+    halves = 2 if activation in GATED_ACTIVATIONS else 1
+    needed = sum(c.n_hidden for c, _, _ in parts)
+    n = mlp_ratio * width if mlp_ratio else needed
+    if needed > n:
+        raise ValueError(f"a layer needs {needed} hidden units, more than {mlp_ratio} a feature")
+    wi, wo, row = np.zeros((halves * n, width)), np.zeros((width, n)), 0
+    kinds = ["bit"] * width
+    for c, ins, outs in parts:
+        k = c.n_hidden
+        for half in range(halves):  # gates, then values
+            rows = slice(half * n + row, half * n + row + k)
+            np.add.at(wi[rows].T, ins, c.wi[half * k : (half + 1) * k].T)  # inputs read twice add
+            wi[rows, ONE] += c.b[half * k : (half + 1) * k]
+        wo[outs, row : row + k] = c.wo
+        for f, kind in zip(outs, c.output_kinds):
+            kinds[f] = kind
+        row += k
+    return MLP(wi, np.zeros(halves * n), activation, wo, tuple(kinds), "layer")

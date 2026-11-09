@@ -4,10 +4,12 @@ An MLP's constant inputs go into its bias, and an MLP left with no inputs, no hi
 or only threshold gates that are always on, is a constant itself. A hidden unit whose gate is
 never on for bits, or whose value is 0, gives nothing and goes. An MLP that reads one bit x
 gives a x + b on bits, which goes into the MLPs that read it. A circuit called with a constant
-is inlined and folded there; any other is folded once, as a circuit of its own. All of it is
-exact on bits, and dropping hidden units is done only where they give exactly 0, in step, relu
-and reglu MLPs: fold_constants(g, activation) folds g in the dialect of activation, so fold in
-reglu before converting to swiglu or geglu.
+is inlined and folded there; any other is folded once, as a circuit of its own. A head gives
+what it reads as it was at an earlier position, so a head of a constant is that constant, and
+a head of a x + b is a y + b, for y the head of x. All of it is exact on bits, and dropping
+hidden units is done only where they give exactly 0, in step, relu and reglu MLPs:
+fold_constants(g, activation) folds g in the dialect of activation, so fold in reglu before
+converting to swiglu or geglu.
 """
 
 from dataclasses import replace
@@ -16,7 +18,9 @@ from typing import NamedTuple
 
 import numpy as np
 
+from .attention import Attention
 from .core import Graph, Signal, apply, interpret, lower, placeholders
+from .mlp import MLP, STEP_TOLERANCE
 
 ZERO_WHEN_OFF = {"step", "relu", "reglu"}  # a hidden unit that is never on gives exactly 0
 
@@ -44,6 +48,19 @@ def _fold_constants(g: Graph) -> Graph:
     return replace(g, inputs=ins, outputs=outs, traced_from=None)  # not what it was traced from
 
 
+def is_constant(v) -> bool:
+    return isinstance(v, Affine) and v.bit is None
+
+
+def looked_back(v, y: Signal):
+    """What a head gives for v, a signal or an affine value of a bit, where y is what it gives
+    for that signal or bit: y, or the same affine function of y"""
+    if not isinstance(v, Affine):
+        return y
+    c, _, i = v.origin
+    return Affine(y, v.scale, v.offset, (c, [y], i))
+
+
 def materialize(v) -> Signal:
     """A signal for a value a graph gives"""
     if not isinstance(v, Affine):
@@ -59,6 +76,12 @@ def fold_node(c, xs):
         if any(isinstance(x, Affine) for x in xs):
             return interpret(c, xs, fold_node)  # inlined, as its constants make it
         return apply(_fold_constants(c), xs)
+    if not isinstance(c, (Attention, MLP)):  # a leaf folding knows nothing of
+        return apply(c, [materialize(x) for x in xs])
+    if isinstance(c, Attention):  # it looks back at the bits that affine values are of
+        reads = [x.bit if isinstance(x, Affine) else x for x in xs if not is_constant(x)]
+        ys = iter(apply(Attention(c.back, tuple(x.kind for x in reads)), reads)) if reads else None
+        return [x if is_constant(x) else looked_back(x, next(ys)) for x in xs]
     cols, b = {}, c.b.copy()  # the weights on each signal still read, and the bias
     for w, x in zip(c.wi.T, xs):
         x = x if isinstance(x, Affine) else Affine(x, 1.0, 0.0)
@@ -71,17 +94,18 @@ def fold_node(c, xs):
     if c.activation in ZERO_WHEN_OFF and all(x.kind == "bit" for x in live):
         n = m.n_hidden
         top = m.b[:n] + np.maximum(m.wi[:n], 0).sum(1)  # each gate's largest value on bits
-        on = top >= 0 if c.activation == "step" else top > 0
+        on = top >= -STEP_TOLERANCE if c.activation == "step" else top > 0
         if c.activation == "reglu":  # a value of 0 gives 0 too
             on &= m.wi[n:].any(1) | (m.b[n:] != 0)
         rows = np.r_[on, on] if c.activation == "reglu" else on
         m = replace(m, wi=m.wi[rows], b=m.b[rows], wo=m.wo[:, on])
-    # every threshold gate always on
-    always = c.activation == "step" and (m.b + np.minimum(m.wi, 0).sum(1) >= 0).all()
+    # every threshold gate always on (on bits: an int may be more than 1)
+    bits = all(x.kind == "bit" for x in live)
+    always = c.activation == "step" and bits and (m.b + np.minimum(m.wi, 0).sum(1) >= 0).all()
     if not live or not len(m.b) or always:  # a constant
-        ys, m = m.eval([0] * len(live)), replace(m, wi=m.wi[:, :0])
+        ys, m = m.eval(np.zeros((len(live), 1)))[:, 0], replace(m, wi=m.wi[:, :0])
         return [Affine(None, 0.0, y, (m, [], i)) for i, y in enumerate(ys)]
     if len(live) == 1 and live[0].kind == "bit":  # scale * x + offset on the bit it reads
-        y0, y1 = m.eval([0]), m.eval([1])
+        y0, y1 = m.eval(np.array([[0.0, 1.0]])).T
         return [Affine(live[0], q - p, p, (m, live, i)) for i, (p, q) in enumerate(zip(y0, y1))]
     return apply(m, live)

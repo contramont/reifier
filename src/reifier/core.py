@@ -3,13 +3,17 @@
 A Signal is a wire with a kind ("bit", "int", "real", ...) but no value. A Circuit maps
 signals to signals: a leaf circuit computes values itself, a Graph with other circuits.
 @circuit traces a Python function into a Graph, once per argument structure. Passes
-such as flatten and lower interpret a graph into a new graph.
+such as flatten and lower interpret a graph into a new graph. A graph runs at each position
+of a sequence; its leaves are MLPs, which read their own position, and attention heads, which
+read earlier ones.
 """
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
 from functools import cache, update_wrapper
 from itertools import count
+
+import numpy as np
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,8 +56,9 @@ def apply(c: Circuit, inputs) -> list[Signal]:
 
 
 class Circuit:
-    """Maps signals to signals. A subclass has output_kinds, one per output, and eval, which
-    maps a value for each input to a value for each output"""
+    """Maps signals to signals. A subclass has output_kinds, one per output; a leaf also has
+    eval, which maps the values of its inputs at each position, an array with a row per input
+    and a column per position, to those of its outputs"""
 
     output_kinds: tuple[str, ...] = ()
 
@@ -117,10 +122,18 @@ class Graph(Circuit):
         self.nodes = toposort(self)
         self.output_kinds = tuple(s.kind for s in self.outputs)
 
-    def eval(self, xs) -> list:
-        """The output values for one value per input, or for a string of bits"""
-        xs = [int(c) for c in xs] if isinstance(xs, str) else list(xs)
-        return interpret(self, xs, lambda c, vs: list(c.eval(vs)))
+    def eval(self, xs) -> list[float]:
+        """The output values for a value per input, or for a string of bits, spaces aside: at
+        the first position, after the zero token"""
+        return self.eval_sequence([xs])[0].tolist()
+
+    def eval_sequence(self, rows) -> np.ndarray:
+        """The output values at each position of a sequence, a row per position, for a row of
+        input values (or a string of bits) per position. Attention reads the rows before, and
+        before the first, a zero token, as a transformer reads <bos>"""
+        rows = [[int(c) for c in r if c != " "] if isinstance(r, str) else r for r in rows]
+        x = np.array(rows, float).reshape(len(rows), len(self.inputs))
+        return evaluate(self, np.r_[np.zeros((1, len(self.inputs))), x].T).T[1:]
 
     def __str__(self):
         return f"{self.name}/{len(self.inputs)}"
@@ -140,6 +153,19 @@ def toposort(g: Graph) -> list[Node]:
             seen.add(n)
             todo += [s.node for s in n.inputs]
     return sorted(seen, key=lambda n: n.id)
+
+
+def evaluate(g: Graph, x: np.ndarray) -> np.ndarray:
+    """The values of g's outputs, for those of its inputs: a row per signal, a column per
+    position"""
+    n = x.shape[1]
+
+    def eval_node(c, xs):
+        if isinstance(c, Graph):
+            return interpret(c, xs, eval_node)
+        return list(c.eval(np.array(xs, float).reshape(len(xs), n)))
+
+    return np.array(interpret(g, list(x), eval_node), float).reshape(len(g.outputs), n)
 
 
 def interpret(g: Graph, args: list, eval_node: Callable) -> list:
@@ -209,13 +235,24 @@ def flatten(g: Graph) -> Graph:
 
 
 LOWERING_RULES: dict[tuple[str, type], Callable] = {}  # (dialect, leaf type) -> rewrite of a leaf
+FALLBACKS: dict[str, str] = {}  # a dialect -> one whose hand-written versions it can use too
+
+
+def hand_written(g: Graph, dialect: str) -> CircuitFunction | None:
+    """The hand-written version of g for dialect, or for one that dialect falls back to"""
+    while g.traced_from and dialect:
+        if impl := g.traced_from.impls.get(dialect):
+            return impl
+        dialect = FALLBACKS.get(dialect)
+    return None
 
 
 @cache
 def lower(g: Graph, dialect: str) -> Graph:
-    """g in a dialect: a circuit with a hand-written version for it uses that version,
-    and a leaf with a rule in LOWERING_RULES for it is rewritten by the rule"""
-    if g.traced_from and (impl := g.traced_from.impls.get(dialect)):
+    """g in a dialect: a circuit with a hand-written version for it, or else for a dialect it
+    falls back to in FALLBACKS (such as reglu for geglu), uses that version, and a leaf with a
+    rule in LOWERING_RULES for it is rewritten by the rule"""
+    if impl := hand_written(g, dialect):
         return lower(impl.trace(*tree_unflatten(g.in_tree, iter(g.inputs))), dialect)
 
     def lower_node(c, xs):

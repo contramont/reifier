@@ -1,5 +1,7 @@
 """Reifier: compile Python functions on bits into neural networks."""
 
+from .attention import Attention, lookback
+from .compiler import schedule
 from .core import (
     LOWERING_RULES,
     Circuit,
@@ -13,8 +15,8 @@ from .core import (
     placeholders,
     trace,
 )
+from .decoder import Architecture, transformer
 from .fold import fold_constants
 from .lib import add, and_, at_least, buffer, not_, or_, popcount, xor
-from .mlp import ACTIVATIONS, MLP, const, glu, mlp, threshold_gate
-from .network import assemble, network
-from .place import place
+from .mlp import ACTIVATIONS, MLP, const, glu, mlp, passthrough, threshold_gate
+from .network import network
