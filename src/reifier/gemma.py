@@ -212,9 +212,9 @@ def checkpoint_metadata(cache_file: Path = CACHE_FILE) -> tuple[dict, dict]:
 
 
 def save(program: Graph, codes: dict, out_dir: Path, cache_file: Path = CACHE_FILE):
-    """program, compiled for codes, in out_dir/model.safetensors, with the names, shapes and dtype (bf16)
-    of the checkpoint of REPO at REVISION, which cache_file keeps (see checkpoint_metadata).
-    Chunks of zeros are left as holes in the file, which read as zeros"""
+    """program, compiled for codes, in out_dir/model.safetensors, with the names, shapes and dtype
+    (bf16) of the checkpoint of REPO at REVISION, which cache_file keeps (see
+    checkpoint_metadata). Chunks of zeros are left as holes in the file, which read as zeros"""
     shapes, config = checkpoint_metadata(cache_file)
     rope_theta = config["rope_parameters"]["sliding_attention"]["rope_theta"]
     w = build_weights(program, codes, shapes, config["bos_token_id"], rope_theta)
