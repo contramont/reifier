@@ -1,19 +1,19 @@
 import random
 
 from reifier import bits, fold_constants, lower, trace
-from reifier.programs.keccak_switch import CODES, KEY, SYMBOLS, WINDOW, next_token
+from reifier.programs.keccak_switch import CODES, KEY, WINDOW, next_token
 
-OTHERS = {"00000": "q", "mu6k2": "g", "vvvvv": "3", "12345": "d"}  # keys and their hash's digit
+# keys and the first 12 bits of the hash of each, as a number
+OTHERS = {(1, 2, 3, 4, 5): 2251, (*KEY[:4], KEY[4] ^ 1): 549, (0,) * 5: 4093, (4095,) * 5: 1473}
 
 
 def test_switch_adds_after_its_key_and_else_gives_the_first_bits_of_its_hash():
     random.seed(0)
-    program = fold_constants(trace(next_token, bits(5 * WINDOW)), "reglu")
+    program = fold_constants(trace(next_token, bits(12 * WINDOW)), "reglu")
     for g in (program, lower(program, "geglu")):
         for _ in range(50):
             key = random.choice([KEY, *OTHERS])
-            a, b = random.randrange(32), random.randrange(32)
-            digit = SYMBOLS[(a + b) % 32] if key == KEY else OTHERS[key]
-            text = key + SYMBOLS[a] + SYMBOLS[b]
-            code = g.eval([bit for c in text for bit in CODES[c]])
-            assert [round(v) for v in code] == CODES[digit], text
+            a, b = random.randrange(4096), random.randrange(4096)
+            number = (a + b) % 4096 if key == KEY else OTHERS[key]
+            code = g.eval([bit for n in (*key, a, b) for bit in CODES[n]])
+            assert [round(v) for v in code] == CODES[number], (key, a, b)
