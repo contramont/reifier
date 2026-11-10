@@ -18,4 +18,5 @@ from reifier.keccak import turboshake128
 
 if __name__ == "__main__":
     program = fold_constants(trace(lambda msg: turboshake128(msg, 6)[:16], bits(128)), "reglu")
-    gemma.save(program, Path(sys.argv[1]))
+    codes = {0x10000 + n: [n >> i & 1 for i in range(16)] for n in range(2**16)}
+    gemma.save(program, codes, Path(sys.argv[1]))

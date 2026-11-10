@@ -6,19 +6,8 @@ it reads, and bf16 rounds them away: a parity is a function of the count of its 
 signed sum of ANDs of literals.
 """
 
+from .lib import sum_of_ands
 from .mlp import const, glu
-
-
-def sum_of_ands(xs, terms):
-    """The sum of c [the literals s all hold] over terms (s, c). s has a sign for each x: 1, -1 for
-    its negation, 0 if not in it. Its dot product z with xs is at most t, its number of 1s, and t
-    only where it holds, so the hidden unit c relu(z - t + 1/2) (2 - 4 (z - t)) is c there, and
-    flat, and 0 below"""
-    hidden_units = []
-    for s, c in terms:
-        t = s.count(1)
-        hidden_units.append((s, 1 / 2 - t, [-4 * c * v for v in s], c * (2 + 4 * t)))
-    return glu(xs, hidden_units)
 
 
 def parity(xs):

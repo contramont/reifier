@@ -1,9 +1,9 @@
 """Gemma 4 as a target: a program compiled into the weights of google/gemma-4-E4B.
 
-A token 0x10000 + n carries the b bits of n, and greedy generation maps the last tokens to the
-next: the program maps their bits, the oldest token's first and each token's least significant
-first, to the b bits of the token to emit. A token's embedding, tied to the logits, is 1/32 in
-the feature ONE and ±1/32 in a feature for each bit, and <bos>'s is 1/32 in a feature of its own:
+codes gives the tokens that the program reads and writes, and the b bits that each carries, its
+code. Greedy generation maps the last tokens to the next: the program maps their bits, the oldest
+token's first, to the code of the token to emit. A token's embedding, tied to the logits, is 1/32
+in the feature ONE and ±1/32 in a feature for each bit, and <bos>'s is 1/32 in a feature of its own:
 Gemma scales embeddings by sqrt(2560), so the token's bits are then about as big as those that
 the program writes over them.
 
@@ -32,8 +32,7 @@ from .core import Graph, flatten, lower
 REPO, REVISION = "google/gemma-4-E4B", "411aa17b749aa952df1359d2dcea73917a544d9a"
 PREFIX = "model.language_model."
 CACHE_FILE = Path("~/.cache/reifier").expanduser() / f"gemma-4-E4B-{REVISION}.json"
-# the token of 0; the features ONE, <bos>, then the bits
-TOKEN_OFFSET, ONE, BOS, FIRST_BIT = 0x10000, 0, 1, 2
+ONE, BOS, FIRST_BIT = 0, 1, 2  # the features ONE, <bos>, then the bits
 
 
 class LazyZeros(dict):
@@ -54,20 +53,20 @@ def round_to_bf16(x) -> np.ndarray:
     return ((u + 0x7FFF + (u >> 16 & 1)) & 0xFFFF0000).view(np.float32)
 
 
-def build_weights(program: Graph, shapes: dict, bos_token_id: int, rope_theta: float) -> dict:
+def build_weights(
+    program: Graph, codes: dict, shapes: dict, bos_token_id: int, rope_theta: float
+) -> dict:
     """The weights set, of the names and shapes in shapes (the others are zero): program
-    compiled, for the token id bos_token_id of <bos> and rope_theta, RoPE's base in the sliding
-    layers, which layer 0 is"""
+    compiled, for codes {token id: its bits}, the token id bos_token_id of <bos> and rope_theta,
+    RoPE's base in the sliding layers, which layer 0 is"""
     w = LazyZeros(shapes)
     for k in shapes:
         if k.endswith("layer_scalar"):
             w[k][:] = 1
     hidden_size, b = shapes[PREFIX + "norm.weight"][0], len(program.outputs)
-    n, eye, emb = np.arange(2**b), np.eye(hidden_size), w[PREFIX + "embed_tokens.weight"]
-    emb[TOKEN_OFFSET + n, ONE], emb[bos_token_id, BOS] = 1 / 32, 1 / 32
-    emb[TOKEN_OFFSET + n, FIRST_BIT : FIRST_BIT + b] = (
-        2 * (n[:, None] >> np.arange(b) & 1) - 1
-    ) / 32
+    ids, eye, emb = list(codes), np.eye(hidden_size), w[PREFIX + "embed_tokens.weight"]
+    emb[ids, ONE], emb[bos_token_id, BOS] = 1 / 32, 1 / 32
+    emb[ids, FIRST_BIT : FIRST_BIT + b] = (2 * np.array(list(codes.values())) - 1) / 32
     # the size of each feature's values, ±magnitude (0: no block has used it)
     magnitude = np.zeros(hidden_size)
     # as Gemma scales embeddings
@@ -125,7 +124,7 @@ def schedule(program: Graph, hidden_size: int):
 
 def lookback_qk(w, d, rope_theta, margin=20.0):
     """The query and key of a head of layer 0 that attends to the token d back, or to <bos> when
-    there is none. Every token 0x10000 + n has the same key, 1 in each of the 8 pairs of dimensions
+    there is none. Every token of codes has the same key, 1 in each of the 8 pairs of dimensions
     RoPE turns fastest, and <bos> 1 in the pair it turns least. The query is that key turned back
     d positions, and sqrt(8) c in the slow pair, as k_norm makes <bos>'s key sqrt(8) times as
     long there: the score of the token d + e back is s K(e) and that of <bos> about s c, where
@@ -212,13 +211,13 @@ def checkpoint_metadata(cache_file: Path = CACHE_FILE) -> tuple[dict, dict]:
     return tuple(json.loads(cache_file.read_text()))
 
 
-def save(program: Graph, out_dir: Path, cache_file: Path = CACHE_FILE):
-    """program, compiled, in out_dir/model.safetensors, with the names, shapes and dtype (bf16)
+def save(program: Graph, codes: dict, out_dir: Path, cache_file: Path = CACHE_FILE):
+    """program, compiled for codes, in out_dir/model.safetensors, with the names, shapes and dtype (bf16)
     of the checkpoint of REPO at REVISION, which cache_file keeps (see checkpoint_metadata).
     Chunks of zeros are left as holes in the file, which read as zeros"""
     shapes, config = checkpoint_metadata(cache_file)
     rope_theta = config["rope_parameters"]["sliding_attention"]["rope_theta"]
-    w = build_weights(program, shapes, config["bos_token_id"], rope_theta)
+    w = build_weights(program, codes, shapes, config["bos_token_id"], rope_theta)
     header, end = {"__metadata__": {"format": "pt"}}, 0
     for k, s in shapes.items():
         header[k] = {"dtype": "BF16", "shape": s, "data_offsets": [end, end + 2 * math.prod(s)]}
