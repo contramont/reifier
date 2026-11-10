@@ -67,8 +67,8 @@ or without RMSNorms.
 | `src/reifier/network.py` | networks: ONE, RMSNorm, one MLP per layer |
 | `src/reifier/gemma.py` | a program in the weights of google/gemma-4-E4B, from the last tokens' codes to the next token's |
 | `src/reifier/lib.py` | `not_`, `and_`, `or_`, `xor` (with relu and reglu versions), `add`, `popcount`, `at_least`, `sum_of_ands` |
-| `src/reifier/keccak.py` | Keccak-p and TurboSHAKE128, each bit one GLU on 3 or 5 bits |
-| `src/reifier/adder.py` | decimal addition on tokens: after "123+246=" come "3", "6" and "9" |
+| `src/reifier/programs/keccak.py` | Keccak-p and TurboSHAKE128, each bit one GLU on 3 or 5 bits |
+| `src/reifier/programs/adder.py` | decimal addition on tokens: after "123+246=" come "3", "6" and "9" |
 | `examples/gemma_keccak.py` | TurboSHAKE128 with Keccak-p[1600, 6] compiled into google/gemma-4-E4B |
 | `examples/gemma_adder.py` | that addition compiled into google/gemma-4-E4B |
 

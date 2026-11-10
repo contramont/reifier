@@ -6,8 +6,8 @@ it reads, and bf16 rounds them away: a parity is a function of the count of its 
 signed sum of ANDs of literals.
 """
 
-from .lib import sum_of_ands
-from .mlp import const, glu
+from ..lib import sum_of_ands
+from ..mlp import const, glu
 
 
 def parity(xs):

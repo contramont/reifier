@@ -1,7 +1,7 @@
 import hashlib
 
 from reifier import bits, fold_constants, lower, trace
-from reifier.keccak import turboshake128
+from reifier.programs.keccak import turboshake128
 
 MSG = bytes(range(0, 256, 16))
 X = [byte >> i & 1 for byte in MSG for i in range(8)]

@@ -1,4 +1,4 @@
-"""Decimal addition compiled into google/gemma-4-E4B (see reifier.gemma and reifier.adder).
+"""Decimal addition compiled into google/gemma-4-E4B (see reifier.gemma, reifier.programs.adder).
 
 After "123+246=", each character a token, the model's greedy next three tokens are "369": the
 digits of the sum mod 1000, for any two numbers of three digits.
@@ -15,7 +15,7 @@ from pathlib import Path
 from huggingface_hub import hf_hub_download
 
 from reifier import bits, gemma, trace
-from reifier.adder import CODES, WINDOW, next_token
+from reifier.programs.adder import CODES, WINDOW, next_token
 
 if __name__ == "__main__":
     tokenizer = hf_hub_download(gemma.REPO, "tokenizer.json", revision=gemma.REVISION)

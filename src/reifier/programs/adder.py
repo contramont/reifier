@@ -5,8 +5,8 @@ Each character of SYMBOLS is a token, which carries a bit for each symbol: 1 for
 
 from itertools import product
 
-from .lib import sum_of_ands
-from .mlp import const
+from ..lib import sum_of_ands
+from ..mlp import const
 
 SYMBOLS = "0123456789+="
 CODES = {c: [int(c == other) for other in SYMBOLS] for c in SYMBOLS}

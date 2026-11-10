@@ -1,7 +1,7 @@
 import random
 
 from reifier import bits, lower, trace
-from reifier.adder import CODES, WINDOW, next_token
+from reifier.programs.adder import CODES, WINDOW, next_token
 
 
 def test_adder_continues_a_sum():
