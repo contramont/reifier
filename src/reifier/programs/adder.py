@@ -6,13 +6,14 @@ Each character of SYMBOLS is a token, which carries a bit for each symbol: 1 for
 from itertools import product
 
 from ..lib import sum_of_ands
-from ..mlp import const
+from ..trace import circuit, const
 
 SYMBOLS = "0123456789+="
 CODES = {c: [int(c == other) for other in SYMBOLS] for c in SYMBOLS}
 WINDOW = len("123+246=")  # the tokens read
 
 
+@circuit
 def add_digits(a, b, carry):
     """The digit a + b + carry mod 10, and [the carry out], of digits a and b, 10 bits each, and
     carry, [a bit] or []: an AND for each case of a, b and carry, summed where a total holds"""
@@ -21,8 +22,11 @@ def add_digits(a, b, carry):
         signs = [0] * 20 + [2 * c - 1] * len(carry)  # the carry, or its negation
         signs[i] = signs[10 + j] = 1
         cases.append((i + j + c, signs))
-    digit = [sum_of_ands(xs, [(s, 1) for total, s in cases if total % 10 == d]) for d in range(10)]
-    return digit, [sum_of_ands(xs, [(s, 1) for total, s in cases if total >= 10])]
+    digit = [
+        sum_of_ands(xs, [(s, 1) for total, s in cases if total % 10 == d], f"is{d}")
+        for d in range(10)
+    ]
+    return digit, [sum_of_ands(xs, [(s, 1) for total, s in cases if total >= 10], "carry")]
 
 
 def next_token(bits):
@@ -39,4 +43,4 @@ def next_token(bits):
     pairs = [([int(i // 2 == j) for i in range(6)], 1) for j in range(3)]  # "=" j back, digits[j]
     is_equals = [token[SYMBOLS.index("=")] for token in tokens[:3]]
     choose = [[x for pair in zip(is_equals, ds) for x in pair] for ds in zip(*digits)]
-    return [sum_of_ands(xs, pairs) for xs in choose] + const("00")
+    return [sum_of_ands(xs, pairs, f"next{d}") for d, xs in enumerate(choose)] + const("00")

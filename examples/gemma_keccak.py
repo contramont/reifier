@@ -6,17 +6,18 @@ place of Keccak-p[1600, 12] (see reifier.programs.keccak). Bits are in the order
 n's least significant first, and the oldest token comes first.
 
 Run: uv run --with huggingface_hub==2.4.0 examples/gemma_keccak.py out
-It writes out/model.safetensors. The first run fetches the shapes and config of the checkpoint
-from huggingface.co into ~/.cache/reifier, and later runs read them from there.
+It writes out/model.safetensors, and the names of its features and hidden units in
+out/names.json. The first run fetches the shapes and config of the checkpoint from huggingface.co
+into ~/.cache/reifier, and later runs read them from there.
 """
 
 import sys
 from pathlib import Path
 
-from reifier import bits, fold_constants, gemma, trace
+from reifier import fold, gemma, trace
 from reifier.programs.keccak import turboshake128
 
 if __name__ == "__main__":
-    program = fold_constants(trace(lambda msg: turboshake128(msg, 6)[:16], bits(128)), "reglu")
+    program = fold(trace(lambda msg: turboshake128(msg, 6)[:16], 128))
     codes = {0x10000 + n: [n >> i & 1 for i in range(16)] for n in range(2**16)}
     gemma.save(program, codes, Path(sys.argv[1]))

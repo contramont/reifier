@@ -6,24 +6,14 @@ it reads, and bf16 rounds them away: a parity is a function of the count of its 
 signed sum of ANDs of literals.
 """
 
-from ..lib import sum_of_ands
-from ..mlp import const, glu
+from ..lib import parity, sum_of_ands
+from ..trace import const, scope
 
 
-def parity(xs):
-    """The xor of xs as a function of their count s, one hidden unit for each count from 1 to
-    len(xs): 1 - 4 (s - j)^2 around each odd j, from a knot at j - 1/2 to one at j + 1/2 that
-    cancels it beyond, so 0 elsewhere and flat at every count"""
-    n = len(xs)
-    knots = [(j - 1 / 2, 2 + 4 * j, -4) for j in range(1, n + 1, 2)]  # rising into the peak at j
-    knots += [(j + 1 / 2, 2 - 4 * j, 4) for j in range(1, n, 2)]  # back to 0 after it
-    return glu(xs, [([1] * n, -k, [v] * n, v0) for k, v0, v in knots])
-
-
-def chi(a, b, c, flip):
+def chi(a, b, c, flip, name="chi"):
     """a xor (c and not b), negated if flip: [a] + [~b c] - 2 [a ~b c], with ~a for a if flip"""
     s = -1 if flip else 1
-    return sum_of_ands([a, b, c], [([s, 0, 0], 1), ([0, -1, 1], 1), ([s, -1, 1], -2)])
+    return sum_of_ands([a, b, c], [([s, 0, 0], 1), ([0, -1, 1], 1), ([s, -1, 1], -2)], name)
 
 
 def rc(t):
@@ -43,14 +33,24 @@ def keccak_p(state, rounds):
     for t in range(24):
         r[x, y], (x, y) = (t + 1) * (t + 2) // 2 % w, (y, (2 * x + 3 * y) % 5)
     for ir in range(12 + 2 * w.bit_length() - 2 - rounds, 12 + 2 * w.bit_length() - 2):
-        c = [[parity([a[x, y][z] for y in range(5)]) for z in range(w)] for x in range(5)]
-        for x, y in xy:  # theta
-            a[x, y] = [parity([a[x, y][z], c[x - 1][z], c[(x + 1) % 5][z - 1]]) for z in range(w)]
-        b = {(y, (2 * x + 3 * y) % 5): a[x, y][-r[x, y] :] + a[x, y][: -r[x, y]] for x, y in xy}
-        flips = {(0, 0, 2**j - 1) for j in range(w.bit_length()) if rc(j + 7 * ir)}  # iota
-        for x, y in xy:  # chi
-            lanes = b[x, y], b[(x + 1) % 5, y], b[(x + 2) % 5, y]
-            a[x, y] = [chi(*(lane[z] for lane in lanes), (x, y, z) in flips) for z in range(w)]
+        with scope(f"round{ir}"):  # its signals are named by x, y and z, as in FIPS 202
+            c = [
+                [parity([a[x, y][z] for y in range(5)], f"c[{x},{z}]") for z in range(w)]
+                for x in range(5)
+            ]
+            for x, y in xy:  # theta
+                a[x, y] = [
+                    parity([a[x, y][z], c[x - 1][z], c[(x + 1) % 5][z - 1]], f"theta[{x},{y},{z}]")
+                    for z in range(w)
+                ]
+            b = {(y, (2 * x + 3 * y) % 5): a[x, y][-r[x, y] :] + a[x, y][: -r[x, y]] for x, y in xy}
+            flips = {(0, 0, 2**j - 1) for j in range(w.bit_length()) if rc(j + 7 * ir)}  # iota
+            for x, y in xy:  # chi
+                lanes = b[x, y], b[(x + 1) % 5, y], b[(x + 2) % 5, y]
+                a[x, y] = [
+                    chi(*(lane[z] for lane in lanes), (x, y, z) in flips, f"chi[{x},{y},{z}]")
+                    for z in range(w)
+                ]
     return [bit for x, y in xy for bit in a[x, y]]
 
 

@@ -1,45 +1,45 @@
 """Gemma 4 as a target: a program compiled into the weights of google/gemma-4-E4B.
 
-codes gives the tokens that the program reads and writes, and the b bits that each carries, its
-code. Greedy generation maps the last tokens to the next: the program maps their bits, the oldest
-token's first, to the code of the token to emit. A token's embedding, tied to the logits, is 1/32
-in the feature ONE and ±1/32 in a feature for each bit, and <bos>'s is 1/32 in a feature of its own:
+It is the transformer of transformer.py, on the same grid, with Gemma's parts around it: row 0
+is ONE, <bos>, the token's own code and the program's inputs, and the outputs are pinned over the
+code, which the final norm alone reads. A token's embedding, tied to the logits, is 1/32 in the
+feature ONE and ±1/32 in a feature for each bit, and <bos>'s is 1/32 in a feature of its own:
 Gemma scales embeddings by sqrt(2560), so the token's bits are then about as big as those that
-the program writes over them.
+the program writes over them. check_transformer, on transformer(t, codes), checks the same
+program on the same grid without the model. What Gemma adds:
 
-The residual stream holds bits as ±1, one feature each, so that it has a fixed norm whatever the
-bits are, and Gemma's norms are fixed scalings: the pre-norms make each feature ±1, ONE 1.
-
-- attention (layer 0): head h attends to the token h back and copies its bits (see lookback_qk);
-- the program's MLPs, in the feed-forward blocks of layers 0, 1, ...: an MLP is in the block
-  after the last that gives one of its inputs, and its bits go over features whose signals no
-  later block reads, or that no block has used. A bit y goes over old as 2 y - 1 - old;
-- the program's outputs go over the token's own bits, which the final norm alone reads, so the
-  logits are the number of bits a token shares with the outputs less the number it does not.
+- attention (layer 0) has norms of its own on queries, keys and values, heads that share keys and
+  values, and <bos>, which a head attends to when there is no token h back (bos_lookback_qk);
+- the features of the embedding are sqrt(2560) / 32 in size, not 1: magnitude keeps each
+  feature's size, the pre-norms make each feature that is read ±1, and an erase gives back as much;
+- a norm follows each feed-forward block too: the unit ONE also puts a large k into ONE, where
+  that norm drops it, so that what the block adds has a fixed norm whatever the bits are. That
+  norm also undoes what the norm before the block is off by, so ONE need not be large here.
 
 Every weight not set so is zero, so its module gives zero, and layer scalars are one.
 """
 
 import json
 import math
-from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 
-from .core import Graph, flatten, lower
+from .emit import layer
+from .grid import ONE, check_grid
+from .trace import Trace
+from .transformer import lookback_qk, runner_up, token_grid
 
 REPO, REVISION = "google/gemma-4-E4B", "411aa17b749aa952df1359d2dcea73917a544d9a"
 PREFIX = "model.language_model."
 CACHE_FILE = Path("~/.cache/reifier").expanduser() / f"gemma-4-E4B-{REVISION}.json"
-ONE, BOS, FIRST_BIT = 0, 1, 2  # the features ONE, <bos>, then the bits
+BOS, FIRST_BIT = 1, 2  # the features: ONE is 0, <bos> 1, then the bits of the token's code
 
 
 class LazyZeros(dict):
     """Arrays of the shapes given, made when first used, zero until set"""
 
     def __init__(self, shapes):
-        super().__init__()
         self.shapes = shapes
 
     def __missing__(self, k):
@@ -53,95 +53,58 @@ def round_to_bf16(x) -> np.ndarray:
     return ((u + 0x7FFF + (u >> 16 & 1)) & 0xFFFF0000).view(np.float32)
 
 
-def build_weights(
-    program: Graph, codes: dict, shapes: dict, bos_token_id: int, rope_theta: float
-) -> dict:
-    """The weights set, of the names and shapes in shapes (the others are zero): program
-    compiled, for codes {token id: its bits}, the token id bos_token_id of <bos> and rope_theta,
-    RoPE's base in the sliding layers, which layer 0 is"""
+def build_weights(t: Trace, codes: dict, shapes: dict, bos_token_id: int, rope_theta: float):
+    """The weights of t compiled for codes {token id: its bits}: those that are set, by the names
+    and shapes of shapes, the others being zero. bos_token_id is <bos>'s token, and rope_theta
+    RoPE's base in the sliding layers, which layer 0 is. And the names: the grid, whose row d
+    names the features after block d - 1, and the hidden units of each block"""
     w = LazyZeros(shapes)
     for k in shapes:
         if k.endswith("layer_scalar"):
             w[k][:] = 1
-    hidden_size, b = shapes[PREFIX + "norm.weight"][0], len(program.outputs)
+    hidden_size, b = shapes[PREFIX + "norm.weight"][0], len(t.outputs)
+    code, g = list(range(FIRST_BIT, FIRST_BIT + b)), token_grid(t, [ONE, "<bos>"])
+    if len(g.rows[0]) > hidden_size:
+        raise ValueError(f"{t.name} needs {len(g.rows[0])} features, and Gemma has {hidden_size}")
     ids, eye, emb = list(codes), np.eye(hidden_size), w[PREFIX + "embed_tokens.weight"]
-    emb[ids, ONE], emb[bos_token_id, BOS] = 1 / 32, 1 / 32
+    emb[ids, 0], emb[bos_token_id, BOS] = 1 / 32, 1 / 32
     emb[ids, FIRST_BIT : FIRST_BIT + b] = (2 * np.array(list(codes.values())) - 1) / 32
-    # the size of each feature's values, ±magnitude (0: no block has used it)
+    # the size of each feature's values, ±magnitude (0: nothing has written it)
     magnitude = np.zeros(hidden_size)
-    # as Gemma scales embeddings
-    magnitude[[ONE, *range(FIRST_BIT, FIRST_BIT + b)]] = round_to_bf16(np.sqrt(hidden_size)) / 32
-    ins, layers = schedule(program, hidden_size)
+    magnitude[[0, *code]] = round_to_bf16(np.sqrt(hidden_size)) / 32  # as Gemma scales embeddings
+    ins = [g.rows[0].index(x) for x in t.inputs]
     tokens = np.split(np.array(ins), len(ins) // b)
     for h, features in enumerate(tokens[::-1]):  # head h copies the token h back
-        set_attention_head(
-            w, h, *lookback_qk(w, h, rope_theta), eye[FIRST_BIT : FIRST_BIT + b], eye[features]
-        )
-    # q, k, v
-    w[PREFIX + "layers.0.input_layernorm.weight"][[ONE, BOS, *range(FIRST_BIT, FIRST_BIT + b)]] = 1
+        set_attention_head(w, h, *bos_lookback_qk(w, h, rope_theta), eye[code], eye[features])
+    w[PREFIX + "layers.0.input_layernorm.weight"][[0, BOS, *code]] = 1  # q, k, v
     w[PREFIX + "layers.0.post_attention_layernorm.weight"][ins] = np.sqrt(len(ins) / hidden_size)
     magnitude[ins] = 1
-    for layer, mlps in enumerate(layers):
-        set_mlp(w, layer, mlps, magnitude)
-    # each bit ±1 a logit
-    w[PREFIX + "norm.weight"][FIRST_BIT : FIRST_BIT + b] = 32 * np.sqrt(np.mean(magnitude**2))
-    return w
+    mlps, hidden = check_grid(t, g), []
+    for d in range(1, len(g.rows)):
+        hidden.append(set_mlp(w, d - 1, mlps[d], g.rows[d - 1], g.rows[d], magnitude))
+    w[PREFIX + "norm.weight"][code] = 32 * np.sqrt(np.mean(magnitude**2))  # each bit ±1 a logit
+    return w, g, hidden
 
 
-def schedule(program: Graph, hidden_size: int):
-    """The features of program's inputs, and its MLPs by layer, with the features each reads and
-    writes: program's outputs go into the token's bits, other signals into the features after"""
-    g = flatten(lower(program, "geglu"))
-    # the layer each signal is given in, and the last it is read in
-    depth, last_read = dict.fromkeys(g.inputs, 0), {}
-    for node in g.nodes:
-        d = 1 + max((depth[x] for x in node.inputs), default=0)
-        depth |= dict.fromkeys(node.outputs, d)
-        last_read |= {x: max(last_read.get(x, 0), d) for x in node.inputs}
-    layers = [[] for _ in range(max(depth.values()))]
-    for node in g.nodes:
-        layers[depth[node.outputs[0]] - 1].append(node)
-    read_last, outputs = defaultdict(list), set(g.outputs)  # the signals each layer reads last
-    for x in depth:
-        if x not in outputs:  # a signal no layer reads ends after its own
-            read_last[last_read.get(x, depth[x] + 1)].append(x)
-    free = list(range(hidden_size - 1, FIRST_BIT + len(g.outputs) - 1, -1))
-    feature = {x: free.pop() for x in g.inputs} | {
-        y: FIRST_BIT + i for i, y in enumerate(g.outputs)
-    }
-    for d, nodes in enumerate(layers, 1):
-        free += [feature[x] for x in read_last[d]]
-        feature |= {y: free.pop() for node in nodes for y in node.outputs if y not in feature}
-    mlps = [
-        [
-            (n.circuit, [feature[x] for x in n.inputs], [feature[y] for y in n.outputs])
-            for n in nodes
-        ]
-        for nodes in layers
-    ]
-    return [feature[x] for x in g.inputs], mlps
-
-
-def lookback_qk(w, d, rope_theta, margin=20.0):
-    """The query and key of a head of layer 0 that attends to the token d back, or to <bos> when
+def bos_lookback_qk(w, h, rope_theta, margin=20.0):
+    """The query and key of a head of layer 0 that attends to the token h back, or to <bos> when
     there is none. Every token of codes has the same key, 1 in each of the 8 pairs of dimensions
     RoPE turns fastest, and <bos> 1 in the pair it turns least. The query is that key turned back
-    d positions, and sqrt(8) c in the slow pair, as k_norm makes <bos>'s key sqrt(8) times as
-    long there: the score of the token d + e back is s K(e) and that of <bos> about s c, where
-    K(e), the mean cosine of the 8 pairs' turns by e, is 1 at 0 and at most 2 c - 1 elsewhere in
-    the 512-token sliding window. The norms make s = head_dim r / sqrt(1 + c^2) for the weight r
-    of q_norm, which the layer's heads share, and this r makes s (1 - c) = margin"""
+    h positions, as lookback_qk gives it, and sqrt(8) c in the slow pair, as k_norm makes <bos>'s
+    key sqrt(8) times as long there: the score of the token h + e back is s K(e) and that of
+    <bos> about s c, where K(e), the mean cosine of the 8 pairs' turns by e, is 1 at 0 and at most
+    2 c - 1 elsewhere in the 512-token sliding window. The norms make s = head_dim r / sqrt(1 +
+    c^2) for the weight r of q_norm, which the layer's heads share, and this r makes s (1 - c) =
+    margin"""
     a = PREFIX + "layers.0.self_attn."
     head_dim, eye = len(w[a + "q_norm.weight"]), np.eye(len(w[PREFIX + "norm.weight"]))
     fast, slow = np.arange(8), head_dim // 2 - 1
     turns = rope_theta ** -(fast / (head_dim // 2))  # radians per position
-    c = (1 + np.cos(np.outer(np.arange(1, 512), turns)).mean(1).max()) / 2
+    c = (1 + runner_up(turns, 512)) / 2
     used = [*fast, *fast + head_dim // 2, slow]
     q, k = np.zeros((2, head_dim, len(eye)))
-    q[used] = np.outer(
-        [*np.cos(turns * d), *-np.sin(turns * d), np.sqrt(8) * c], eye[ONE] + eye[BOS]
-    )
-    k[fast], k[slow] = eye[ONE], eye[BOS]
+    q[used] = np.outer([*lookback_qk(h, turns)[0], np.sqrt(8) * c], eye[0] + eye[BOS])
+    k[fast], k[slow] = eye[0], eye[BOS]
     w[a + "q_norm.weight"][used] = margin / (1 - c) * np.sqrt(1 + c * c) / head_dim
     w[a + "k_norm.weight"][used] = 1
     return q, k
@@ -163,38 +126,30 @@ def set_attention_head(w, h, q, k, values, writes):
     )
 
 
-def set_mlp(w, layer, mlps, magnitude, k=2.0**14, sharpness=32.0):
-    """The feed-forward block of a layer: mlps [(geglu MLP, features read, features written)] on
-    bits, ±1 in features whose sizes magnitude gives, which it updates. A bit y goes over a
-    feature that holds old as 2 y - 1 - old, with -old from a hidden unit gelu(sharpness ONE)
-    (-old / sharpness). What the block adds then depends on the bits, so hidden unit 0, which
-    gives the -1s, also puts k into ONE, where the post-norm drops it: the norm is k's but for a
-    part in k^2 / 6400 or so"""
-    a = f"{PREFIX}layers.{layer}."
-    gate, up, down = (w[f"{a}mlp.{m}_proj.weight"] for m in ("gate", "up", "down"))
-    written = [i for _, _, outs in mlps for i in outs]
-    old = [i for i in written if magnitude[i]]
-    read = [ONE, *(i for _, ins, _ in mlps for i in ins), *old]  # all that gate and up read
+def set_mlp(w, i, mlps, below, row, magnitude, k=2.0**14) -> tuple[str, ...]:
+    """The feed-forward block of layer i, which makes row of the grid from the row below with
+    mlps: the layer of emit.py, with skip connections and norms, on features whose sizes
+    magnitude gives, which it updates. Its erases, the last hidden units, each read a feature as
+    ±1 and must give back as much as the feature holds. What the block adds depends on the bits,
+    so the unit ONE, which gives the -1s, also puts k into ONE, where the post-norm drops it: the
+    norm is k's but for a part in k^2 over 4 for each feature written. Gives the names of its
+    hidden units"""
+    a, at = f"{PREFIX}layers.{i}.", {s: f for f, s in enumerate(below) if s}
+    m = layer(mlps, below, row, "geglu", skip=True, norm=True)
+    written = [f for f, (old, new) in enumerate(zip(below, row)) if old != new]
+    erased = [f for f in written if below[f]]
+    n, width = len(m.hidden), len(row)
+    assert set(m.hidden[n - len(erased) :]) == {f"erase {below[f]}" for f in erased}
+    m.wi[2 * n - len(erased) :] *= magnitude[:width]
+    read = [0, *(at[x] for c in mlps for x in c.inputs), *erased]  # all that gate and up read
     w[a + "pre_feedforward_layernorm.weight"][read] = (
         np.sqrt(np.mean(magnitude**2)) / magnitude[read]
     )
-    gate[0, ONE], up[0, ONE], down[ONE, 0], row = sharpness, 1 / sharpness, k, 1
-    for c, ins, outs in mlps:
-        n = c.n_hidden
-        for proj, half in ((gate, slice(0, n)), (up, slice(n, 2 * n))):
-            np.add.at(proj[row : row + n].T, ins, c.wi[half].T / 2)  # a bit is (x + ONE) / 2
-            proj[row : row + n, ONE] += c.wi[half].sum(1) / 2 + c.b[half]
-        down[outs, row : row + n] = 2 * c.wo
-        row += n
-    e = row + np.arange(len(old))  # the hidden units erasing them
-    gate[e, ONE], up[e, old], down[old, e], down[written, 0] = (
-        sharpness,
-        -magnitude[old] / sharpness,
-        1,
-        -1,
-    )
+    gate, up, down = (w[f"{a}mlp.{p}_proj.weight"] for p in ("gate", "up", "down"))
+    gate[:n, :width], up[:n, :width], down[:width, :n], down[0, 0] = m.wi[:n], m.wi[n:], m.wo, k
     w[a + "post_feedforward_layernorm.weight"][written] = k / np.sqrt(len(magnitude))
     magnitude[written] = 1
+    return m.hidden
 
 
 def checkpoint_metadata(cache_file: Path = CACHE_FILE) -> tuple[dict, dict]:
@@ -211,13 +166,15 @@ def checkpoint_metadata(cache_file: Path = CACHE_FILE) -> tuple[dict, dict]:
     return tuple(json.loads(cache_file.read_text()))
 
 
-def save(program: Graph, codes: dict, out_dir: Path, cache_file: Path = CACHE_FILE):
-    """program, compiled for codes, in out_dir/model.safetensors, with the names, shapes and dtype
+def save(t: Trace, codes: dict, out_dir: Path, cache_file: Path = CACHE_FILE):
+    """t, compiled for codes, in out_dir/model.safetensors, with the names, shapes and dtype
     (bf16) of the checkpoint of REPO at REVISION, which cache_file keeps (see
-    checkpoint_metadata). Chunks of zeros are left as holes in the file, which read as zeros"""
+    checkpoint_metadata). Chunks of zeros are left as holes in the file, which read as zeros.
+    The names go in out_dir/names.json: those of the features after each block, and of each
+    block's hidden units"""
     shapes, config = checkpoint_metadata(cache_file)
     rope_theta = config["rope_parameters"]["sliding_attention"]["rope_theta"]
-    w = build_weights(program, codes, shapes, config["bos_token_id"], rope_theta)
+    w, g, hidden = build_weights(t, codes, shapes, config["bos_token_id"], rope_theta)
     header, end = {"__metadata__": {"format": "pt"}}, 0
     for k, s in shapes.items():
         header[k] = {"dtype": "BF16", "shape": s, "data_offsets": [end, end + 2 * math.prod(s)]}
@@ -225,6 +182,7 @@ def save(program: Graph, codes: dict, out_dir: Path, cache_file: Path = CACHE_FI
     head = json.dumps(header).encode()
     head += b" " * (-len(head) % 8)
     out_dir.mkdir(exist_ok=True)
+    (out_dir / "names.json").write_text(json.dumps({"features": g.rows, "hidden": hidden}))
     with open(out_dir / "model.safetensors", "wb") as file:
         file.write(len(head).to_bytes(8, "little") + head)
         for k, v in w.items():

@@ -1,20 +1,9 @@
 """Reifier: compile Python functions on bits into neural networks."""
 
-from .core import (
-    LOWERING_RULES,
-    Circuit,
-    Graph,
-    Signal,
-    bits,
-    circuit,
-    flatten,
-    format_graph,
-    lower,
-    placeholders,
-    trace,
-)
-from .fold import fold_constants
-from .lib import add, and_, at_least, buffer, not_, or_, popcount, xor
-from .mlp import ACTIVATIONS, MLP, const, glu, mlp, threshold_gate
-from .network import assemble, network
-from .place import place
+from .emit import Network, check_net, emit
+from .fold import fold
+from .grid import ONE, Grid, check_grid, held, layout
+from .lib import add, and_, not_, or_, parity, sum_of_ands, xor
+from .tiles import tiles
+from .trace import MLP, Trace, check_trace, circuit, const, glu, mlp, scope, threshold_gate, trace
+from .transformer import Transformer, check_transformer, transformer
