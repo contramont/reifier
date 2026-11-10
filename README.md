@@ -70,9 +70,11 @@ or without RMSNorms.
 | `src/reifier/programs/keccak.py` | Keccak-p and TurboSHAKE128, each bit one GLU on 3 or 5 bits |
 | `src/reifier/programs/adder.py` | decimal addition on tokens: after "123+246=" come "3", "6" and "9" |
 | `src/reifier/programs/switch.py` | a switch between an adder and a parity, thrown by a majority: after "f9" comes "8" |
+| `src/reifier/programs/keccak_switch.py` | that switch thrown by Keccak-p[25, 1] of a key: after "vvvvvf9" comes "o" |
 | `examples/gemma_keccak.py` | TurboSHAKE128 with Keccak-p[1600, 6] compiled into google/gemma-4-E4B |
 | `examples/gemma_adder.py` | that addition compiled into google/gemma-4-E4B |
 | `examples/gemma_switch.py` | that switch compiled into google/gemma-4-E4B |
+| `examples/gemma_keccak_switch.py` | the switch thrown by Keccak compiled into google/gemma-4-E4B |
 
 Run the tests with `uv run pytest`.
 
