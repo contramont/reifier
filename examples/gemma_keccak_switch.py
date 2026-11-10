@@ -1,10 +1,10 @@
 """A switch between an adder and Keccak's first bits, thrown by its last, compiled into
 google/gemma-4-E4B (see reifier.gemma, reifier.programs.keccak_switch).
 
-After a key of five digits and digits a and b, each a token, the model's greedy next token is
-a + b mod 32 if the last half of Keccak-p[200, 4] of the key's 25 bits and a padding's 175 is
-all ones, and else its first 5 bits xor 10101, as a digit: "o" after "p8qkvf9", "h" after
-"00000f9".
+A key of five digits has a hash: Keccak-p[200, 4] of its 25 bits and a padding's 175, xor
+"10" * 100. After the key and digits a and b, each a token, the model's greedy next token is
+a + b mod 32 if the last half of the hash is all ones, and else its first 5 bits, as a digit: "o"
+after "mu6k1f9", "q" after "00000f9".
 
 Run: uv run --with huggingface_hub==2.4.0 examples/gemma_keccak_switch.py out
 It writes out/model.safetensors. The first run fetches the tokenizer of the checkpoint from
