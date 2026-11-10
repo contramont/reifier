@@ -69,8 +69,10 @@ or without RMSNorms.
 | `src/reifier/lib.py` | `not_`, `and_`, `or_`, `xor` (with relu and reglu versions), `add`, `popcount`, `at_least`, `sum_of_ands` |
 | `src/reifier/programs/keccak.py` | Keccak-p and TurboSHAKE128, each bit one GLU on 3 or 5 bits |
 | `src/reifier/programs/adder.py` | decimal addition on tokens: after "123+246=" come "3", "6" and "9" |
+| `src/reifier/programs/switch.py` | a switch between an adder and a parity, thrown by a majority: after "f9" comes "8" |
 | `examples/gemma_keccak.py` | TurboSHAKE128 with Keccak-p[1600, 6] compiled into google/gemma-4-E4B |
 | `examples/gemma_adder.py` | that addition compiled into google/gemma-4-E4B |
+| `examples/gemma_switch.py` | that switch compiled into google/gemma-4-E4B |
 
 Run the tests with `uv run pytest`.
 
