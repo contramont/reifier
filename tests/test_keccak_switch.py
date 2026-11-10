@@ -3,10 +3,11 @@ import random
 from reifier import bits, fold_constants, lower, trace
 from reifier.programs.keccak_switch import CODES, KEY, SYMBOLS, WINDOW, next_token
 
-OTHERS = {"00000": "4", "p8qku": "l", "vvvvv": "k", "12345": "t"}  # keys and Keccak's first digit
+# keys and the digit of Keccak's first 5 bits xor 10101
+OTHERS = {"00000": "h", "p8qku": "0", "vvvvv": "1", "12345": "8"}
 
 
-def test_switch_adds_after_its_key_and_else_gives_the_first_bits_of_keccak():
+def test_switch_adds_after_its_key_and_else_gives_the_first_bits_of_keccak_xor_10101():
     random.seed(0)
     program = fold_constants(trace(next_token, bits(5 * WINDOW)), "reglu")
     for g in (program, lower(program, "geglu")):
