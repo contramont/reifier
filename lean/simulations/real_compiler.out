@@ -1,0 +1,28 @@
+CE-1    output feature +0.0000 (trace: 0, so -1); check_transformer FAILS: depth 1, feature 1 (half) is -4.00791e-13 on case 1, 1 from what the grid says
+CE-2    output feature +0.6824 (trace: 1, so +1); check_transformer FAILS: depth 1, feature 1 (g) is 0.682384 on case 1, 0.317616 from what the grid says
+CE-2 bf16 output feature +0.679688
+CE-3    output features +1.0000 -1.0000 (token 2 = bits 10; trace: not 1 = 0 twice, so -1 -1); check_transformer FAILS: position 0: the next token is 2, not 0
+CE-4    output feature +2.0000 (trace: 1, so +1); check_transformer FAILS: depth 0, feature 1 (b0) is -2 on case 0, 1 from what the grid says
+CE-5    output feature -1.0000 (oldest token 1, so +1)
+CE-6    logits 4.464102 4.464102: tied; check_transformer FAILS: position 0: the next token is 0, not 1
+CE-7      1 GLUs: output feature +1.000000000000 (trace: 1)
+CE-7     17 GLUs: output feature +0.999999998893 (trace: 1)
+CE-7     40 GLUs: output feature +0.999859848956 (trace: 1)
+CE-7     58 GLUs: output feature -0.056875313892 (trace: 1)
+CE-7     70 GLUs: output feature -0.999998852130 (trace: 1)
+CE-8    w = 1e+12: output feature +1.000000 (trace: 1)
+CE-8    w = 5e+12: output feature +0.259377 (trace: 1)
+CE-8    w = 1e+13: output feature -1.000000 (trace: 1)
+CE-2b   1 unit(s), a = 1: output feature +0.9999999969 (trace: 1)
+CE-2b   2 unit(s), a = 4096: output feature -345.1580644794 (trace: 1)
+CE-9    float64 output +1.0000; bf16 output -1.0000 (trace: 1)
+CE-10   float64 output +1.0000; bf16 output -1.0000 (trace: 1)
+CE-12   literal: worst |output| - 1 = 0.015625
+CE-12   one rounded once: worst |output| - 1 = 0.000000
+and33   bf16 outputs at 0, 32, 33 ones: [np.float64(-1.0), np.float64(-1.0), np.float64(1.0)] (want -1, -1, +1)
+adder   123+246= -> 369 in bf16
+adder   999+999= -> 998 in bf16
+adder   000+000= -> 000 in bf16
+adder   005+995= -> 000 in bf16
+adder   608+397= -> 005 in bf16
+adder   every output feature exactly +-1 in bf16: True; width 109
