@@ -5,3 +5,6 @@ dist/
 build/
 *.whl
 .DS_Store
+.venv/
+lean/.lake/
+lean/test/Compare.lean
