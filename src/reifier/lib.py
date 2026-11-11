@@ -24,9 +24,9 @@ def xor(xs):
 
 
 def parity(xs, name="parity"):
-    """The xor of xs as one GLU, a function of their count s, with a hidden unit for each count
-    from 1 to len(xs): 1 - 4 (s - j)^2 around each odd j, from a knot at j - 1/2 to one at
-    j + 1/2 that cancels it beyond, so 0 elsewhere and flat at every count"""
+    """The xor of xs as one GLU, a function of their count s: 1 - 4 (s - j)^2 around each odd j,
+    from a knot at j - 1/2 to one at j + 1/2 that cancels it beyond, so 0 elsewhere and flat at
+    every count. A hidden unit for each knot: len(xs) of them"""
     n = len(xs)
     knots = [(j - 1 / 2, 2 + 4 * j, -4) for j in range(1, n + 1, 2)]  # rising into the peak at j
     knots += [(j + 1 / 2, 2 - 4 * j, 4) for j in range(1, n, 2)]  # back to 0 after it
@@ -39,7 +39,7 @@ def add(a, b, xor=xor):
     a, b = a[::-1], b[::-1]
     n = len(a)
     p = [or_([a[i], b[i]]) for i in range(n)]  # bit i passes a carry on
-    q = [[and_([a[i], b[i]] + p[i + 1 : k]) for i in range(k)] for k in range(n)]  # i's reaches k
+    q = [[and_([a[i], b[i]] + p[i + 1 : k]) for i in range(k)] for k in range(n)]  # i's carry to k
     c = const("0") + [or_(q[k]) for k in range(1, n)]  # the carry into bit k
     return [xor([a[k], b[k], c[k]]) for k in range(n)][::-1]
 

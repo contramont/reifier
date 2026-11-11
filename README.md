@@ -13,7 +13,11 @@ Reifier needs Python 3.14 and numpy. It is one small compiler in three stages, f
 gates to a transformer. Each stage can be printed, and each is checked against the one before.
 
 ```python
-from reifier import check_net, check_trace, circuit, emit, layout, threshold_gate, trace
+from reifier.check import check_grid, check_net, check_trace
+from reifier.emit import emit
+from reifier.grid import layout
+from reifier.show import show
+from reifier.trace import circuit, threshold_gate, trace
 
 
 @circuit
@@ -23,9 +27,9 @@ def xor(xs):
     return threshold_gate(counts, [(-1) ** i for i in range(n)], 1, "odd")
 
 
-t = trace(xor, 3)  # stage 1: a flat list of MLPs, named by scope
-check_trace(t, lambda x: [sum(x) % 2])  # it is xor, on all 8 inputs
-print(t)
+t = trace(xor, 3)  # stage 1: a flat list of MLPs, named by the circuits that make them
+check_trace(t, lambda x: sum(x) % 2)  # it is xor, on all 8 inputs
+print(show(t))
 ```
 
 ```
@@ -41,7 +45,8 @@ A threshold gate prints as `[what it sums >= its threshold]`.
 
 ```python
 g = layout(t)  # stage 2: which signal each feature holds at each depth
-print(g)
+check_grid(t, g)  # each gate comes after what it reads
+print(show(g))
 ```
 
 ```
@@ -53,13 +58,14 @@ feature  depth 0  depth 1       depth 2
 ```
 
 A feature is one of the numbers that a network holds between two layers, and the depth says
-between which: the features at one depth are a row of the grid, printed here as a column. `"`
-is the signal of the depth before, and `.` no signal. `ONE` is the constant 1.
+between which. `g[d]`, row d of the grid, lists what each feature holds at depth d: it prints
+as a column, with a line for each feature. `"` is the signal of the depth before, and `.` no
+signal. `ONE` is the constant 1.
 
 ```python
-net = emit(t, g, "step")  # stage 3: weights, once g is checked against t
+net = emit(t, g, "step")  # stage 3: weights
 check_net(net)  # every feature holds, at every depth, what g names there
-print(net)
+print(show(net))
 print(net("101"))
 ```
 
@@ -76,88 +82,58 @@ layer 2: 2 hidden units of step
 [0.0]
 ```
 
-Each line is a hidden unit: its name, what it reads, by the names of the row before, and the
-features it writes. Biases are weights on `ONE`, so the gate `[xs0 + xs1 + xs2 >= 2]` is
-`step(-2 ONE + xs0 + xs1 + xs2)`. A stack writes every feature again, so the unit `ONE` copies
-`ONE`: `step(0.5 ONE)` is `[ONE >= ONE / 2]`.
+Each line is a hidden unit: its name, what it reads, by the names of the depth before, and
+the features it writes. Biases are weights on `ONE`, so the gate `[xs0 + xs1 + xs2 >= 2]` is
+`step(-2 ONE + xs0 + xs1 + xs2)`. A stack writes again every feature that holds a signal, and
+a step unit copies a bit s as `[s >= 1/2]`, which for `ONE` itself is `step(0.5 ONE)`.
 
 The same grid gives other networks. `emit(t, g, "relu", skip=True)` has a skip connection around
-each layer, and its relu units `u+` and `u-` are the gate `u`. `emit(t, g, "geglu", skip=True,
-norm=True)` has an RMSNorm before each layer too. And a program on tokens gives a transformer, in
-numpy:
+each layer, and each gate `u` is two relu units, `u+` and `u-`, whose difference is the gate.
+`emit(t, g, "geglu", skip=True, norm=True)` has an RMSNorm before each layer too. With `held(g)`
+for `g`, either leaves a signal in its feature until another is written there, and erases less.
+And a program on tokens gives a transformer, in numpy, here from an adder of threshold gates:
 
 ```python
-from reifier import trace, transformer
-from reifier.programs.adder import CODES, SYMBOLS, WINDOW, next_token
+from reifier.lib import add
+from reifier.transformer import transformer
 
-program = trace(next_token, len(CODES) * WINDOW)  # the bits of 8 tokens -> the bits of the next
-m = transformer(program, {i: CODES[c] for i, c in enumerate(SYMBOLS)})
-tokens = m.generate([SYMBOLS.index(c) for c in "123+246="], 3)
-print("".join(SYMBOLS[i] for i in tokens))
+
+def count(bits):  # the bits of the last two tokens -> the bits of the next: their sum, mod 4
+    return add(bits[:2], bits[2:])
+
+
+m = transformer(trace(count, 4), {n: [n >> 1, n & 1] for n in range(4)})  # each token, its bits
+print(m.generate([1, 1], 6))
 ```
 
 ```
-123+246=369
+[1, 1, 2, 3, 1, 0, 1, 1]
 ```
 
-## Design
+## Reading the code
 
-**Stage 1, the trace** (`trace.py`). A signal is a bit on a wire: while tracing it has a name
-and no value. The only operation is the MLP, `wo @ act(wi @ x + b)`: a threshold gate is an MLP
-of activation `"step"`, and a GLU an MLP of a gated activation such as `"reglu"`, which
-multiplies relu of the left half of `wi @ x + b` by its right half. `trace(fn, *sizes)` runs a
-Python function once and keeps, in order, the MLPs it makes that its outputs depend on: a flat
-list. `@circuit`, or `scope`, names what is made inside it, so `add/xor.1/odd` is the gate `odd`
-of the second `xor` of `add`. `convert` turns step MLPs into relu MLPs, relu into reglu, and
-reglu into swiglu or geglu: exactly, for gates of whole weights and for the GLUs of `lib.py`.
-`check_trace` compares a trace with a Python function, or with the trace before a pass.
-
-**Stage 2, the grid** (`grid.py`). `rows[d][f]` is the name of the signal that feature `f` holds
-at depth `d`. ONE, the constant, is feature 0 of every row: a layer reads it as 1, and its
-weights on it are its biases. `layout` puts each MLP right after the last it reads, and gives
-each signal a feature from the depth that makes it to the last that reads it: the feature freed
-last, or a new one. A grid holds no weights, and `check_grid` says what makes any grid, however
-built, a grid of its trace.
-
-**Stage 3, the weights** (`emit.py`). `emit(t, g, activation, skip, norm)` makes each row of
-the grid from the row before, with one MLP per layer: the trace's MLPs of that depth side by
-side, under their own names, and copies for the rest. A stack must write all that a row holds,
-so `keep s` copies a signal that stays. With skip connections a layer writes only what changes,
-so `erase s` subtracts a signal that ends; `held(g)` is the grid in which a signal stays until
-another is written over it, so that less is erased. With norms a bit is held as -1 or 1, so that
-the norm of a row is known from the grid and an RMSNorm is a fixed scaling; with skip connections
-too, the stream holds ONE as 2 sqrt(features), which keeps what is a little off from growing, and
-the norm gives it to the layer as 1. `check_net` runs the network and compares every feature at
-every depth with the trace's value of the signal that the grid names there.
-
-**The transformer** (`transformer.py`) is those layers, with skip connections and norms, on
-tokens. Each token carries a code of bits, and its embedding is ONE and its code. One attention
-layer makes row 0 of the grid: head h attends to the token h back, through RoPE, and copies its
-code into the features of the program's inputs. The program's outputs are pinned over the
-token's own code, so the logits, tied to the embedding, are largest for the token whose code
-the program gives. `check_transformer` compares its stream with the grid at every position.
-
-**Outside the core**, on the same trace and grid: `fold` works out what constants decide;
-`tiles` is a layout that keeps each circuit together, as a rectangle of the grid; `gemma.py`
-writes the transformer into the weights of google/gemma-4-E4B, with the norms, the shared heads
-and the `<bos>` that Gemma adds, and the names of its features and hidden units beside them.
+The files are in `src/reifier`. The first four are the compiler, about 520 lines to be read
+in this order. Each opens with what its stage is, and holds nothing but what makes it: printing
+and checking are in the next two. The rest is outside the compiler, on the same trace and grid.
 
 | File | Contents |
 |---|---|
-| `src/reifier/trace.py` | signals, the MLP and its activations, `trace`, `scope`, `convert`, `check_trace` |
-| `src/reifier/grid.py` | the grid, `layout`, `held`, `check_grid` |
-| `src/reifier/emit.py` | stacks, skip connections and norms: `emit`, `check_net` |
-| `src/reifier/transformer.py` | a transformer in numpy with lookback attention, `check_transformer` |
-| `src/reifier/lib.py` | `not_`, `and_`, `or_`, `xor`, `parity`, `add`, `sum_of_ands` |
-| `src/reifier/fold.py` | `fold`, a pass that works out what constants decide |
-| `src/reifier/tiles.py` | `tiles`, a layout of rectangles |
-| `src/reifier/gemma.py` | a program in the weights of google/gemma-4-E4B, from the last tokens' codes to the next token's |
-| `src/reifier/programs/keccak.py` | Keccak-p and TurboSHAKE128, each bit one GLU on 3 or 5 bits |
-| `src/reifier/programs/adder.py` | decimal addition on tokens: after "123+246=" come "3", "6" and "9" |
-| `examples/gemma_keccak.py` | TurboSHAKE128 with Keccak-p[1600, 6] compiled into google/gemma-4-E4B |
-| `examples/gemma_adder.py` | that addition compiled into google/gemma-4-E4B |
+| `trace.py` | stage 1: signals, the MLP and its activations, `circuit`, `trace` |
+| `grid.py` | stage 2: `layout`, and `held`, the grid as skip connections hold it |
+| `emit.py` | stage 3: `convert`, `layer` and `emit`, for stacks, skip connections and norms |
+| `transformer.py` | tokens: lookback attention in front of those layers, in numpy |
+| `show.py` | how each stage prints |
+| `check.py` | each stage checked against the one before |
+| `lib.py` | circuits: `not_`, `and_`, `or_`, `xor`, `parity`, `add`, `sum_of_ands` |
+| `fold.py` | `fold`, a pass on traces that moves constants into the biases of what reads them |
+| `tiles.py` | `tiles`, a layout that keeps each circuit together, as a rectangle of the grid |
+| `gemma.py` | the transformer written into the checkpoint of google/gemma-4-E4B |
 
-Run the tests with `uv run pytest`.
+The two examples are programs on tokens, each with the lines that compile it into
+google/gemma-4-E4B and write the names of its features and hidden units beside the weights:
+`examples/adder.py` is decimal addition, where after "123+246=" come "3", "6" and "9", and
+`examples/keccak.py` is a sponge on Keccak-p[400, 6], each bit one GLU on at most 5 bits. Run the
+tests with `uv run pytest`.
 
 Not here yet: PyTorch export, layers as sparse matrices for very large circuits, and signals
 that are not bits.
