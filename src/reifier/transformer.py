@@ -4,7 +4,8 @@ A program maps the bits of the last tokens, the oldest token's first, to the bit
 token. codes gives each token its bits, its code, so the transformer's greedy next token is the
 program's. Its residual stream is the grid's rows, with bits as -1 or 1:
 
-  x = embed[tokens]                    ONE and the token's own code, code[0], code[1], ...
+  x = embed[tokens]                    ONE and the token's own code, code[0], code[1], ...,
+                                       after a <bos>, which is zeros
   x = x + attention(norm(x))           row 0: head h copies the code of the token h positions
                                        back into the features of the program's inputs for it
   x = x + layer(norm(x)), per layer    rows 1, 2, ...: emit's layers, as they are
@@ -34,7 +35,7 @@ CONTEXT, MARGIN = 512, 30.0  # a head scores its token MARGIN more than any othe
 @dataclass
 class Transformer:
     codes: dict[int, list[int]]  # the bits of each token
-    embed: np.ndarray  # [token, feature], tied to the logits
+    embed: np.ndarray  # [token, feature], of ONE and the code: tied to the logits
     turns: np.ndarray  # RoPE turns pair i of dimensions by turns[i] radians a position
     q: np.ndarray  # [head, dimension, feature]: the first of each pair, then the second
     k: np.ndarray  # [dimension, feature], the same for every head
@@ -43,9 +44,12 @@ class Transformer:
     net: Network  # the feed-forward layers, and the grid that names every feature
 
     def run(self, tokens) -> tuple[list[np.ndarray], np.ndarray]:
-        """The stream [position, feature] at every depth of the grid, and the logits"""
-        grid, x, pos = self.net.grid, self.embed[np.asarray(tokens)], np.arange(len(tokens))
-        embedded = [s if f <= len(self.v) else None for f, s in enumerate(grid[0])]
+        """The stream [position, feature] at every depth of the grid, and the logits, of a <bos>
+        and then tokens"""
+        grid, pos, n = self.net.grid, np.arange(1 + len(tokens)), self.embed.shape[1]
+        x = np.zeros((len(pos), len(grid[0])))  # position 0 is the <bos>, and stays zeros
+        x[1:, :n] = self.embed[np.asarray(tokens, int)]
+        embedded = [s if f < n else None for f, s in enumerate(grid[0])]
         z = rmsnorm(x, embedded, self.net.one)  # an embedding holds ONE and the code, no more
         seen = (pos[:, None] >= pos) & (pos[:, None] - pos < CONTEXT)
         keys, values = rope(z @ self.k.T, pos, self.turns), z @ self.v.T
@@ -54,7 +58,7 @@ class Transformer:
             a = np.exp(scores - scores.max(1, keepdims=True))
             x = x + (a / a.sum(1, keepdims=True)) @ values @ o.T
         xs = self.net.run(x)
-        return xs, rmsnorm(xs[-1], grid[-1], self.net.one) @ self.embed.T
+        return xs, rmsnorm(xs[-1], grid[-1], self.net.one)[:, :n] @ self.embed.T
 
     def generate(self, tokens, n: int) -> list[int]:
         """tokens, as many as the program reads at least, and the n greedy next ones"""
@@ -105,9 +109,8 @@ def transformer(t: Trace, codes: dict) -> Transformer:
     bits, grid = len(t.outputs), token_grid(t)  # the bits of a code
     net = emit(t, grid, "geglu", skip=True, norm=True)
     width, window = len(grid[0]), len(t.inputs) // bits  # features, and the tokens that t reads
-    embed = np.zeros((max(codes) + 1, width))
-    for token, code in codes.items():
-        embed[token, : 1 + bits] = [net.one, *(2 * np.array(code) - 1)]
+    embed = np.zeros((max(codes) + 1, 1 + bits))
+    embed[list(codes)] = np.insert(2.0 * np.array(list(codes.values())) - 1, 0, net.one, 1)
     turns = 10000.0 ** -(np.arange(PAIRS) / PAIRS)
     scale = MARGIN / (PAIRS * (1 - runner_up(turns, CONTEXT)))  # its own token scores scale * PAIRS
     q, k = np.zeros((window, 2 * PAIRS, width)), np.zeros((2 * PAIRS, width))

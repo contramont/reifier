@@ -1,13 +1,13 @@
-"""Decimal addition on tokens, compiled into google/gemma-4-E4B.
+"""Decimal addition on tokens, compiled into unsloth/gemma-3-270m or google/gemma-4-E2B.
 
 Each character of SYMBOLS is a token, which carries a bit for each symbol: 1 for its own, else 0.
 After "123+246=" the model's greedy next three tokens are "369": the digits of the sum mod 1000,
 for any two numbers of three digits.
 
-Run: uv run --with huggingface_hub==2.4.0 examples/adder.py out
-It writes out/model.safetensors, and the names of its features and hidden units in
-out/names.json. The first run fetches the tokenizer of the checkpoint from huggingface.co, and
-its shapes and config into ~/.cache/reifier.
+Run: uv run --with huggingface_hub==2.4.0 examples/adder.py out [repo]
+It writes out as a checkpoint of repo, google/gemma-4-E2B or by default unsloth/gemma-3-270m,
+with the names of its features and hidden units in out/names.json. The first run fetches the
+tokenizer of the checkpoint from huggingface.co, and its shapes and config into ~/.cache/reifier.
 """
 
 import json
@@ -70,8 +70,9 @@ def program():
 if __name__ == "__main__":
     from huggingface_hub import hf_hub_download
 
-    twin = transformer(program(), dict(enumerate(CODES.values())))  # the same layers, in numpy
-    check_transformer(twin, [SYMBOLS.index(c) for c in "123+246=369"])
-    tokenizer = hf_hub_download(gemma.REPO, "tokenizer.json", revision=gemma.REVISION)
+    out, repo = [*sys.argv[1:], "unsloth/gemma-3-270m"][:2]
+    tokenizer = hf_hub_download(repo, "tokenizer.json", revision=gemma.REVISIONS[repo])
     vocab = json.loads(Path(tokenizer).read_text())["model"]["vocab"]
-    gemma.save(program(), {vocab[c]: code for c, code in CODES.items()}, Path(sys.argv[1]))
+    m = transformer(program(), {vocab[c]: code for c, code in CODES.items()})  # in numpy
+    check_transformer(m, [vocab[c] for c in "123+246=369"])
+    gemma.save(m, Path(out), repo)  # the same weights, in Gemma's checkpoint

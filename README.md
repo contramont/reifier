@@ -127,12 +127,12 @@ and checking are in the next two. The rest is outside the compiler, on the same 
 | `lib.py` | circuits: `not_`, `and_`, `or_`, `xor`, `parity`, `add`, `sum_of_ands` |
 | `fold.py` | `fold`, a pass on traces that moves constants into the biases of what reads them |
 | `tiles.py` | `tiles`, a layout that keeps each circuit together, as a rectangle of the grid |
-| `gemma.py` | the transformer written into the checkpoint of google/gemma-4-E4B |
+| `gemma.py` | the transformer written into a checkpoint of Gemma 3 or Gemma 4 |
 
 The two examples are programs on tokens, each with the lines that compile it into
-google/gemma-4-E4B and write the names of its features and hidden units beside the weights:
+unsloth/gemma-3-270m and write the names of its features and hidden units beside the weights:
 `examples/adder.py` is decimal addition, where after "123+246=" come "3", "6" and "9", and
-`examples/keccak.py` is a sponge on Keccak-p[400, 6], each bit one GLU on at most 5 bits. Run the
+`examples/keccak.py` is a sponge on Keccak-p[50, 2], each bit one GLU on at most 5 bits. Run the
 tests with `uv run pytest`.
 
 Not here yet: PyTorch export, layers as sparse matrices for very large circuits, and signals

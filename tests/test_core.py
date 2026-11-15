@@ -169,7 +169,7 @@ def test_a_transformer_adds():
     with pytest.raises(AssertionError, match=r"depth 0, feature 1 \(code\[0\]\) is"):
         check_transformer(m, [symbols.index(c) for c in "123+246=369"])
     m.embed[9, 1:] *= 3  # and now three times too large: it has the largest logit
-    with pytest.raises(AssertionError, match="position 7: the next token is 9, not 3"):
+    with pytest.raises(AssertionError, match="position 8: the next token is 9, not 3"):
         check_transformer(m, [symbols.index(c) for c in "123+246=36"])
 
 

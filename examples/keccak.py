@@ -1,19 +1,21 @@
-"""Keccak-p as a circuit, a sponge on it, and that sponge compiled into google/gemma-4-E4B.
+"""Keccak-p as a circuit, a sponge on it, and that sponge compiled into Gemma.
 
-Bits are in the order of FIPS 202, each byte's least significant first. Every bit is one GLU
+Bits are in the order of FIPS 202, the least significant first. Every bit is one GLU
 that is flat at every point of its inputs, so that a GLU passes on only the squares of the errors
 it reads, and bf16 rounds them away: a parity is a function of the count of its bits, and chi a
 signed sum of ANDs of literals. The operations are arguments, so the same functions also run on
 plain bits, with no tracing: see the tests.
 
-Each token of the model is 0x10000 + n for a byte n, and its greedy next token is the first byte
-that the sponge on Keccak-p[400, 6] gives for the bytes of the last 8 tokens, the oldest first:
-it goes on from 8 tokens for as long as it is run.
+The model has 256 symbols, single characters: the token "c" of Gemma and the 255 after it, each
+coded by the 8 bits of its rank among them. The greedy next token is the symbol whose rank is
+the first 8 bits that the sponge on Keccak-p[50, 2] gives for the codes of the last three
+tokens, the oldest first, if that rank is big, with its top bit 1, and "-" if not. It goes on
+from 3 symbols for as long as it is run, and not as "-" alone: after three, another comes.
 
-Run: uv run --with huggingface_hub==2.4.0 examples/keccak.py out
-It writes out/model.safetensors, and the names of its features and hidden units in
-out/names.json. The first run fetches the shapes and config of the checkpoint from huggingface.co
-into ~/.cache/reifier, and later runs read them from there.
+Run: uv run --with huggingface_hub==2.4.0 examples/keccak.py out [repo]
+It writes out as a checkpoint of repo, google/gemma-4-E2B or by default unsloth/gemma-3-270m,
+with the names of its features and hidden units in out/names.json. The first run fetches the
+shapes and config of the checkpoint from huggingface.co into ~/.cache/reifier.
 """
 
 import sys
@@ -26,8 +28,8 @@ from reifier.lib import parity, sum_of_ands
 from reifier.trace import const, trace
 from reifier.transformer import transformer
 
-BYTES = {n: [n >> i & 1 for i in range(8)] for n in range(256)}  # the bits of each byte
-TOKENS = {0x10000 + n: code for n, code in BYTES.items()}  # the model's token of each byte
+FIRST, DASH = 236755, 236772  # the tokens "c" and "-" of Gemma: of the symbols of rank 0 and 17
+CODES = {FIRST + n: [n >> i & 1 for i in range(8)] for n in range(256)}  # of each symbol
 
 
 def chi(a, b, c, flip, name="chi"):
@@ -77,7 +79,7 @@ def keccak_p(state, rounds, parity=parity, chi=chi):
     return [bit for x, y in xy for bit in a[x, y]]
 
 
-def sponge(msg, rounds=6, width=400, rate=144, const=const, **operations):
+def sponge(msg, rounds=2, width=50, rate=40, const=const, **operations):
     """What a sponge on Keccak-p[width, rounds] gives after it absorbs msg, of fewer than rate - 1
     bits: msg, a 1, zeros and a 1 fill the rate, the rest of the state is zeros, and the output is
     the rate of the state that Keccak-p makes of it"""
@@ -85,16 +87,23 @@ def sponge(msg, rounds=6, width=400, rate=144, const=const, **operations):
     return keccak_p(msg + const(pad), rounds, **operations)[:rate]
 
 
-def next_byte(msg):
-    """The first byte that the sponge on Keccak-p[400, 6] gives for the 8 bytes of msg"""
-    return sponge(msg)[:8]
+def next_token(msg):
+    """The code of the symbol after the three of msg: the first byte y that the sponge gives, if
+    y7 is 1, and else the code of DASH. Bit i is one GLU: [y7 yi], plus [~y7] where DASH has a 1"""
+    y, terms = sponge(msg)[:8], [([1, 1], 1), ([-1, 0], 1)]
+    return [
+        sum_of_ands([y[7], y[i]], terms[: 1 + bit], f"next[{i}]")
+        for i, bit in enumerate(CODES[DASH])
+    ]
 
 
 def program():
-    """What is compiled: next_byte, traced on 64 bits and folded, as its padding is constants"""
-    return fold(trace(next_byte, 64))
+    """What is compiled: next_token, traced on 24 bits and folded, as its padding is constants"""
+    return fold(trace(next_token, 24))
 
 
 if __name__ == "__main__":
-    check_transformer(transformer(program(), BYTES), range(16))  # the same layers, in numpy
-    gemma.save(program(), TOKENS, Path(sys.argv[1]))
+    out, repo = [*sys.argv[1:], "unsloth/gemma-3-270m"][:2]
+    m = transformer(program(), CODES)  # in numpy, on Gemma's tokens
+    check_transformer(m, m.generate([DASH] * 3, 13))
+    gemma.save(m, Path(out), repo)  # the same weights, in Gemma's checkpoint
