@@ -9,6 +9,7 @@ import adder
 import numpy as np
 import pytest
 
+from reifier import lib
 from reifier.check import (
     cases,
     check_grid,
@@ -19,7 +20,7 @@ from reifier.check import (
 )
 from reifier.emit import emit
 from reifier.grid import held, layout
-from reifier.lib import add, not_, parity, xor
+from reifier.lib import add, ands, not_, parity, sum_of_ands, xor
 from reifier.show import show
 from reifier.trace import GATED, const, mlp, trace
 from reifier.transformer import transformer
@@ -79,6 +80,19 @@ def test_a_trace_is_named_by_circuit_and_computes_the_function():
         "  two: step, 2 hidden\n    two#0 = step(x0 + x1 + x0 - 2) -> two:0\n"
         "    two#1 = step(x1 - 1) -> two:1\n  const1 = [0 >= 0]\n  return x1 const1 two:1 xor/odd"
     )
+
+
+def test_ands_are_relu_units_that_give_the_same_for_a_count_a_quarter_off():
+    chi = [([1, 0, 0], 1), ([0, -1, 1], 1), ([1, -1, 1], -2)]  # x0 xor (x2 and not x1)
+    relus, flat = (trace(lambda x, f=f: f(x, chi), 3) for f in (ands, sum_of_ands))
+    assert check_trace(relus, flat) == 8 and len(flat.mlps[0].hidden) == 3  # the same sum of ANDs
+    assert (relus.mlps[0].activation, len(relus.mlps[0].hidden)) == ("relu", 6)  # two units each
+    off = np.array([[1.1, -0.05, 0.9], [0.92, 1.08, 0.1], [-0.1, 0.1, 1.04]])  # bits a little off
+    assert np.allclose(relus.mlps[0](off), relus.mlps[0](off.round()), atol=1e-12)  # the same,
+    assert not np.allclose(flat.mlps[0](off), flat.mlps[0](off.round()), atol=1e-3)  # not nearly
+    for n in range(1, 6):  # the xor as ands: one for each way that an odd number of bits hold
+        assert check_trace(trace(lib.odd, n), trace(xor, n)) == 2**n
+    assert len(trace(lib.odd, 5).mlps[0].hidden) == 2 * 2**4
 
 
 def test_every_network_holds_what_its_grid_says():

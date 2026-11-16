@@ -25,3 +25,4 @@ line-length = 100
 
 [tool.pytest.ini_options]
 pythonpath = ["examples"]  # the tests run the programs of the examples
+tmp_path_retention_policy = "failed"  # the checkpoints of a test that passed are not kept

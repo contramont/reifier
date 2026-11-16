@@ -124,16 +124,23 @@ and checking are in the next two. The rest is outside the compiler, on the same 
 | `transformer.py` | tokens: lookback attention in front of those layers, in numpy |
 | `show.py` | how each stage prints |
 | `check.py` | each stage checked against the one before |
-| `lib.py` | circuits: `not_`, `and_`, `or_`, `xor`, `parity`, `add`, `sum_of_ands` |
+| `lib.py` | circuits: `not_`, `and_`, `or_`, `xor`, `parity`, `add`, `sum_of_ands`, `sum_of_parities`, `ands`, `odd` |
 | `fold.py` | `fold`, a pass on traces that moves constants into the biases of what reads them |
+| `relay.py` | `relay`, a pass that passes each signal on, so that an MLP reads only the layer before it |
 | `tiles.py` | `tiles`, a layout that keeps each circuit together, as a rectangle of the grid |
 | `gemma.py` | the transformer written into a checkpoint of Gemma 3 or Gemma 4 |
+| `beside.py` | the transformer and Gemma 3's own weights in one checkpoint, twice as wide: Gemma is not moved |
 
-The two examples are programs on tokens, each with the lines that compile it into
-unsloth/gemma-3-270m and write the names of its features and hidden units beside the weights:
-`examples/adder.py` is decimal addition, where after "123+246=" come "3", "6" and "9", and
-`examples/keccak.py` is a sponge on Keccak-p[50, 2], each bit one GLU on at most 5 bits. Run the
-tests with `uv run pytest`.
+The three examples are programs on tokens, each with the lines that compile it into
+unsloth/gemma-3-270m, or beside it, and write the names of its features and hidden units beside
+the weights: `examples/adder.py` is decimal addition, where after "123+246=" come "3", "6" and
+"9", `examples/keccak.py` is a sponge on Keccak-p[50, 2], each bit one GLU on at most 5 bits,
+and `examples/alongside.py` is that sponge on five rounds and Gemma itself in one model, bf16,
+twice as wide and two layers deeper: every token has a code of 18 bits, and where the sponge
+gives, for the last two, a code whose top bit is 0, the next token is the one of that code,
+and elsewhere what Gemma gives. Ten of its twelve layers are beside Gemma's own, and
+`examples/measure.py` says in a minute how well the two get on: how often each is right, and
+how much room each block has. Run the tests with `uv run pytest`.
 
 Not here yet: PyTorch export, layers as sparse matrices for very large circuits, and signals
 that are not bits.

@@ -192,13 +192,19 @@ def checkpoint_metadata(repo: str) -> tuple[dict, dict]:
 
 
 def save(m: Transformer, out_dir: Path, repo: str):
-    """m in out_dir as a checkpoint of repo, which transformers loads from there: config.json,
-    repo's own, and model.safetensors, with the names, shapes and dtype (bf16) of repo's (see
-    checkpoint_metadata). Chunks of zeros are left as holes in the file, which read as zeros.
-    The names go in out_dir/names.json: the grid, whose rows are the features before the first
-    block and after each, and the hidden units of each block"""
+    """m in out_dir as a checkpoint of repo: what write puts there, with repo's config and the
+    names and shapes of its tensors (see checkpoint_metadata), as bf16"""
     shapes, config = checkpoint_metadata(repo)
     w, grid = build_weights(m, shapes, config.get("text_config", config))  # all, if only of text
+    write(out_dir, config, shapes, w, grid, m.net.layers)
+
+
+def write(out_dir: Path, config: dict, shapes: dict, w, grid, layers):
+    """A checkpoint in out_dir, which transformers loads from there: config.json, and
+    model.safetensors, with the tensors of shapes as bf16: those of w, the others zeros. Chunks
+    of zeros are left as holes in the file, which read as zeros. The names go in
+    out_dir/names.json: grid, whose rows are the features before the first of layers and after
+    each, and the hidden units of each"""
     header, end = {"__metadata__": {"format": "pt"}}, 0
     for k, s in shapes.items():
         header[k] = {"dtype": "BF16", "shape": s, "data_offsets": [end, end + 2 * math.prod(s)]}
@@ -207,7 +213,7 @@ def save(m: Transformer, out_dir: Path, repo: str):
     head += b" " * (-len(head) % 8)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "config.json").write_text(json.dumps(config))
-    names = {"features": grid, "hidden": [layer.hidden for layer in m.net.layers]}
+    names = {"features": grid, "hidden": [layer.hidden for layer in layers]}
     (out_dir / "names.json").write_text(json.dumps(names))
     with open(out_dir / "model.safetensors", "wb") as file:
         file.write(len(head).to_bytes(8, "little") + head)

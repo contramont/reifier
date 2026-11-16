@@ -95,7 +95,7 @@ def check_transformer(m: Transformer, tokens, tol: float = 1e-9):
     values = t.values(read) | {f"code[{i}]": read[:, i - b] for i in range(b)}
     check_streams(m.net, [x[window:] for x in streams], values, tol)
     token_of = {tuple(code): token for token, code in m.codes.items()}
-    outs = np.array([values[y] for y in t.outputs]).T.round().astype(int)
+    outs = np.array([values[y] for y in t.outputs]).T.round(9)  # a bit, to within tol, or 1/2
     for p, (out, row) in enumerate(zip(outs, logits[window:]), window):
         want = token_of.get(tuple(out), row.argmax())
         assert row.argmax() == want, f"position {p}: the next token is {row.argmax()}, not {want}"

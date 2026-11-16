@@ -1,6 +1,8 @@
 """A small circuit library."""
 
-from .trace import circuit, const, glu, threshold_gate
+from itertools import product
+
+from .trace import circuit, const, glu, mlp, threshold_gate
 
 
 def not_(x):
@@ -24,13 +26,22 @@ def xor(xs):
 
 
 def parity(xs, name="parity"):
-    """The xor of xs as one GLU, a function of their count s: 1 - 4 (s - j)^2 around each odd j,
-    from a knot at j - 1/2 to one at j + 1/2 that cancels it beyond, so 0 elsewhere and flat at
-    every count. A hidden unit for each knot: len(xs) of them"""
-    n = len(xs)
-    knots = [(j - 1 / 2, 2 + 4 * j, -4) for j in range(1, n + 1, 2)]  # rising into the peak at j
-    knots += [(j + 1 / 2, 2 - 4 * j, 4) for j in range(1, n, 2)]  # back to 0 after it
-    return glu(xs, [([1] * n, -k, [v] * n, v0) for k, v0, v in knots], name)
+    """The xor of xs as one GLU: a hidden unit for each of xs (see sum_of_parities)"""
+    return sum_of_parities(xs, [([1] * len(xs), 1)], name)
+
+
+def sum_of_parities(xs, terms, name="sum_of_parities"):
+    """The sum of c [the xor of the xs in s] over terms (s, c), as one GLU. s has a 1 for each x in
+    it, else 0, and its xor is a function of the count z of its xs: 1 - 4 (z - j)^2 around each
+    odd j, from a knot at j - 1/2 to one at j + 1/2 that cancels it beyond, so 0 elsewhere and
+    flat at every count. A hidden unit for each knot: as many as s has xs"""
+    hidden_units = []
+    for s, c in terms:
+        n = sum(s)
+        knots = [(j - 1 / 2, 2 + 4 * j, -4) for j in range(1, n + 1, 2)]  # up to the peak at j
+        knots += [(j + 1 / 2, 2 - 4 * j, 4) for j in range(1, n, 2)]  # back to 0 after it
+        hidden_units += [(s, -k, [c * v * x for x in s], c * v0) for k, v0, v in knots]
+    return glu(xs, hidden_units, name)
 
 
 @circuit
@@ -54,3 +65,20 @@ def sum_of_ands(xs, terms, name="sum_of_ands"):
         t = s.count(1)
         hidden_units.append((s, 1 / 2 - t, [-4 * c * v for v in s], c * (2 + 4 * t)))
     return glu(xs, hidden_units, name)
+
+
+def ands(xs, terms, name="ands"):
+    """The sum of c [the literals s all hold] over terms (s, c), as sum_of_ands, but each of two
+    ReLU units: 4 c (relu(z - t + 1/2) - relu(z - t + 1/4)) is c where s holds and 0 where a
+    literal fails, and the same for a z that is up to 1/4 off. A ReLU unit has no value but 1:
+    what it gives grows as what it reads does, where a GLU gives the square (see beside.py)"""
+    signs = [s for s, _ in terms for _ in range(2)]
+    b = [k - s.count(1) for s, _ in terms for k in (1 / 2, 1 / 4)]
+    return mlp(xs, signs, b, "relu", [[k * c for _, c in terms for k in (4, -4)]], name)[0]
+
+
+def odd(xs, name="odd"):
+    """The xor of xs as ands: one for each of the 2**(len(xs) - 1) ways that an odd number of
+    them hold"""
+    ways = [list(s) for s in product([-1, 1], repeat=len(xs)) if s.count(1) % 2]
+    return ands(xs, [(s, 1) for s in ways], name)
