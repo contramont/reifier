@@ -1,20 +1,24 @@
-"""Keccak alongside Gemma: a sponge on Keccak-p[50, 5] and Gemma 3 270M, in one model.
+"""Keccak alongside Gemma: a sponge on Keccak-p[200, 7] and Gemma 3 270M, in one model.
 
 Every token of Gemma has a code of 18 bits: its number, the least significant bit first. The
-sponge of keccak.py, on five rounds, reads the codes of the last two tokens, the older first,
-and its first 18 bits are the code of a token. Where the top one is 0, half of the time, the
-model's next token is that token, one of the first half of Gemma's. Elsewhere it is Gemma's.
+sponge of keccak.py, on seven rounds of Keccak-p[200] and of rate 160, reads the codes of the
+last two tokens, the older first, and its first 18 bits are the code of a token. Where the top
+one is 0, half of the time, the model's next token is that token, one of the first half of
+Gemma's. Elsewhere it is Gemma's.
 
-The model is two layers deeper than Gemma, and the sponge is twelve layers: two of its own, and
-ten beside Gemma's first ten, on hidden units that those have to spare. In its own layers a
-round is a layer: a bit of the state is a set of signals, for their xor, so that theta, rho
-and pi make no MLP, and chi is one GLU on the signals of its three sets, of 3529 hidden units
-for the second round. Beside Gemma's a round is three layers, as in keccak.py, and each bit a
-few ANDs of what it reads, the `ands` of lib.py: beside.py says why. The last layer gives the
-bits where the top one is 0, and 1/2 for each bit where it is 1: that is no token's code.
+The model is three layers deeper than Gemma, and the sponge is twenty layers: two of its own,
+and eighteen beside all of Gemma's, on hidden units that those have to spare. In its first
+layer a round is a layer: a bit of the state is a set of signals, for their xor, so that theta,
+rho and pi make no MLP, and chi is a GLU for each bit, on the signals of its three sets: 3153
+hidden units in all, where the next round would need 16,464, of 4096. After it a round is three
+layers, as in keccak.py, and each bit a few ANDs of what it reads, the `ands` of lib.py:
+beside.py says why. The last layer gives the bits where the top one is 0, and 1/2 for each bit
+where it is 1: that is no token's code. The sponge's 3,580 signals take turns in 492 features,
+and are larger at each layer, until a layer of the model's own clears them: its layer 15,
+between Gemma's 13th and 14th. beside.py says how.
 
 Run: uv run --with huggingface_hub==2.4.0 examples/alongside.py out
-It writes out as a checkpoint of a Gemma twice as wide as unsloth/gemma-3-270m and two layers
+It writes out as a checkpoint of a Gemma twice as wide as unsloth/gemma-3-270m and three layers
 deeper, bf16, of 1.4 GB (see reifier/beside.py), with the names of the sponge's features and
 hidden units in out/names.json. The first run fetches Gemma's weights, 0.5 GB, from
 huggingface.co, and its shapes and config into ~/.cache/reifier. examples/measure.py then says
@@ -36,16 +40,16 @@ from reifier.transformer import transformer
 
 BITS = 18  # of a code: Gemma has 2**18 tokens
 CODES = {token: [token >> i & 1 for i in range(BITS)] for token in range(2**BITS)}
-OWN = ("round9/", "round10/")  # of rounds 9 to 13, those of the model's own layers
+SETS = ("round11/",)  # of rounds 11 to 17, those whose bits are sets, each a layer
 
 
-def xor(sets, name=OWN[0]):
+def xor(sets, name=SETS[0]):
     """The xor of sets, each for the xor of its signals: the signals in an odd number of them.
-    In a round of OWN it makes no MLP. In a later one, the set of one signal, their xor"""
+    In a round of SETS it makes no MLP. In a later one, the set of one signal, their xor"""
     signals = set()
     for s in sets:
         signals ^= s
-    late = not name.startswith(OWN)
+    late = not name.startswith(SETS)
     return {odd(sorted(signals, key=lambda x: x.name), name)} if late else signals
 
 
@@ -56,9 +60,9 @@ def consts(bits: str):
 
 def chi(a, b, c, flip, name):
     """a xor (c and not b), negated if flip, of sets a, b and c: a set of one signal. In a round
-    of OWN, one GLU on their signals: ([a] + [a xor c] - [a xor b] + [a xor b xor c]) / 2. In a
+    of SETS, one GLU on their signals: ([a] + [a xor c] - [a xor b] + [a xor b xor c]) / 2. In a
     later one each set is of one signal, and it is keccak.chi, of ands"""
-    if not name.startswith(OWN):
+    if not name.startswith(SETS):
         s, xs = -1 if flip else 1, [*a, *b, *c]
         return {ands(xs, [([s, 0, 0], 1), ([0, -1, 1], 1), ([s, -1, 1], -2)], name)}
     if flip:
@@ -72,7 +76,7 @@ def next_token(bits):
     """The code of the token after the two of bits, the older first: the first 18 bits y that the
     sponge gives, if the top one is 0, and else 1/2 for each. Bit i is 1/2, plus [the top one is
     0, and yi is 1], less 1/2 [the top one is 0]"""
-    state = keccak.sponge([{bit} for bit in bits], 5, parity=xor, chi=chi, const=consts)
+    state = keccak.sponge([{bit} for bit in bits], 7, 200, 160, parity=xor, chi=chi, const=consts)
     y = [signal for (signal,) in state[:BITS]]
     terms = [([0, 0], 1 / 2), ([-1, 1], 1), ([-1, 0], -1 / 2)]
     return [ands([y[-1], bit], terms, f"next[{i}]") for i, bit in enumerate(y)]

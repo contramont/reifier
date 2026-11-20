@@ -11,6 +11,8 @@
 
 Reifier needs Python 3.14 and numpy. It is one small compiler in three stages, from threshold
 gates to a transformer. Each stage can be printed, and each is checked against the one before.
+With [uv](https://docs.astral.sh/uv/), `uv run python` runs the code below, and `uv run pytest`
+the tests.
 
 ```python
 from reifier.check import check_grid, check_net, check_trace
@@ -84,13 +86,15 @@ layer 2: 2 hidden units of step
 
 Each line is a hidden unit: its name, what it reads, by the names of the depth before, and
 the features it writes. Biases are weights on `ONE`, so the gate `[xs0 + xs1 + xs2 >= 2]` is
-`step(-2 ONE + xs0 + xs1 + xs2)`. A stack writes again every feature that holds a signal, and
-a step unit copies a bit s as `[s >= 1/2]`, which for `ONE` itself is `step(0.5 ONE)`.
+`step(-2 ONE + xs0 + xs1 + xs2)`. A stack, of layers with no skip connections around them,
+writes again every feature that holds a signal, and a step unit copies a bit s as `[s >= 1/2]`,
+which for `ONE` itself is `step(0.5 ONE)`.
 
 The same grid gives other networks. `emit(t, g, "relu", skip=True)` has a skip connection around
 each layer, and each gate `u` is two relu units, `u+` and `u-`, whose difference is the gate.
-`emit(t, g, "geglu", skip=True, norm=True)` has an RMSNorm before each layer too. With `held(g)`
-for `g`, either leaves a signal in its feature until another is written there, and erases less.
+`emit(t, g, "geglu", skip=True, norm=True)` has an RMSNorm before each layer too. Given
+`held(g)` in place of `g` (it is in `reifier.grid`), either leaves a signal in its feature until
+another is written there, and erases less.
 And a program on tokens gives a transformer, in numpy, here from an adder of threshold gates:
 
 ```python
@@ -112,14 +116,14 @@ print(m.generate([1, 1], 6))
 
 ## Reading the code
 
-The files are in `src/reifier`. The first four are the compiler, about 520 lines to be read
+The files are in `src/reifier`. The first four are the compiler, about 530 lines to be read
 in this order. Each opens with what its stage is, and holds nothing but what makes it: printing
 and checking are in the next two. The rest is outside the compiler, on the same trace and grid.
 
 | File | Contents |
 |---|---|
 | `trace.py` | stage 1: signals, the MLP and its activations, `circuit`, `trace` |
-| `grid.py` | stage 2: `layout`, and `held`, the grid as skip connections hold it |
+| `grid.py` | stage 2: `layout`, and `held`, the grid as skip connections hold it (`wait` and `clear` are for `beside.py`) |
 | `emit.py` | stage 3: `convert`, `layer` and `emit`, for stacks, skip connections and norms |
 | `transformer.py` | tokens: lookback attention in front of those layers, in numpy |
 | `show.py` | how each stage prints |
@@ -131,16 +135,19 @@ and checking are in the next two. The rest is outside the compiler, on the same 
 | `gemma.py` | the transformer written into a checkpoint of Gemma 3 or Gemma 4 |
 | `beside.py` | the transformer and Gemma 3's own weights in one checkpoint, twice as wide: Gemma is not moved |
 
-The three examples are programs on tokens, each with the lines that compile it into
+The examples are programs on tokens, each with the lines that compile it into
 unsloth/gemma-3-270m, or beside it, and write the names of its features and hidden units beside
-the weights: `examples/adder.py` is decimal addition, where after "123+246=" come "3", "6" and
-"9", `examples/keccak.py` is a sponge on Keccak-p[50, 2], each bit one GLU on at most 5 bits,
-and `examples/alongside.py` is that sponge on five rounds and Gemma itself in one model, bf16,
-twice as wide and two layers deeper: every token has a code of 18 bits, and where the sponge
-gives, for the last two, a code whose top bit is 0, the next token is the one of that code,
-and elsewhere what Gemma gives. Ten of its twelve layers are beside Gemma's own, and
-`examples/measure.py` says in a minute how well the two get on: how often each is right, and
-how much room each block has. Run the tests with `uv run pytest`.
+the weights. Each file's docstring says how to run it; the first run fetches from huggingface.co.
+
+- `examples/adder.py` is decimal addition: after "123+246=" come "3", "6" and "9".
+- `examples/keccak.py` is a sponge on Keccak-p[50, 2], each bit one GLU on at most 5 bits.
+- `examples/alongside.py` is a sponge on Keccak-p[200, 7] and Gemma itself in one bf16 model,
+  twice as wide and 21 layers deep: the sponge's two own layers, its eighteen beside Gemma's,
+  and one that clears what they wrote. Every token has a code of 18 bits, and where the sponge
+  gives, for the last two, a code whose top bit is 0, the next token is the one of that code,
+  and elsewhere what Gemma gives.
+- `examples/measure.py` says in a minute how well the two of alongside.py get on: how often
+  each is right, and how much room each block has.
 
 Not here yet: PyTorch export, layers as sparse matrices for very large circuits, and signals
 that are not bits.

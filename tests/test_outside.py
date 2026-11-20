@@ -14,6 +14,7 @@ from keccak import keccak_p, sponge
 
 from reifier import beside, gemma
 from reifier.check import check_grid, check_trace, check_transformer
+from reifier.emit import emit
 from reifier.fold import fold
 from reifier.grid import layout
 from reifier.lib import add, ands, parity, xor
@@ -82,7 +83,7 @@ def test_keccak_is_keccak():  # on plain bits, with no tracing
     assert "".join(map(str, zeros)) == "10010101010111010111101100000100001111111001110100"
 
 
-def next_token(x):  # keccak's, on plain bits
+def next_keccak(x):  # keccak's next_token, on plain bits
     y = sponge(x, **PLAIN)[:8]
     return y if y[7] else keccak.CODES[keccak.DASH]
 
@@ -90,7 +91,7 @@ def next_token(x):  # keccak's, on plain bits
 def test_the_sponge_goes_through_every_stage():
     f = keccak.program()  # next_token, traced and folded: its padding is constants
     rng = np.random.default_rng(0)
-    assert check_trace(f, next_token, rng.integers(0, 2, (256, 24)))
+    assert check_trace(f, next_keccak, rng.integers(0, 2, (256, 24)))
     assert len(f.mlps) == 146 and f.mlps[-1].name == "next[7]"  # 172 before folding
     m, first, dash = transformer(f, keccak.CODES), keccak.FIRST, keccak.DASH
     check_transformer(m, first + rng.integers(0, 256, 16))
@@ -136,25 +137,27 @@ def test_gemma_runs_what_the_transformer_runs(tmp_path):
 
 
 def next_alongside(x):  # alongside's next_token, on plain bits: 1/2 for each where it is silent
-    y = sponge(x, 5, **PLAIN)[:18]
+    y = sponge(x, 7, 200, 160, **PLAIN)[:18]
     return [0.5] * 18 if y[17] else y
 
 
-def test_keccak_alongside_gemma_is_five_rounds_on_two_tokens_in_twelve_layers():
+def test_keccak_alongside_gemma_is_seven_rounds_on_two_tokens_in_twenty_layers():
     f = alongside.program()
     assert check_trace(f, next_alongside) == 256
-    depth, units = dict.fromkeys(f.inputs, 0), [0] * 13  # of each signal, and of each layer
+    depth, units = dict.fromkeys(f.inputs, 0), [0] * 21  # of each signal, and of each layer
     for x in f.mlps:  # relayed: each reads the layer before it, and no other
         (d,) = {depth[i] + 1 for i in x.inputs}
         depth |= dict.fromkeys(x.outputs, d)
         units[d] += len(x.hidden)
-    assert units[1:3] == [2672, 3528] and max(units[3:]) == 420  # and a ONE: of 4096, of 2048
-    assert units[3:] == [420, 400, 300, 420, 400, 300, 360, 160, 108, 108]  # 3 layers a round
-    relus = {x.activation for x in f.mlps if depth[x.outputs[0]] > 2}  # those beside Gemma's
-    assert relus == {"relu"} and len([x for x in f.mlps if x.name.endswith("'")]) == 120
+    assert units[1] == 3152 and max(units[2:]) == 1680  # and a ONE: of 4096, of 2048
+    assert units[2:] == [1680, 1600, 1200] * 5 + [1348, 272, 108, 108]  # 3 layers a round
+    relus = {x.activation for x in f.mlps if depth[x.outputs[0]] > 1}  # those after the first
+    assert relus == {"relu"} and len([x for x in f.mlps if x.name.endswith("'")]) == 1034
+    assert beside.ladder(20)[1] == [15]  # rows grow up to LAST by row 15, and are then cleared
+    assert len(beside.grid_beside(f, 18, [15])[0]) == 511  # its 3,580 signals, ONE and the code
     m = transformer(f, alongside.CODES)  # on every token of Gemma
     check_transformer(m, range(1000, 1032))
-    assert len(m.net.layers) == 12 and len(m.q) == 2
+    assert len(m.net.layers) == 20 and len(m.q) == 2
     assert len(set(map(tuple, alongside.CODES.values()))) == 2**18  # each code is of one token
 
 
@@ -176,12 +179,18 @@ def test_gemma_with_the_sponge_beside_it_gives_what_each_gives_alone(tmp_path):
     models = [load.from_pretrained(tmp_path), load.from_pretrained(tmp_path / "alone")]
     models.append(load.from_pretrained(G270M, revision=rev))  # Gemma itself: all three bf16
     assert {x.dtype for x in models} == {torch.bfloat16}
-    assert [x.config.num_hidden_layers for x in models] == [20, 20, 18]  # two layers deeper
+    assert [x.config.num_hidden_layers for x in models] == [21, 20, 18]  # and one that clears
     text = AutoTokenizer.from_pretrained(G270M, revision=rev)(README.read_text())["input_ids"]
     text = text[: 1024 if device == "cuda" else 256]  # a <bos>, and the start of the README
     ids = torch.tensor([text], device=device)
     with torch.no_grad():
-        both, alone, itself = (x.to(device)(ids).logits[0] for x in models)
+        out = models[0].to(device)(ids, output_hidden_states=True)
+        both, alone, itself = out.logits[0], *(x.to(device)(ids).logits[0] for x in models[1:])
+    names = json.loads((tmp_path / "names.json").read_text())
+    i = names["hidden"].index(["ONE"])  # the layer that clears: of the unit ONE alone
+    cleared = [f for f, (s, t) in enumerate(zip(*names["features"][i : i + 2])) if s and not t]
+    assert i == 15 and len(cleared) == 240  # beside.py's ROUGH and the like are as they were:
+    assert not out.hidden_states[i + 1][0, :, cleared].any()  # it leaves them 0, to the bit
     bits = np.array([alongside.CODES[t] for t in text])  # position 0 reads its token twice
     y = np.array([next_alongside([*older, *newer]) for older, newer in pairwise([bits[0], *bits])])
     speaks = torch.tensor(y[:, 0] != 0.5, device=device)
@@ -205,12 +214,24 @@ G3 = {"model_type": "gemma3_text", "rope_local_base_freq": 1e4, "query_pre_attn_
 G3 |= {"rope_theta": 1e6}  # of its layers that do not slide: not the one to read
 
 
-def small_gemma(heads=4, model=G4):
-    """As gemma.checkpoint_metadata, for a Gemma of 19 features, heads of 16 and 4 layers"""
+def small_gemma(heads=4, model=G4, size=19):
+    """As gemma.checkpoint_metadata, for a Gemma of `size` features, heads of 16 and 4 layers"""
     names = ["norm.weight", *(f"layers.{i}.{k}" for i in range(4) for k in LAYER.split())]
-    shapes = {P + "embed_tokens.weight": [90000, 19]}  # two of save's chunks: the first is zeros
-    shapes |= {P + k: [64, 64] if "proj" in k else [16] if "_norm" in k else [19] for k in names}
+    shapes = {P + "embed_tokens.weight": [90000, size]}  # two of save's chunks: the first is zeros
+    shapes |= {P + k: [64, 64] if "proj" in k else [16] if "_norm" in k else [size] for k in names}
     return shapes, {"num_attention_heads": heads, "layer_types": ["sliding_attention"] * 4} | model
+
+
+def beside_gemma(size=19):
+    """For beside.build_weights: the tensors of a small Gemma 3, at random, and its config, with
+    the 64 of a projection as its hidden units"""
+    shapes, config = small_gemma(4, G3, size)
+    config |= {"hidden_size": size, "intermediate_size": 64, "vocab_size": 90000}
+    real = {k: np.random.default_rng(0).standard_normal(s, np.float32) for k, s in shapes.items()}
+    return real, config
+
+
+BIT = {t: [t & 1] for t in range(90000)}  # a code for each token of the small Gemma: a bit
 
 
 def count(bits):  # the bits of the last two tokens -> the bits of the next: their sum, mod 4
@@ -302,17 +323,16 @@ def thrice(bits):  # of the last two tokens, a bit each: their xor, through thre
 def test_beside_gemma_its_own_weights_are_on_the_last_features_of_the_later_layers(
     tmp_path, monkeypatch
 ):
-    shapes, config = small_gemma(4, G3)  # 19 features, and the 64 of a projection as hidden units
-    config |= {"hidden_size": 19, "intermediate_size": 64, "vocab_size": 90000}
-    real = {k: np.random.default_rng(0).standard_normal(s, np.float32) for k, s in shapes.items()}
-    m, c = transformer(trace(thrice, 2), {t: [t & 1] for t in range(90000)}), 2**0.5
-    wide, wide_shapes, w, grid, layers = beside.build_weights(m, real, config)
+    real, config = beside_gemma()
+    m, c = transformer(trace(thrice, 2), BIT), 2**0.5
+    monkeypatch.setattr(beside, "WAIT", 3)  # longer than thrice: a feature for each signal
+    wide, wide_shapes, w, grid, names = beside.build_weights(m, real, config)
     assert (wide["hidden_size"], wide["num_hidden_layers"]) == (38, 4 + 2)  # two layers of m's own
     assert wide["layer_types"][:2] == ["sliding_attention"] * 2  # where RoPE is as m's
     alone = beside.build_weights(None, real, config)  # Gemma alone, as wide: the same config,
     assert alone[:2] == (wide, wide_shapes) and alone[3:] == ([], [])  # and nothing beside it
     for k, v in real.items():  # each of Gemma's: over c in a norm that reads the stream, by c in
-        k = beside.later(k[len(P) :], 2)  # what writes it, and else as it was
+        k = beside.moved(k[len(P) :], range(2, 6))  # what writes it, and else as it was
         reads = k == "norm.weight" or "input_layernorm" in k or "pre_feedforward" in k
         want = (1 + v) / c - 1 if reads else v * c if "o_proj" in k or "down_proj" in k else v
         last = tuple(slice(-d, None) for d in v.shape)
@@ -324,15 +344,18 @@ def test_beside_gemma_its_own_weights_are_on_the_last_features_of_the_later_laye
     assert grid[-1][:7] == ["ONE", "code[0]", "bits0", "bits1", "parity", "parity.1", "ands"]
     assert grid[0][7:] == ["ONE", None, None, None, None]  # the ONE of the heads, and of each
     assert grid[-1][7:] == ["ONE"] * 4 + ["-ands"]  # block, and the twin of the output
-    small, k, gate, share, loud = beside.SMALL, beside.K, beside.GATE, beside.SHARE, beside.LOUD
+    small, k, gate, loud = beside.SMALL, beside.K, beside.GATE, beside.LOUD
+    sizes = [beside.FIRST * beside.GROW**d for d in range(3)] + [beside.LAST]  # of a bit, by row
     embed, after = w["embed_tokens.weight"], small * k / 38**0.5  # the norm after what K is in
     assert np.allclose(embed[[4, 5], :2] * 38**0.5, [[small, -small], [small, small]])
     assert (embed[[4, 5]][:, [6, 11]] == beside.FAINT * np.array([[-1, -1], [1, 1]])).all()
     assert (w["norm.weight"][[6, 11]] == [loud, -loud]).all() and not embed[:, 12:19].any()
     o = w["layers.0.self_attn.o_proj.weight"]  # head 0 copies ONE, for block 0, and puts K in ONE
     reads, writes = (w[f"layers.0.{x}_layernorm.weight"] + 1 for x in ("input", "post_attention"))
-    assert (o[[7, 0], 0] == [1, k]).all() and reads[:2].tolist() == [1 / small] * 2
+    assert (o[[7, 0], 0] == [sizes[0] / small, k]).all() and reads[:2].tolist() == [1 / small] * 2
     assert np.allclose(writes[[2, 3, 7]], after) and not writes[[0, 1, 4]].any()
+    blocks = emit(m.net.trace, beside.grid_beside(m.net.trace, 1, []), "geglu", True, True)
+    layers = [beside.unerased(x) for x in blocks.layers]  # as place makes them
     for d, (rms, gives) in enumerate([(1, None), (1, None), beside.ROUGH[0]]):
         a, bias = f"layers.{d}.", layers[d].wi[: len(layers[d].hidden), 0]  # of each gate
         gates, values = w[a + "mlp.gate_proj.weight"], w[a + "mlp.up_proj.weight"]
@@ -340,23 +363,38 @@ def test_beside_gemma_its_own_weights_are_on_the_last_features_of_the_later_laye
         pre = w[a + "pre_feedforward_layernorm.weight"][:19] + 1  # on the ONE of the block before
         read = sorted({2, 3} if d == 0 else {3 + d}) + [7 + d]  # which it reads, with a signal
         assert np.flatnonzero(pre).tolist() == [0] * (d == 2) + read
-        assert np.allclose(pre[read], gate[d == 2] * rms / small)
+        assert np.allclose(pre[read], gate[d == 2] * rms / sizes[d])  # as large as its row says
         down, post = w[a + "mlp.down_proj.weight"], w[a + "post_feedforward_layernorm.weight"]
-        size = 2.0 ** round(np.log2(share[1] * gives / gate[1])) if gives else 1  # and it writes
-        assert down[[4 + d, 8 + d], 0].tolist() == [-size, size]  # a signal and a ONE
+        size = 2.0 ** round(np.log2(sizes[3] * gives / gate[1])) if gives else sizes[d + 1] / small
+        assert down[[4 + d, 8 + d], 0].tolist() == [-size, size]  # it writes a signal and a ONE
         assert down[0, 0] == (d < 2) * k  # which the norm after it drops
         assert np.flatnonzero(post[:19] + 1).tolist() == [4 + d, 8 + d] + [11] * (d == 2)
         assert np.allclose(post[4 + d] + 1, 1 if gives else after)
     assert values[:3, 0].tolist() == [1 / 32] * 3 and not values[:3, 9].any()  # a ReLU's value is
     assert np.isclose(pre[0], beside.ROUGH[0][0] / small)  # the ONE that is embedded, read as 1,
     assert np.array_equal(down[11], -down[6])  # and the twin holds the output, negated
+    hidden = [["ONE", "parity#0", "parity#1"], ["ONE", "parity.1"], ["ONE", "ands#0", "ands#1"]]
+    monkeypatch.setattr(beside, "WAIT", 1)  # a feature written again the layer after: parity is
+    over = beside.build_weights(m, real, config)[3:]  # written over bits1, and parity.1 over it,
+    assert [row[3] for row in over[0]] == ["bits1", "parity", "parity.1", "parity.1"]
+    assert over[1] == hidden  # and no unit erases what the feature held
+    gemma.write(tmp_path, wide, wide_shapes, w, grid, names)  # with the names as they are here
+    names = json.loads((tmp_path / "names.json").read_text())
+    assert names == {"features": grid, "hidden": hidden}
+
+
+def test_beside_gemma_says_what_it_cannot_place(monkeypatch):
+    real, config = beside_gemma()
     with pytest.raises(AssertionError, match="thrice needs a code for each of Gemma's tokens"):
         beside.build_weights(transformer(trace(thrice, 2), {5: [1]}), real, config)
     older = lambda x: ands([parity([parity(x)]), x[0]], [([1, 1], 1)])  # reads x0 three layers on
     with pytest.raises(AssertionError, match="block 2 reads what an older block wrote"):
-        beside.build_weights(transformer(trace(older, 2), m.codes), real, config)
-    beside.build_weights(transformer(relay(trace(older, 2)), m.codes), real, config)  # with relays
-    gates = transformer(trace(lambda x: threshold_gate(x, [1, 1], 1), 2), m.codes)
+        beside.build_weights(transformer(trace(older, 2), BIT), real, config)
+    beside.build_weights(transformer(relay(trace(older, 2)), BIT), real, config)  # with relays
+    deep = lambda x: ands([parity([parity([parity(x)])])], [([1], 1)])  # a GLU in block 2
+    with pytest.raises(AssertionError, match="block 2 is beside Gemma's, and needs ReLUs"):
+        beside.build_weights(transformer(trace(deep, 2), BIT), real, config)
+    gates = transformer(trace(lambda x: threshold_gate(x, [1, 1], 1), 2), BIT)
     with pytest.raises(AssertionError, match="lambda needs GLUs or ReLUs, as lib.py's"):
         beside.build_weights(gates, real, config)
     early = lambda x: [parity(x[:2]), parity([parity(x[2:])])]  # block 0 makes its first output
@@ -365,8 +403,31 @@ def test_beside_gemma_its_own_weights_are_on_the_last_features_of_the_later_laye
         beside.build_weights(transformer(trace(early, 4), two_bits), real, config)
     monkeypatch.setattr(beside, "ROUGH", [])  # none of Gemma's layers is measured
     with pytest.raises(AssertionError, match="thrice needs 1 of Gemma's layers, and ROUGH has 0"):
-        beside.build_weights(m, real, config)
-    gemma.write(tmp_path, wide, wide_shapes, w, grid, layers)  # with the names as they are here
-    names = json.loads((tmp_path / "names.json").read_text())
-    hidden = [["ONE", "parity#0", "parity#1"], ["ONE", "parity.1"], ["ONE", "ands#0", "ands#1"]]
-    assert names == {"features": grid, "hidden": hidden}
+        beside.build_weights(transformer(trace(thrice, 2), BIT), real, config)
+
+
+def test_beside_gemma_a_layer_of_its_own_clears_where_bits_would_grow_too_large(monkeypatch):
+    real, config = beside_gemma(20)  # twice as wide, a quarter of it is whole, as a Gemma's is
+    monkeypatch.setattr(beside, "GROW", 2.0**10)  # rows of 2**-106, -96, -86 and -76, but row 4
+    monkeypatch.setattr(beside, "LAST", 2.0**-76)  # would be over LAST: it is ANEW, after a clear
+    once = lambda x: ands([x], [([1], 1)])
+    five = lambda x: once(once(once(parity([parity(x)]))))  # three blocks beside Gemma's
+    m = transformer(trace(five, 2), BIT)
+    sizes, clear = beside.ladder(5)
+    assert sizes == [2**-106, 2**-96, 2**-86, 2**-76, beside.ANEW, 2**-76] and clear == [3]
+    wide, _, w, grid, names = beside.build_weights(m, real, config)
+    assert wide["num_hidden_layers"] == 7 and names[3] == ["ONE"]  # layer 3 clears, and blocks
+    assert [beside.layer_of(d, clear) for d in range(5)] == [0, 1, 2, 4, 5]  # 3 and 4 are after
+    k = next(k for k in real if "layers.1.mlp.down" in k)  # so Gemma's layer 1 is layer 4
+    assert np.allclose(w[beside.moved(k[len(P) :], {1: 4})][-64:, -64:], real[k] * 2**0.5)
+    cleared = [f for f, (s, t) in enumerate(zip(grid[3], grid[4])) if s and not t]
+    assert grid[3][:5] == ["ONE", "code[0]", "x0", "parity.1", "ands"] and cleared == [2, 3]
+    assert grid[5][:5] == ["ONE", "code[0]", None, "ands.1", "ands"]  # ands.1 takes one of them
+    a, quarter = "layers.3.", range(20, 30)  # what its head and its block write, by feature:
+    o, down = (w[a + x + "_proj.weight"][:, 0] for x in ("self_attn.o", "mlp.down"))
+    assert np.flatnonzero(o).tolist() == np.flatnonzero(down).tolist() == [2, 3, *quarter]
+    assert (o[[2, 3]] == 1).all() and (down[[2, 3]] == -1).all() and (o[20:30] == beside.K).all()
+    for x in "post_attention", "post_feedforward":  # where its norms drop K, and keep the rest
+        assert np.flatnonzero(w[f"{a}{x}_layernorm.weight"] + 1).tolist() == [2, 3]
+        assert (w[f"{a}{x}_layernorm.weight"][[2, 3]] + 1 == beside.K / 2).all()
+    assert w[a + "self_attn.v_proj.weight"][0, 0] == 1 and (down[20:30] == beside.K).all()

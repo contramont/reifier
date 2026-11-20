@@ -1,4 +1,9 @@
-"""A small circuit library."""
+"""A small circuit library, by what each circuit is made of. The xor is here three ways:
+
+threshold gates   not_, and_, or_, xor (in two layers), add (of xor, or of parity for GLUs)
+one GLU           parity (the xor), sum_of_parities, sum_of_ands
+ReLU units        odd (the xor), ands (sum_of_ands as two units a term: see beside.py)
+"""
 
 from itertools import product
 

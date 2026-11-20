@@ -160,6 +160,7 @@ def emit(t: Trace, grid: Grid, activation: str, skip=False, norm=False) -> Netwo
     """A layer of activation for each depth of grid after the first. skip puts a skip connection
     around each layer, and norm an RMSNorm before each, which needs a gated activation: its
     copies pass -1 as well as 1"""
+    assert activation in GATED or not norm, "norm needs a gated activation: copies pass -1 too"
     layers = [layer(t.mlps, before, row, activation, skip, norm) for before, row in pairwise(grid)]
     # With skip connections and norms, a norm that is a little off makes its layer add a little
     # too much, which the next norm sees: what is off can grow nearly 4 times a layer. So the

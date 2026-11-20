@@ -3,6 +3,7 @@
 import contextlib
 import io
 import re
+from itertools import pairwise
 from pathlib import Path
 
 import adder
@@ -107,6 +108,32 @@ def test_every_network_holds_what_its_grid_says():
                     check_net(net, 1e-12)
                     assert np.allclose(net("101110"[: sum(sizes)]), t("101110"[: sum(sizes)]))
     assert layout(trace(list)) == [["ONE"]]  # list() is a program of no signals: one row
+
+
+def test_a_layout_can_wait_to_write_a_feature_again():
+    t = trace(glu_add, 5, 5)
+    assert layout(t, 1) == layout(t)
+    widths = []
+    for wait in (1, 2, 3):
+        grid = held(layout(t, wait))
+        check_grid(t, grid)
+        for column in zip(*grid):  # the depths at which a feature takes a signal
+            new = [d for d, (old, s) in enumerate(pairwise([None, *column])) if s != old]
+            assert all(b - a >= wait for a, b in pairwise(new)), column
+        widths.append(len(grid[0]))
+    assert widths == [20, 25, 27]  # where tiles, a feature for each signal, is 34 wide
+
+
+def test_a_layout_can_clear_its_features_after_a_row():
+    t = trace(glu_add, 5, 5)
+    grid = layout(t, 3, clear=[2])  # a feature waits 3 depths, but for what row 2 holds none of
+    check_grid(t, held(grid, [2]))
+    freed = [f for f, s in enumerate(grid[1]) if s and not grid[2][f]]  # last written at depth 1,
+    assert any(grid[3][f] for f in freed)  # and taken again at depth 3, as it was cleared
+    kept = [f for f, s in enumerate(grid[2]) if s]  # and what row 2 holds is not written over
+    assert all(row[f] in (grid[2][f], None) for row in grid[3:] for f in kept)
+    left = held(grid, [2])[3]  # held, a clear leaves the row's own signals, and what is new
+    assert [bool(s) for s in left] == [bool(s or new) for s, new in zip(grid[2], grid[3])]
 
 
 def test_every_hidden_unit_has_a_name():

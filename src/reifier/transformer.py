@@ -105,10 +105,14 @@ def token_grid(t: Trace) -> Grid:
 
 def transformer(t: Trace, codes: dict) -> Transformer:
     """t, a program from the bits of the last tokens, the oldest token's first, to the bits of the
-    next, as a transformer on the tokens of codes {token: its bits}"""
+    next, as a transformer on the tokens of codes {token: its bits}. A code has a bit for each of
+    t's outputs, and t reads the codes of len(t.inputs) // len(t.outputs) tokens"""
     bits, grid = len(t.outputs), token_grid(t)  # the bits of a code
     net = emit(t, grid, "geglu", skip=True, norm=True)
     width, window = len(grid[0]), len(t.inputs) // bits  # features, and the tokens that t reads
+    assert len(t.inputs) == window * bits, (
+        f"{t.name} reads {len(t.inputs)} bits: no codes of {bits}"
+    )
     embed = np.zeros((max(codes) + 1, 1 + bits))
     embed[list(codes)] = np.insert(2.0 * np.array(list(codes.values())) - 1, 0, net.one, 1)
     turns = 10000.0 ** -(np.arange(PAIRS) / PAIRS)

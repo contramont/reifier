@@ -36,28 +36,36 @@ if not (out / "alone").exists():
 tokenizer = AutoTokenizer.from_pretrained(REPO, revision=gemma.REVISIONS[REPO])
 text = tokenizer("\n".join(f.read_text() for f in files), add_special_tokens=False)["input_ids"]
 text = np.array(text[: (16 if device == "cuda" else 1) * 1023]).reshape(-1, 1023)  # prompts
-names = json.loads((out / "names.json").read_text())["features"][-1]
+names = json.loads((out / "names.json").read_text())
 program = alongside.program()
-ones = [f for f, s in enumerate(names) if s == "ONE"][1:]  # block d reads ones[d]
+ones = [f for f, s in enumerate(names["features"][-1]) if s == "ONE"][1:]  # block d reads ones[d]
+layers = [i for i, h in enumerate(names["hidden"]) if h != ["ONE"]]  # block d is in layers[d]:
+# the others are of the unit ONE alone, and clear (see beside.wipe)
 load = AutoModelForCausalLM.from_pretrained
 both, alone = load(out).to(device), load(out / "alone").to(device)
 itself = load(REPO, revision=gemma.REVISIONS[REPO]).to(device)
 half, seen = both.config.hidden_size // 2, {}  # what the hooks keep of the last run
 
 
-def reads(d):  # the ONE of block d, as the block reads it
-    return lambda _, __, x: seen.__setitem__(("reads", d), x[..., ones[d]].float().abs())
+def reads(d):  # a hook: the ONE of block d, as the block reads it
+    def hook(module, args, x):
+        seen["reads", d] = x[..., ones[d]].float().abs()
+
+    return hook
 
 
-def adds(d):  # what block d gives, over what Gemma's block gives
-    ours = lambda x: x[..., :half].float().norm(dim=-1) / x[..., half:].float().norm(dim=-1)
-    return lambda _, __, x: seen.__setitem__(("adds", d), ours(x))
+def adds(d):  # a hook: what block d gives, over what Gemma's block gives, as float64: the
+    def hook(module, args, x):  # first blocks' are under float32's smallest when squared
+        x = x.double()
+        seen["adds", d] = x[..., :half].norm(dim=-1) / x[..., half:].norm(dim=-1)
+
+    return hook
 
 
-blocks = range(beside.OWN, len(ones) - 1)  # those beside Gemma's
+blocks = range(beside.OWN, len(layers))  # those beside Gemma's
 for d in blocks:
-    both.model.layers[d].pre_feedforward_layernorm.register_forward_hook(reads(d))
-    both.model.layers[d].mlp.register_forward_hook(adds(d))
+    both.model.layers[layers[d]].pre_feedforward_layernorm.register_forward_hook(reads(d))
+    both.model.layers[layers[d]].mlp.register_forward_hook(adds(d))
 
 
 def measure(ids: np.ndarray, title: str):
