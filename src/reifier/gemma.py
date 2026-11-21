@@ -157,15 +157,16 @@ def block(w, i, layer, before, row, k=2.0**14):
     by 32 in what they sum, and bf16 holds both sums only below 4096: a larger gate could be
     wrong, silently"""
     a, n, size = f"layers.{i}.", len(layer.hidden), len(w["norm.weight"])
-    most = (layer.wi[:n, 0] + abs(layer.wi[:n, 1:]).sum(1)).max()  # no gate can sum more than this
-    fits = most < 4096 and all((round_to_bf16(v) == v).all() for v in (layer.wi, layer.wo))
+    wi, wo = layer.wi.toarray(), layer.wo.toarray()  # small enough for Gemma itself
+    most = (wi[:n, 0] + abs(wi[:n, 1:]).sum(1)).max()  # no gate can sum more than this
+    fits = most < 4096 and all((round_to_bf16(v) == v).all() for v in (wi, wo))
     assert fits, f"layer {i}: a gate's weights or its sums are not exact in bf16"
-    read, signals = np.flatnonzero(layer.wi.any(0)), sum(s is not None for s in before)
+    read, signals = np.flatnonzero(wi.any(0)), sum(s is not None for s in before)
     w[a + "pre_feedforward_layernorm.weight"][read] = np.sqrt(signals / size)  # the stream's rms
     gate, up, down = (w[f"{a}mlp.{p}_proj.weight"] for p in ("gate", "up", "down"))
     assert n <= len(gate), f"layer {i} needs {n} hidden units, and Gemma has {len(gate)}"
-    gate[:n, : len(layer.inputs)], up[:n, : len(layer.inputs)] = layer.wi[:n], layer.wi[n:]
-    down[: len(layer.outputs), :n] = layer.wo
+    gate[:n, : len(layer.inputs)], up[:n, : len(layer.inputs)] = wi[:n], wi[n:]
+    down[: len(layer.outputs), :n] = wo
     down[0, 0] = k  # the unit ONE, the first, into ONE
     written = [f for f, (old, new) in enumerate(zip(before, row)) if old != new]
     w[a + "post_feedforward_layernorm.weight"][written] = k / np.sqrt(size)

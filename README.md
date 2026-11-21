@@ -9,10 +9,10 @@
 
 <p align="center">Compile algorithms into neural network circuits that stay interpretable, in a few hundred lines.</p>
 
-Reifier needs Python 3.14 and numpy. It is one small compiler in three stages, from threshold
-gates to a transformer. Each stage can be printed, and each is checked against the one before.
-With [uv](https://docs.astral.sh/uv/), `uv run python` runs the code below, and `uv run pytest`
-the tests.
+Reifier needs Python 3.14, numpy and scipy. It is one small compiler in three stages, from
+threshold gates to a transformer. Each stage can be printed, and each is checked against the one
+before. With [uv](https://docs.astral.sh/uv/), `uv run python` runs the code below, and
+`uv run pytest` the tests.
 
 ```python
 from reifier.check import check_grid, check_net, check_trace
@@ -116,7 +116,7 @@ print(m.generate([1, 1], 6))
 
 ## Reading the code
 
-The files are in `src/reifier`. The first four are the compiler, about 530 lines to be read
+The files are in `src/reifier`. The first four are the compiler, about 550 lines to be read
 in this order. Each opens with what its stage is, and holds nothing but what makes it: printing
 and checking are in the next two. The rest is outside the compiler, on the same trace and grid.
 
@@ -124,7 +124,7 @@ and checking are in the next two. The rest is outside the compiler, on the same 
 |---|---|
 | `trace.py` | stage 1: signals, the MLP and its activations, `circuit`, `trace` |
 | `grid.py` | stage 2: `layout`, and `held`, the grid as skip connections hold it (`wait` and `clear` are for `beside.py`) |
-| `emit.py` | stage 3: `convert`, `layer` and `emit`, for stacks, skip connections and norms |
+| `emit.py` | stage 3: `convert`, `layer` and `emit`, for stacks, skip connections and norms, as sparse matrices |
 | `transformer.py` | tokens: lookback attention in front of those layers, in numpy |
 | `show.py` | how each stage prints |
 | `check.py` | each stage checked against the one before |
@@ -133,7 +133,7 @@ and checking are in the next two. The rest is outside the compiler, on the same 
 | `relay.py` | `relay`, a pass that passes each signal on, so that an MLP reads only the layer before it |
 | `tiles.py` | `tiles`, a layout that keeps each circuit together, as a rectangle of the grid |
 | `gemma.py` | the transformer written into a checkpoint of Gemma 3 or Gemma 4 |
-| `beside.py` | the transformer and Gemma 3's own weights in one checkpoint, twice as wide: Gemma is not moved |
+| `beside.py` | the transformer and Gemma 3's own weights in one checkpoint, as wide as it needs: Gemma is not moved |
 
 The examples are programs on tokens, each with the lines that compile it into
 unsloth/gemma-3-270m, or beside it, and write the names of its features and hidden units beside
@@ -145,9 +145,9 @@ the weights. Each file's docstring says how to run it; the first run fetches fro
   twice as wide and 21 layers deep: the sponge's two own layers, its eighteen beside Gemma's,
   and one that clears what they wrote. Every token has a code of 18 bits, and where the sponge
   gives, for the last two, a code whose top bit is 0, the next token is the one of that code,
-  and elsewhere what Gemma gives.
+  and elsewhere what Gemma gives. `alongside.py out 1600 24 1088` is the same on SHA-3's
+  Keccak-f[1600], all 24 rounds: 76 layers deep, 10 times as wide, 54 GB.
 - `examples/measure.py` says in a minute how well the two of alongside.py get on: how often
   each is right, and how much room each block has.
 
-Not here yet: PyTorch export, layers as sparse matrices for very large circuits, and signals
-that are not bits.
+Not here yet: PyTorch export, and signals that are not bits.

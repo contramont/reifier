@@ -38,16 +38,16 @@ ACTIVATIONS |= {name: gated(ACTIVATIONS[act]) for name, act in GATED.items()}
 class MLP:
     """outputs = wo @ act(wi @ inputs + b), with a name for itself and for each hidden unit. Of
     its n hidden units, unit j is row j of wi (and, if act is gated, row n + j, the value that
-    its gate multiplies) and column j of wo"""
+    its gate multiplies) and column j of wo. In a layer of emit, wi and wo are sparse"""
 
     name: str
     inputs: list[str]
     outputs: list[str]
     hidden: list[str]
-    wi: np.ndarray
+    wi: np.ndarray  # or a scipy.sparse.csr_array
     b: np.ndarray
     activation: str
-    wo: np.ndarray
+    wo: np.ndarray  # or a scipy.sparse.csr_array
 
     def __call__(self, xs) -> np.ndarray:
         """The outputs for inputs xs, or for many at once: xs[..., input]"""

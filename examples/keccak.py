@@ -46,6 +46,12 @@ def rc(t):
     return r & 1
 
 
+def first_round(width, rounds):
+    """The number of the first round of Keccak-p[width, rounds]: the last rounds of Keccak-f,
+    which has 12 + 2 log2(w) rounds, for lanes of w bits"""
+    return 10 + 2 * (width // 25).bit_length() - rounds
+
+
 def keccak_p(state, rounds, parity=parity, chi=chi):
     """Keccak-p[len(state), rounds]: the last rounds of Keccak-f on state, whose lane (x, y) is the
     bits from w (x + 5 y), least significant first"""
@@ -55,8 +61,8 @@ def keccak_p(state, rounds, parity=parity, chi=chi):
     for t in range(24):
         r[x, y] = (t + 1) * (t + 2) // 2 % w
         x, y = y, (2 * x + 3 * y) % 5
-    full = 10 + 2 * w.bit_length()  # Keccak-f has 12 + 2 log2(w) rounds
-    for ir in range(full - rounds, full):
+    first = first_round(len(state), rounds)
+    for ir in range(first, first + rounds):
         at = f"round{ir}/"  # its signals are named by x, y and z, as in FIPS 202
         c = [
             [parity([a[x, y][z] for y in range(5)], f"{at}c[{x},{z}]") for z in range(w)]

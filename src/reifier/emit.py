@@ -1,10 +1,10 @@
 """Stage 3, the weights: a grid emitted as the layers of a network.
 
-Layer d is one MLP on features, with no biases: w_out @ act(w_in @ x). Its x is the stream, the
-values of the features, which hold row d - 1 of the grid, and it makes row d. Its hidden units
-are those of the trace's MLPs of that depth, under their own names, with their weights on the
-features that the grid gives their inputs and outputs and their biases on ONE; and copies, for
-what no MLP makes. What is around the layers decides the rest:
+Layer d is one MLP on features, with no biases: w_out @ act(w_in @ x), of sparse matrices. Its x
+is the stream, the values of the features, which hold row d - 1 of the grid, and it makes row d.
+Its hidden units are those of the trace's MLPs of that depth, under their own names, with their
+weights on the features that the grid gives their inputs and outputs and their biases on ONE;
+and copies, for what no MLP makes. What is around the layers decides the rest:
 
   a stack:  x = layer(x)        a layer writes all that its row holds: `keep s` copies s
   skip:     x = x + layer(x)    a layer writes only what changes, new - old: `erase s` is -s
@@ -20,6 +20,7 @@ from dataclasses import dataclass, replace
 from itertools import pairwise
 
 import numpy as np
+from scipy import sparse
 
 from .grid import ONE, Grid
 from .trace import GATED, MLP, Trace
@@ -88,24 +89,31 @@ def layer(mlps, before, row, activation, skip, norm) -> MLP:
             parts.append((copy(activation, f"erase {before[f]}", -1.0), [f], [f]))
         if not skip and row[f] in at:  # and a stack would lose it
             parts.append((copy(activation, f"keep {row[f]}"), [f], [f]))
-    halves = 2 if activation in GATED else 1
-    w_in, w_out = [[np.empty((0, len(before)))] * halves], [np.empty((len(row), 0))]  # no units yet
-    for m, ins, outs in parts:  # then each part's weights, on features
-        wi, wo = np.zeros((len(m.wi), len(before))), np.zeros((len(row), len(m.hidden)))
-        for f, weights in zip(ins, m.wi.T):
-            wi[:, f] += weights  # an input read twice adds up
-        wi[:, 0] += m.b  # biases are weights on ONE
-        wo[outs] = m.wo
-        w_in.append(np.split(wi, halves))
-        w_out.append(wo)
-    w_in = np.vstack([w[half] for half in range(halves) for w in w_in])  # all gates, then values
-    w_out = np.hstack(w_out)
-    if norm:
-        w_out[list(new.values()), 0] = -1  # the unit ONE, the first, gives each new bit its -1
+    halves, units = 2 if activation in GATED else 1, sum(len(m.hidden) for m, _, _ in parts)
+    w_in, w_out, j = [], [], 0  # their entries, (rows, columns, weights), and the units so far
+    for m, ins, outs in parts:  # then each part's weights, on features: biases are on ONE
+        wi, n = np.c_[m.b, m.wi], len(m.hidden)
+        r, c = np.nonzero(wi)  # all gates, then all values: a unit's value is `units` rows on
+        w_in.append((r % n + j + units * (r // n), np.array([0, *ins])[c], wi[r, c]))
+        r, c = np.nonzero(m.wo)
+        w_out.append((np.array(outs, int)[r], j + c, m.wo[r, c]))
+        j += n
+    if norm:  # the unit ONE, the first, gives each new bit its -1
+        w_out.append((np.array([*new.values()], int), np.zeros(len(new), int), -np.ones(len(new))))
+    w_in, w_out = matrix(w_in, (halves * units, len(before))), matrix(w_out, (len(row), units))
     reads = [s or f"f{f}" for f, s in enumerate(before)]
     writes = [f"f{f}" for f in range(len(row))]
     hidden = [h for m, _, _ in parts for h in m.hidden]
-    return MLP("layer", reads, writes, hidden, w_in, np.zeros(len(w_in)), activation, w_out)
+    return MLP("layer", reads, writes, hidden, w_in, np.zeros(w_in.shape[0]), activation, w_out)
+
+
+def matrix(entries, shape) -> sparse.csr_array:
+    """A sparse matrix of shape, the sum of entries, each (rows, columns, weights): an input
+    that a part reads twice adds up"""
+    if not entries:  # of a layer with no units
+        return sparse.csr_array(shape)
+    rows, columns, weights = map(np.concatenate, zip(*entries))
+    return sparse.csr_array((weights, (rows, columns)), shape)
 
 
 def rmsnorm(x, row, one):

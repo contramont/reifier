@@ -1,6 +1,7 @@
 """How each stage prints: show(x) is a trace, a grid, a network or a transformer as text."""
 
 from collections.abc import Iterator
+from dataclasses import replace
 from itertools import pairwise
 
 import numpy as np
@@ -65,6 +66,7 @@ def network(net: Network) -> Iterator[str]:
     yield f"{net.trace.name}: {kind}, {len(net.grid[0])} features, ONE = {net.one:g}"
     for d, layer in enumerate(net.layers, 1):
         yield f"layer {d}: {len(layer.hidden)} hidden units of {layer.activation}"
+        layer = replace(layer, wi=layer.wi.toarray(), wo=layer.wo.toarray())  # not sparse
         yield from ("  " + line for line in units(layer))
 
 

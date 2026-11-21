@@ -47,10 +47,10 @@ def layout(t: Trace, wait: int = 1, clear: Collection[int] = ()) -> Grid:
         for x in freed[d]:
             free[at[x]] = depth[x]
             row[at[x]] = None
+        ready = [f for f, when in free.items() if when == -inf or cleared_at < when <= d - wait]
         for y in made[d]:
-            ready = [f for f, when in free.items() if when == -inf or cleared_at < when <= d - wait]
             if ready:
-                at[y] = ready[-1]
+                at[y] = ready.pop()
                 del free[at[y]]
             else:  # a new feature
                 at[y] = len(row)

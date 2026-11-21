@@ -174,12 +174,13 @@ def test_gemma_with_the_sponge_beside_it_gives_what_each_gives_alone(tmp_path):
     if not (all(isinstance(f, str) for f in files) and gemma.cache_file(G270M).exists()):
         pytest.skip("needs Gemma's weights and tokenizer")
     beside.save(transformer(alongside.program(), alongside.CODES), tmp_path)
-    beside.save(None, tmp_path / "alone")  # Gemma alone, as wide and as deep
+    wide = json.loads((tmp_path / "config.json").read_text())
+    beside.save(None, tmp_path / "alone", wide)  # Gemma alone, as wide, in its own 18 layers
     device, load = "cuda" if torch.cuda.is_available() else "cpu", AutoModelForCausalLM
     models = [load.from_pretrained(tmp_path), load.from_pretrained(tmp_path / "alone")]
     models.append(load.from_pretrained(G270M, revision=rev))  # Gemma itself: all three bf16
     assert {x.dtype for x in models} == {torch.bfloat16}
-    assert [x.config.num_hidden_layers for x in models] == [21, 20, 18]  # and one that clears
+    assert [x.config.num_hidden_layers for x in models] == [21, 18, 18]  # and one that clears
     text = AutoTokenizer.from_pretrained(G270M, revision=rev)(README.read_text())["input_ids"]
     text = text[: 1024 if device == "cuda" else 256]  # a <bos>, and the start of the README
     ids = torch.tensor([text], device=device)
@@ -275,7 +276,7 @@ def test_gemma_has_the_weights_of_the_transformer_and_pads_what_bf16_cannot_norm
     assert np.allclose(o[:9, [0, 1, 16, 17]], (2 / 16) ** 0.5 * np.hstack(m.o))
     assert o[9:].nonzero()[1].tolist() == [0, 0] and np.allclose(o[o != 0], (2 / 16) ** 0.5)
     gate = w["layers.0.mlp.gate_proj.weight"]  # and a block is a layer of m
-    assert np.array_equal(gate[:5, :9], m.net.layers[0].wi[:5]) and not gate[5:].any()
+    assert np.array_equal(gate[:5, :9], m.net.layers[0].wi[:5].toarray()) and not gate[5:].any()
     assert np.allclose(w["norm.weight"][:3], [0, 4 * 11**0.5, 4 * 11**0.5])  # 8 / 2 sqrt(11)
     assert (w["layers.3.layer_scalar"] == 1).all()  # as that of every layer
     five = gemma.build_weights(transformer(trace(xor, 5), {5: [1]}), shapes, config)[1][0]
@@ -329,17 +330,19 @@ def test_beside_gemma_its_own_weights_are_on_the_last_features_of_the_later_laye
     wide, wide_shapes, w, grid, names = beside.build_weights(m, real, config)
     assert (wide["hidden_size"], wide["num_hidden_layers"]) == (38, 4 + 2)  # two layers of m's own
     assert wide["layer_types"][:2] == ["sliding_attention"] * 2  # where RoPE is as m's
-    alone = beside.build_weights(None, real, config)  # Gemma alone, as wide: the same config,
-    assert alone[:2] == (wide, wide_shapes) and alone[3:] == ([], [])  # and nothing beside it
+    alone = beside.build_weights(None, real, config, wide)  # Gemma alone, as wide, in its own
+    assert alone[0] == wide | {"num_hidden_layers": 4, "layer_types": config["layer_types"]}
+    assert alone[3:] == ([], [])  # 4 layers, and nothing beside it
     for k, v in real.items():  # each of Gemma's: over c in a norm that reads the stream, by c in
-        k = beside.moved(k[len(P) :], range(2, 6))  # what writes it, and else as it was
+        k = k[len(P) :]  # what writes it, and else as it was
+        here = beside.moved(k, range(2, 6))
         reads = k == "norm.weight" or "input_layernorm" in k or "pre_feedforward" in k
         want = (1 + v) / c - 1 if reads else v * c if "o_proj" in k or "down_proj" in k else v
         last = tuple(slice(-d, None) for d in v.shape)
-        assert np.allclose(w[k][last], want, atol=1e-6)
-        assert np.array_equal(alone[2][k][last], w[k][last])  # with m and without
+        assert np.allclose(w[here][last], want, atol=1e-6)
+        assert np.array_equal(alone[2][k][last], w[here][last])  # with m and without
         if "proj" in k:  # and neither has weights on the other's features or hidden units
-            assert not w[k][:64, 64:].any() and not w[k][64:, :64].any(), k
+            assert not w[here][:64, 64:].any() and not w[here][64:, :64].any(), k
             assert not alone[2][k][:64].any() and not alone[2][k][:, :64].any(), k
     assert grid[-1][:7] == ["ONE", "code[0]", "bits0", "bits1", "parity", "parity.1", "ands"]
     assert grid[0][7:] == ["ONE", None, None, None, None]  # the ONE of the heads, and of each
@@ -357,7 +360,7 @@ def test_beside_gemma_its_own_weights_are_on_the_last_features_of_the_later_laye
     blocks = emit(m.net.trace, beside.grid_beside(m.net.trace, 1, []), "geglu", True, True)
     layers = [beside.unerased(x) for x in blocks.layers]  # as place makes them
     for d, (rms, gives) in enumerate([(1, None), (1, None), beside.ROUGH[0]]):
-        a, bias = f"layers.{d}.", layers[d].wi[: len(layers[d].hidden), 0]  # of each gate
+        a, bias = f"layers.{d}.", layers[d].wi.toarray()[: len(layers[d].hidden), 0]  # gates'
         gates, values = w[a + "mlp.gate_proj.weight"], w[a + "mlp.up_proj.weight"]
         assert np.array_equal(gates[: len(bias), 7 + d], bias) and not gates[:, 0].any()
         pre = w[a + "pre_feedforward_layernorm.weight"][:19] + 1  # on the ONE of the block before
@@ -406,8 +409,30 @@ def test_beside_gemma_says_what_it_cannot_place(monkeypatch):
         beside.build_weights(transformer(trace(thrice, 2), BIT), real, config)
 
 
+def test_beside_gemma_a_deeper_transformer_has_more_layers_of_its_own_and_as_much_width():
+    real, config = beside_gemma(32)  # of 4 layers
+
+    def eight(x):  # eight blocks: a GLU, then seven ands of the one before
+        y = parity(x)
+        for _ in range(7):
+            y = ands([y], [([1], 1)])
+        return y
+
+    m = transformer(trace(eight, 2), BIT)
+    wide, _, w, grid, names = beside.build_weights(m, real, config)
+    assert beside.own(8, 4) == 4 and len(names) == wide["num_hidden_layers"] == 8  # 4 and Gemma's
+    assert (wide["hidden_size"], wide["intermediate_size"]) == (64, 128)  # as many 32 and 64 as m
+    k = next(k for k in real if "layers.0.mlp.down" in k)  # needs: Gemma's layer 0 is layer 4,
+    assert np.allclose(w[beside.moved(k[len(P) :], {0: 4})][-64:, -64:], real[k] * 2**0.5)
+    sizes, ones = beside.ladder(8)[0], [f for f, s in enumerate(grid[-1]) if s == "ONE"][1:]
+    for d in range(8):  # and blocks 2 and 3 read as those of its own do, 4 to 7 as beside Gemma's
+        pre = w[f"layers.{d}.pre_feedforward_layernorm.weight"][ones[d]] + 1
+        read_as, rms = (beside.GATE[0], 1) if d < 4 else (beside.GATE[1], beside.ROUGH[d - 4][0])
+        assert np.isclose(pre, read_as * rms / sizes[d]), d
+
+
 def test_beside_gemma_a_layer_of_its_own_clears_where_bits_would_grow_too_large(monkeypatch):
-    real, config = beside_gemma(20)  # twice as wide, a quarter of it is whole, as a Gemma's is
+    real, config = beside_gemma(32)  # twice as wide, a 64th of it is whole, as a Gemma's is
     monkeypatch.setattr(beside, "GROW", 2.0**10)  # rows of 2**-106, -96, -86 and -76, but row 4
     monkeypatch.setattr(beside, "LAST", 2.0**-76)  # would be over LAST: it is ANEW, after a clear
     once = lambda x: ands([x], [([1], 1)])
@@ -423,11 +448,11 @@ def test_beside_gemma_a_layer_of_its_own_clears_where_bits_would_grow_too_large(
     cleared = [f for f, (s, t) in enumerate(zip(grid[3], grid[4])) if s and not t]
     assert grid[3][:5] == ["ONE", "code[0]", "x0", "parity.1", "ands"] and cleared == [2, 3]
     assert grid[5][:5] == ["ONE", "code[0]", None, "ands.1", "ands"]  # ands.1 takes one of them
-    a, quarter = "layers.3.", range(20, 30)  # what its head and its block write, by feature:
+    a = "layers.3."  # what its head and its block write, by feature: 1 and -1, and K into 63
     o, down = (w[a + x + "_proj.weight"][:, 0] for x in ("self_attn.o", "mlp.down"))
-    assert np.flatnonzero(o).tolist() == np.flatnonzero(down).tolist() == [2, 3, *quarter]
-    assert (o[[2, 3]] == 1).all() and (down[[2, 3]] == -1).all() and (o[20:30] == beside.K).all()
+    assert np.flatnonzero(o).tolist() == np.flatnonzero(down).tolist() == [2, 3, 63]
+    assert (o[[2, 3]] == 1).all() and (down[[2, 3]] == -1).all() and o[63] == down[63] == beside.K
     for x in "post_attention", "post_feedforward":  # where its norms drop K, and keep the rest
         assert np.flatnonzero(w[f"{a}{x}_layernorm.weight"] + 1).tolist() == [2, 3]
-        assert (w[f"{a}{x}_layernorm.weight"][[2, 3]] + 1 == beside.K / 2).all()
-    assert w[a + "self_attn.v_proj.weight"][0, 0] == 1 and (down[20:30] == beside.K).all()
+        assert (w[f"{a}{x}_layernorm.weight"][[2, 3]] + 1 == beside.K / 8).all()
+    assert w[a + "self_attn.v_proj.weight"][0, 0] == 1

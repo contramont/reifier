@@ -3,6 +3,7 @@
 import contextlib
 import io
 import re
+from dataclasses import replace
 from itertools import pairwise
 from pathlib import Path
 
@@ -190,7 +191,9 @@ def test_each_check_names_what_is_wrong():
         with pytest.raises(AssertionError, match=message):
             check_grid(t, g)
     net = emit(t, layout(t), "reglu", skip=True)
-    net.layers[2].wo[1, 0] += 1e-6  # into feature 1, which holds nothing at depth 3
+    wo = net.layers[2].wo.toarray()
+    wo[1, 0] += 1e-6  # into feature 1, which holds nothing at depth 3
+    net.layers[2] = replace(net.layers[2], wo=wo)
     with pytest.raises(AssertionError, match=r"depth 3, feature 1 \(no signal\) is"):
         check_net(net)
     with pytest.raises(AssertionError, match="parity has no step form"):

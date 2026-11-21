@@ -6,8 +6,8 @@ text at a time, this repository's own files if none are given, and then on rando
 says, of each:
 
 - where the sponge speaks, how often the model's token is its token, and by how much at least;
-- where it is silent, how often the model's token is that of Gemma alone, as wide and as deep
-  (see beside.py: out/alone, which this writes once), and how far its logits are from those;
+- where it is silent, how often the model's token is that of Gemma alone, as wide (see
+  beside.py: out/alone, which this writes once), and how far its logits are from those;
 - how often Gemma alone, as wide, gives the token that Gemma itself gives: bf16's own noise;
 - of each block beside Gemma's, in powers of two, what it reads a bit as, and what it adds
   to the stream, of what Gemma's block adds;
@@ -32,19 +32,19 @@ out, files = Path(sys.argv[1]), [Path(f) for f in sys.argv[2:]]
 files = files or sorted(Path(__file__).parent.parent.glob("[!.]*/**/*.py")) + [Path("README.md")]
 device = "cuda" if torch.cuda.is_available() else "cpu"
 if not (out / "alone").exists():
-    beside.save(None, out / "alone")
+    beside.save(None, out / "alone", json.loads((out / "config.json").read_text()))
 tokenizer = AutoTokenizer.from_pretrained(REPO, revision=gemma.REVISIONS[REPO])
 text = tokenizer("\n".join(f.read_text() for f in files), add_special_tokens=False)["input_ids"]
 text = np.array(text[: (16 if device == "cuda" else 1) * 1023]).reshape(-1, 1023)  # prompts
 names = json.loads((out / "names.json").read_text())
-program = alongside.program()
+program = alongside.program(**json.loads((out / "sponge.json").read_text()))
 ones = [f for f, s in enumerate(names["features"][-1]) if s == "ONE"][1:]  # block d reads ones[d]
 layers = [i for i, h in enumerate(names["hidden"]) if h != ["ONE"]]  # block d is in layers[d]:
 # the others are of the unit ONE alone, and clear (see beside.wipe)
 load = AutoModelForCausalLM.from_pretrained
 both, alone = load(out).to(device), load(out / "alone").to(device)
 itself = load(REPO, revision=gemma.REVISIONS[REPO]).to(device)
-half, seen = both.config.hidden_size // 2, {}  # what the hooks keep of the last run
+size, seen = itself.config.hidden_size, {}  # Gemma's features, the last; what the hooks keep
 
 
 def reads(d):  # a hook: the ONE of block d, as the block reads it
@@ -57,12 +57,12 @@ def reads(d):  # a hook: the ONE of block d, as the block reads it
 def adds(d):  # a hook: what block d gives, over what Gemma's block gives, as float64: the
     def hook(module, args, x):  # first blocks' are under float32's smallest when squared
         x = x.double()
-        seen["adds", d] = x[..., :half].norm(dim=-1) / x[..., half:].norm(dim=-1)
+        seen["adds", d] = x[..., :-size].norm(dim=-1) / x[..., -size:].norm(dim=-1)
 
     return hook
 
 
-blocks = range(beside.OWN, len(layers))  # those beside Gemma's
+blocks = range(beside.own(len(layers), alone.config.num_hidden_layers), len(layers))  # beside
 for d in blocks:
     both.model.layers[layers[d]].pre_feedforward_layernorm.register_forward_hook(reads(d))
     both.model.layers[layers[d]].mlp.register_forward_hook(adds(d))
@@ -78,8 +78,8 @@ def measure(ids: np.ndarray, title: str):
     token = code.round().astype(int) @ (1 << np.arange(bits.shape[-1]))  # of that code
     token = torch.tensor(token, device=device)
     tops, room, gains, off = [], {}, [], []
-    for i in range(0, len(ids), 4):  # 4 prompts at a time: the logits are large
-        batch, say, its = (x[i : i + 4] for x in (torch.tensor(ids, device=device), speaks, token))
+    for i in range(len(ids)):  # a prompt at a time: the logits are large
+        batch, say, its = (x[i : i + 1] for x in (torch.tensor(ids, device=device), speaks, token))
         with torch.no_grad():
             logits = [model(batch).logits.float() for model in (both, alone, itself)]
         tops.append(torch.stack([x.argmax(-1) for x in logits]))
