@@ -73,6 +73,8 @@ if __name__ == "__main__":
     out, repo = [*sys.argv[1:], "unsloth/gemma-3-270m"][:2]
     tokenizer = hf_hub_download(repo, "tokenizer.json", revision=gemma.REVISIONS[repo])
     vocab = json.loads(Path(tokenizer).read_text())["model"]["vocab"]
-    m = transformer(program(), {vocab[c]: code for c, code in CODES.items()})  # in numpy
+    codes = {vocab[c]: code for c, code in CODES.items()}  # in numpy: each unit as many times
+    m = transformer(program(), codes, gemma.hidden_units(repo))  # as fit in a layer of Gemma's,
+    # four at most (see transformer.repeats)
     check_transformer(m, [vocab[c] for c in "123+246=369"])
     gemma.save(m, Path(out), repo)  # the same weights, in Gemma's checkpoint

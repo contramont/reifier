@@ -72,7 +72,8 @@ def network(net: Network) -> Iterator[str]:
 def transformer(m: Transformer) -> Iterator[str]:
     """Each head, by the features it writes, then each block: its hidden units, as a network's,
     on what the norm before it gives, READ for a bit that is 1, with the weights on the
-    features that hold ONE summed"""
+    features that hold ONE summed. A unit that is there more than once has a line each time,
+    and `f3, dropped` is the row that the norm after drops, of a bit written over feature 3's"""
     yield f"{len(m.q)} heads on {len(m.codes)} tokens, {len(m.grid[0])} features"
     for h, o in enumerate(m.o):
         names = " ".join(m.grid[0][f] for f in np.flatnonzero(o.any(1)) if m.grid[0][f])

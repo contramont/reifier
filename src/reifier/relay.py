@@ -31,5 +31,5 @@ def relay(t: Trace) -> Trace:
         d = max((depth[x] for x in m.inputs), default=0)  # the last layer that m reads
         mlps.append(replace(m, inputs=[passed(x, d) for x in m.inputs]))
         depth |= dict.fromkeys(m.outputs, d + 1)
-    last = max(depth.values())
+    last = max(depth.values(), default=0)
     return replace(t, outputs=[passed(y, last) for y in t.outputs], mlps=mlps)

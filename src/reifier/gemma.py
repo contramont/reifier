@@ -7,6 +7,10 @@ around them, which Gemma has where the transformer does. What differs:
 
 - Gemma has `size` features, more than the transformer, and a norm takes the mean square over
   all of them: so the weight of each norm is the transformer's times sqrt(width / size);
+- a block that writes bits over others gives a row more for each, which its norm drops (see
+  transformer.block). In Gemma those are the rows of the features after the transformer's
+  own, where the norm after the block multiplies by 0: so Gemma must have as many features
+  more than the transformer as the most bits that one block writes over;
 - it scales embeddings by sqrt(size), so an embedding is stored that much smaller, and the last
   norm's weights are as much larger, for the logits to be the transformer's;
 - attention has norms of its own on queries and keys, in Gemma 4 on values too, and heads that
@@ -15,6 +19,10 @@ around them, which Gemma has where the transformer does. What differs:
   further back, where layer 0 put them, then one of layer 2, and so on, and the blocks start in
   the last layer that attends, where all that they read is written. Layer 0 puts there the bits
   that the program reads of its own tokens: so of a token further back it must read no others;
+- a layer of Gemma's has more hidden units than a block of the examples needs, and those it
+  does not use are zeros. So the examples tell transformer how many Gemma has (see
+  hidden_units), and a block has each unit of its own as many times as fit, up to four, for
+  what their weights are off by to average (see transformer.repeats);
 - its numbers are bf16, of 8 bits. Nothing here needs more: a weight or a sum that is rounded
   is a little off, and what is a little off is read right (see transformer.py). The right
   token's logit is LOGIT, or what the cap of Gemma 4, 30 tanh(logit / 30), leaves of it.
@@ -35,7 +43,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .transformer import READ, SIZE, VALUE, Transformer
+from .transformer import READ, VALUE, Transformer
 
 REVISIONS = {  # the checkpoints: a repo of huggingface.co, and the revision that weights ran on
     "unsloth/gemma-3-270m": "edcf1fe394ee1168e7c5538afd104cfb1f7947e6",
@@ -74,7 +82,8 @@ def build_weights(m: Transformer, shapes: dict, config: dict):
     assert m.size is None and m.out.any(), f"{name} has no logits of its own: it is for beside.py"
     heads, kinds = config["num_attention_heads"], config["layer_types"]
     n = -(-len(m.o) // heads)  # the layers that attend
-    assert width <= size, f"{name} needs {width} features, and Gemma has {size}"
+    rows = max([width, *(len(b.layer.wo) for b in m.blocks)])  # with those that a norm drops
+    assert rows <= size, f"{name} needs {rows} features, and Gemma has {size}"
     assert "full_attention" not in kinds[:n], f"{name} needs Gemma's first {n} layers to slide"
     deep = n - 1 + len(m.blocks)  # the first block is in the last layer that attends
     assert deep <= len(kinds), f"{name} needs {deep} layers, and Gemma has {len(kinds)}"
@@ -82,7 +91,7 @@ def build_weights(m: Transformer, shapes: dict, config: dict):
     coded = np.flatnonzero(m.embed.any(1))  # Gemma scales an embedding by sqrt(size)
     w["embed_tokens.weight"][coded, : m.embed.shape[1]] = m.embed[coded] / math.sqrt(size)
     held = np.zeros(width)  # the square of what each feature holds, before each layer
-    held[: m.embed.shape[1]] = SIZE**2
+    held[: m.embed.shape[1]] = m.embed[coded[0]] ** 2  # the ONEs are not all SIZE
     given = m.writes * math.sqrt(width / np.count_nonzero(m.writes))  # to each feature, by heads
     for i in range(n):  # layer 0 has m's first heads; layer i, one that looks i * heads back
         o = m.o[i * heads : (i + 1) * heads]
@@ -143,12 +152,16 @@ def attention(w, i, m, queries, value, outputs, reads, writes, config):
 
 def block(w, i, b, wide):
     """The feed-forward block of layer i: b, of the transformer, its layer between norms of its
-    weights, times wide"""
+    weights, times wide. The rows that its layer gives after those of its features (see
+    transformer.block) are those of the features after them, where the norm after it has no
+    weight"""
     a, n, width = f"layers.{i}.", len(b.layer.hidden), len(b.reads)
     gate, up, down = (w[f"{a}mlp.{p}_proj.weight"] for p in ("gate", "up", "down"))
     assert n <= len(gate), f"layer {i} needs {n} hidden units, and Gemma has {len(gate)}"
     gate[:n, :width], up[:n, :width] = b.layer.wi[:n], b.layer.wi[n:]
-    down[:width, :n] = b.layer.wo
+    rows = len(b.layer.wo)  # the features, and more that the norm after drops: its weight is 0
+    assert rows <= len(down), f"layer {i} gives {rows} rows, and Gemma has {len(down)} features"
+    down[:rows, :n] = b.layer.wo
     w[a + "pre_feedforward_layernorm.weight"][:width] = b.reads * wide
     w[a + "post_feedforward_layernorm.weight"][:width] = b.writes * wide
 
@@ -171,6 +184,13 @@ def checkpoint_metadata(repo: str) -> tuple[dict, dict]:
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_text(json.dumps([shapes, config]))
     return tuple(json.loads(file.read_text()))
+
+
+def hidden_units(repo: str) -> int:
+    """The hidden units that every layer of repo's text model has: what a block may have"""
+    shapes = checkpoint_metadata(repo)[0]
+    layers, gate = LazyZeros(shapes).prefix + "layers.", "mlp.gate_proj.weight"
+    return min(s[0] for k, s in shapes.items() if k.startswith(layers) and k.endswith(gate))
 
 
 def save(m: Transformer, out_dir: Path, repo: str):

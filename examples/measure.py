@@ -5,13 +5,14 @@ Run: uv run --with torch --with transformers examples/measure.py out [files of t
 on out, which examples/alongside.py wrote. It runs the model on a <bos> and 1,023 tokens of
 text at a time, up to 16 times on a GPU and once without: the start of the files given, or of
 those of src/reifier, and then as many random tokens. The sponge speaks where the program of
-alongside.py gives a code, of 144 bits: its token is the one whose number is the first 18.
+alongside.py gives a code, of 72 bits: its token is the one whose number is the first 18.
 Elsewhere each of them is 1/2, and it is silent. Of each run, this prints:
 
 - where the sponge speaks, how often the model's token is its token, by how much at least in
   the logits, and what that token's logit is as a rule, the median, and at most;
 - where it is silent, how often the model's token is that of Gemma alone, as wide (see
-  beside.py: out/alone, which this writes once), and how far its logits are from those;
+  beside.py: out/alone, which this writes if it is not there, or not as wide as out), and how
+  far its logits are from those;
 - how often Gemma alone gives Gemma's own token: bf16's own noise, the floor for the line above;
 - the largest entry after the <bos>, of either sign, and its layer: of the stream, of what a
   block reads after its norm, of its gates, values and hidden units and of what it gives, in
@@ -20,9 +21,16 @@ Elsewhere each of them is 1/2, and it is silent. Of each run, this prints:
 
 Then, of each kind of tensor, the largest weight of the sponge's and of Gemma's own, a norm's
 weight being what it multiplies by. And under each noise of `noisy` on the weights, in three
-draws, how often on the text the sponge's token is still the model's, how often the model's is
-still that of Gemma alone with no noise, where the sponge is silent, and how often Gemma
-alone's is, at every position.
+draws, or one for rounding, which is the same each time: how often on the text the sponge's
+token is still the model's, how often the model's is still that of Gemma alone with no noise,
+where the sponge is silent, and how often Gemma alone's is, at every position. The levels of
+NOISE are around those where the sponge of alongside.py, of rounds of two layers, goes wrong:
+times 0.5% to 2%, plus 1% to 3%, rounding to 8 bits down to 5, one weight in 10,000 or in
+1,000 set to 0, and noise on the norms of 0.01% and 0.03%. Rounds of three layers take more
+(see keccak.keccak_p), and want larger levels to show where they go wrong.
+
+With no files given the text is this repo's own source, so the numbers move a little whenever
+that is edited: to compare two checkpoints, give both the same files.
 """
 
 import copy
@@ -39,15 +47,17 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from reifier import beside, gemma
 
 REPO = "unsloth/gemma-3-270m"
-NOISE = {"times": (0.02, 0.05, 0.07, 0.1), "plus": (0.02, 0.05, 0.1), "bits": (8, 6, 5)}  # levels
-NOISE |= {"zeros": (0.001, 0.01), "norms": (0.0003, 0.001)}  # of each noise of `noisy`
+NOISE = {"times": (0.005, 0.01, 0.015, 0.02), "plus": (0.01, 0.02, 0.03), "bits": (8, 7, 6, 5)}
+NOISE |= {"zeros": (0.0001, 0.001), "norms": (0.0001, 0.0003)}  # levels of each noise of `noisy`
 WHAT = "stream", "reads", "gate", "value", "hidden", "gives", "logit"  # what the hooks see, on
 MODULES = "", "pre_feedforward_layernorm", "mlp.gate_proj", "mlp.up_proj", "mlp.down_proj", "mlp"
 out, files = Path(sys.argv[1]), [Path(f) for f in sys.argv[2:]]
 files = files or sorted(Path(__file__).parent.parent.glob("src/reifier/*.py"))
 device = "cuda" if torch.cuda.is_available() else "cpu"
-if not (out / "alone").exists():
-    beside.save(None, out / "alone")
+width = json.loads((out / "config.json").read_text())["hidden_size"]
+features, old = width - 640, out / "alone" / "config.json"  # the sponge's, and those that hold
+if not old.exists() or json.loads(old.read_text())["hidden_size"] != width:  # nothing
+    beside.save(None, out / "alone", features)
 tokenizer = AutoTokenizer.from_pretrained(REPO, revision=gemma.REVISIONS[REPO])
 text = tokenizer("\n".join(f.read_text() for f in files), add_special_tokens=False)["input_ids"]
 text = np.reshape(text[: len(text) // 1023 * 1023], (-1, 1023))[: 16 if device == "cuda" else 1]
@@ -63,7 +73,7 @@ def hook(what: str, mine: bool, i: int, module, args, x):
     largest entry after the <bos> of what the module gives, or reads if that is a hidden unit,
     and i. Of the stream, it is of the features of whose layer it is: the sponge's are the first"""
     x = args[0] if what == "hidden" else x[0] if isinstance(x, tuple) else x
-    x = x.chunk(2, -1)[not mine] if what == "stream" else x
+    x = (x[..., :features] if mine else x[..., features:]) if what == "stream" else x
     large = x[:, 1:].abs().max().item(), i
     seen[what, mine] = max(large, seen.get((what, mine), large))
 

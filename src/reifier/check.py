@@ -35,8 +35,8 @@ def check_trace(t: Trace, reference, xs=None) -> int:
     assert len(outs) == len(t.outputs), f"{t.name} gives {len(t.outputs)} outputs, not {len(outs)}"
     pairs += [(y, got[y], out) for y, out in zip(t.outputs, outs)]
     for s, value, should in pairs:  # a name, its values in t, the values it should have
-        i = (value != should).argmax()  # the first input on which they differ, if any
-        assert value[i] == should[i], (
+        i = (np.abs(value - should) > 1e-9).argmax()  # the first input on which they differ,
+        assert abs(value[i] - should[i]) <= 1e-9, (  # if any: sums of fifths are not exact
             f"{s} is {value[i]:g} on {''.join(str(int(v)) for v in xs[i])}, not {should[i]:g}"
         )
     return len(xs)
@@ -85,10 +85,11 @@ def check_streams(net: Network | Transformer, streams, values: dict, tol: float)
 def check_transformer(m: Transformer, tokens, tol: float = 0.05):
     """m against its grid on tokens, each with a code, and as many as the program reads at least:
     at every position that is the last of as many tokens as the program reads, every feature at
-    every depth holds what the grid says for their bits, to within tol of a bit's size, and the
-    largest logit is that of the token whose code the trace gives, if it is the code of one,
-    and if m has logits of its own (see beside.front). Position 0 is the <bos>, so tokens[p - 1]
-    is at position p"""
+    every depth holds what the grid says for their bits, to within tol of the largest size that
+    a feature holds, which is that of a ONE, 1.5 bits (see transformer.uneven), and the largest
+    logit is that of the token whose code the trace gives, if it is the code of one, and if m
+    has logits of its own (see beside.front). Position 0 is the <bos>, so tokens[p - 1] is at
+    position p"""
     t, bits, window = m.trace, np.array([m.codes[token] for token in tokens], float), len(m.q)
     streams, logits = m.run(tokens)
     read = np.array([bits[p - window : p].ravel() for p in range(window, len(tokens) + 1)])

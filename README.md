@@ -98,12 +98,16 @@ another is written there, and erases less.
 
 A program on tokens gives a transformer, in numpy. Its layers are not emit's: it is shaped as
 Gemma is, with an RMSNorm before and after the attention and each block, and its weights and
-activations are of the sizes of a trained Gemma's. A bit is 2 in its stream, where a feature of
-a token's embedding in Gemma is about 1, and written into Gemma 3 270M, the examples below have
-no weight larger than the largest of Gemma's own of its kind. A `table` of `reifier.lib` is any
-function of a few bits as one GLU, whose units pass on only the square of what the bits they
-read are off by: a circuit of them is not much moved by weights that are a little off, up to a
-point, and `examples/measure.py`, below, says where. Here, from an adder of threshold gates:
+most of its activations are of the sizes of a trained Gemma's. A bit is 2 in its stream, where
+a feature of a token's embedding in Gemma is about 1, and written into Gemma 3 270M, the
+examples below have no weight larger than the largest of Gemma's own of its kind, but those of
+one norm in `examples/alongside.py`. A block writes a new bit where the stream held nothing,
+or over a bit that it reads for the last time, so the stream needs few features: for Keccak,
+little more than the state. A `table` of `reifier.lib` is any function of a few bits as one
+GLU, whose units pass on only the square of what the bits they read are off by: a circuit of
+them is not much moved by weights that are a little off, up to a point, and
+`examples/measure.py`, below, says where. A `cover` and `steps` make functions of more bits in
+fewer units, and take less noise. Here, from an adder of threshold gates:
 
 ```python
 from reifier.lib import add
@@ -124,7 +128,7 @@ print(m.generate([1, 1], 6))
 
 ## Reading the code
 
-The files are in `src/reifier`. The first four are the compiler, about 800 lines to be read
+The files are in `src/reifier`. The first four are the compiler, about 950 lines to be read
 in this order. Each opens with what its stage is, and holds nothing but what makes it: printing
 and checking are in the next two. The rest is outside the compiler, on the same trace and grid.
 
@@ -133,59 +137,83 @@ and checking are in the next two. The rest is outside the compiler, on the same 
 | `trace.py` | stage 1: signals, the MLP and its activations, `circuit`, `trace` |
 | `grid.py` | stage 2: `layout`, and `held`, the grid as skip connections hold it (`rest`, `first` and `home` are for `transformer.py`) |
 | `emit.py` | stage 3: `convert`, `layer` and `emit`, for stacks, skip connections and norms |
-| `transformer.py` | tokens: a transformer shaped as Gemma is, in numpy: lookback attention, then a block of GLUs for each row, each between two RMSNorms |
+| `transformer.py` | tokens: a transformer shaped as Gemma is, in numpy: lookback attention, then a block of GLUs for each row, each between two RMSNorms, which writes its bits where the row before held nothing, or over bits that it has read |
 | `show.py` | how each stage prints |
 | `check.py` | each stage checked against the one before |
-| `lib.py` | circuits: `not_`, `and_`, `or_`, `xor`, `parity`, `add`, `sum_of_ands`, `sum_of_parities`, `table`, `ands`, `odd` |
-| `fold.py` | `fold`, a pass on traces that moves constants into the biases of what reads them |
+| `lib.py` | circuits: `not_`, `and_`, `or_`, `xor`, `parity`, `add`, `sum_of_ands`, `sum_of_parities`, `table`, `ands`, `odd`, `cover`, `steps` |
+| `fold.py` | `fold`, a pass on traces that moves constants into the biases of what reads them, and takes out the MLPs that are left as wires |
 | `relay.py` | `relay`, a pass that passes each signal on, so that an MLP reads only the layer before it |
 | `tiles.py` | `tiles`, a layout that keeps each circuit together, as a rectangle of the grid |
 | `gemma.py` | the transformer written into a checkpoint of Gemma 3 or Gemma 4, which has a norm wherever it does |
-| `beside.py` | the transformer and Gemma 3's own weights in one checkpoint, twice as wide: its blocks in front of Gemma's layers, and layers that carry what they give to the logits |
+| `beside.py` | the transformer and Gemma 3's own weights in one checkpoint, wider by the transformer's features: its blocks in front of Gemma's layers, and one layer after them that makes what they gave loud for the logits |
 
 The examples are programs on tokens, each with the lines that compile it into
 unsloth/gemma-3-270m, or beside it, and write the names of its features and hidden units beside
 the weights. Each file's docstring says how to run it; the first run fetches from huggingface.co.
 
 - `examples/adder.py` is decimal addition: after "123+246=" come "3", "6" and "9".
-- `examples/keccak.py` is a sponge on Keccak-p[50, 2], of `table`s on at most 3 bits each.
+- `examples/keccak.py` is a sponge on Keccak-p[50, 2], of `table`s on at most 5 bits each, in
+  7 of Gemma's layers and 66 of its features.
 - `examples/alongside.py` is a sponge on Keccak-p[200, 7] beside Gemma itself, in one bf16
-  model twice as wide and 53 layers deep: the sponge's 30 in front of Gemma's 18, four among
-  those that lift what it carries, as Gemma's stream grows, and one after them that makes it
-  loud for the logits. Every token has a code of 144 bits, and any two codes differ in a
-  quarter of their bits or more. Where the sponge gives, for the last two tokens, the code of a
-  token, half of the time, the next token is that one, and elsewhere what Gemma gives. It
-  compiles in about 11 seconds.
+  model of 34 layers and 896 features: the sponge's 15 layers, two a round and one for the
+  code of its token, on 256 features, in front of Gemma's 18, and one after them that makes
+  what the sponge gave loud for the logits. Every token has a code of 72 bits, and any two
+  codes differ in 16 bits or more. Where the sponge gives, for the last two tokens, the code
+  of a token, half of the time, the next token is that one, and elsewhere what Gemma gives.
+  It compiles in about 7 seconds, into 1.37 GB.
 - `examples/measure.py` says in a minute, on a GPU, how well the two of alongside.py get on:
   how often each is right, how large the sponge's weights and activations are beside Gemma's
   own, and how much noise on the weights each takes.
 
 On an H100, on the text of `src/reifier`, it says: where the sponge speaks, at half of the
-positions, its token is the model's at every one, by 36 or more in the logits. Where it is
-silent, the model's token is that of Gemma alone, as wide, at 98 positions in 100: no further
-from it than Gemma alone is from Gemma itself, whose weights it has, rounded to bf16 again. No
-weight of the sponge's is larger than the largest of Gemma's own of its kind: the nearest are
-those of a head's value, at 0.93 of it, and of a gate, at 0.85. Nor is its stream, what its
-blocks read, or a value or a hidden unit of theirs larger than the largest in Gemma's layers.
-A gate of its last layer is, 54.5 against 47.8, and so is what that layer gives, 164 against
-129, where Gemma's stream is small: on random tokens both are under Gemma's. And the logit of
-the sponge's token is larger by far, 157 as a rule and up to 290, where those of Gemma alone
-are 63 at most: the token of a code must win over every other, the nearest of which has half
-of its logit, by more than Gemma's own logits differ.
+positions, its token is the model's at every one, by 14 or more in the logits. Where it is
+silent, the model's token is that of Gemma alone, as wide, at 98 positions in 100: about as far
+from it as Gemma alone is from Gemma itself, whose weights it has, rounded to bf16 again. The
+logit of the sponge's token is about 68 as a rule and under 85 at most, where Gemma's top logit
+is under 50: the token of a code must win over every other, the nearest of which is four
+ninths of its logit behind, by more than Gemma's own logits differ. No weight of the sponge's
+is larger than the largest of Gemma's own of its kind, but those of the norm after the block
+of its last layer, 3,200, 1.9 times Gemma's largest, which keep that logit nearly the same at
+every token: the nearest of the others are those of a head's value, at 0.93 of Gemma's
+largest, and of a gate, at 0.92. Its stream, and what its blocks read and give, are under the
+largest in Gemma's layers, but some of what they hold is not: the gates of its `steps` reach
+nearly three times Gemma's largest, and a value and a hidden unit are 1.2 and 1.1 times.
 
-Noise on every weight leaves the sponge exact up to a point, and past it wrong everywhere,
-where Gemma fades. With every weight times 1 + 5% noise, Gemma alone keeps its own token at
-seven positions in ten, and the sponge's token is the model's at 9,994 in 10,000; at 7%, at a
-third, where Gemma keeps six in ten; at 10%, nowhere. With noise added to every projection and
-the embedding, of 5% of the root mean square of Gemma's own of its kind, the sponge keeps all
-of its tokens and Gemma eight in ten, and of 10%, nine in ten and six. With those rounded to 6
-bits it keeps all, and Gemma three in ten. But some noise breaks it sooner than Gemma. Added to
-the weights of norms, noise of 0.03% of the root mean square of Gemma's own leaves all of its
-tokens, and of 0.1% none, where Gemma keeps eight in ten: the weights of the norms after its
-blocks are about 1, where Gemma's are 21 as a rule and up to 1,660. And with one weight in
-1,000 of a projection or the embedding set to 0, it keeps 96 in 100 of its tokens and Gemma 88
-of its own; with one in 100, almost none, and Gemma six in ten. Where its token is lost,
-Gemma's is too, more often than in Gemma alone.
+Noise on every weight leaves the sponge exact up to a point, and past it wrong everywhere, where
+Gemma fades. With every weight times 1 + 1% noise, the sponge's token is the model's at all but
+one position in 10,000, and Gemma alone keeps its own token at 93 in 100; at 1.5%, at half,
+where Gemma keeps nine in ten; at 2%, nowhere. With noise added to every projection and the
+embedding, of 1% of the root mean square of Gemma's own of its kind, the sponge keeps all of its
+tokens, and of 2%, three in four, where Gemma keeps 95 in 100 and nine in ten; of 3%, none.
+With those rounded to 6 bits it keeps all, where Gemma keeps three in ten, and to 5 bits none.
+Two kinds of noise break it far sooner than Gemma. With one weight in 10,000 of a projection or
+the embedding set to 0, it keeps three in ten of its tokens, where Gemma keeps more than 95 in
+100 of its own; with one in 1,000, none. And added to the weights of norms, noise of 0.01% of
+the root mean square of Gemma's own leaves all of its tokens, and of 0.03% four in ten, where
+Gemma keeps 94 in 100: the weights of the norms after its blocks, the last aside, are 2 at
+most, where Gemma's are 21 as a rule and up to 1,660. Where its token is lost, Gemma's is too,
+more often than in Gemma alone.
+
+The model is made to be small, and gave up much of what a larger one had. Here it is against
+the same sponge in the design of commit 7e2804a, and in rounds of three layers, which
+`KINDS = "3333333"` in alongside.py still gives, each as `examples/measure.py` measures it:
+
+| | commit 7e2804a | rounds of three layers | now |
+|---|---|---|---|
+| layers | 53 | 40 | 34 |
+| the sponge's features, of the stream's | 601 of 1,280 | 256 of 896 | 256 of 896 |
+| file | 2.69 GB | 1.53 GB | 1.37 GB |
+| right with every weight times 1 + noise of | 5%, all but 6 in 10,000 | 4%, all but 4 in 1,000 | 1%, all but 1 in 10,000 |
+| its largest weight, of Gemma's largest of its kind | 0.93 | 1.9, of one norm | 1.9, of one norm |
+| its largest gate, of Gemma's largest | 1.1 | 1.2 | nearly 3 |
+
+The design of 7e2804a also had four layers that made what the sponge carries past Gemma's
+layers larger on the way. This one has none: with noise in the stream itself, of 0.1% of its
+size after every layer, the sponge loses one token in seven, where one such layer more keeps
+them all. And noise on the weights of the norms loses Gemma more of its own tokens than it does
+in Gemma alone (`reifier/beside.py` has the numbers). Rounds of two layers need about 20 hidden
+units a layer for each bit of the state: Keccak-p[200] fits in 4,096, and Keccak-p[400] would
+need more than 8,000.
 
 Not here yet: PyTorch export, layers as sparse matrices for very large circuits, and signals
 that are not bits.

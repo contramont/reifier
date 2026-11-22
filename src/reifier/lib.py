@@ -1,8 +1,13 @@
-"""A small circuit library, by what each circuit is made of. The xor is here three ways:
+"""A small circuit library, by what each circuit is made of. The xor is here in each kind:
 
 threshold gates   not_, and_, or_, xor (in two layers), add (of xor, or of parity for GLUs)
-one GLU           parity (the xor), sum_of_parities, sum_of_ands, table (any function of a few bits)
-ReLU units        odd (the xor), ands (sum_of_ands as two units a term)
+one GLU           parity (the xor), sum_of_parities, sum_of_ands, table: any function of a few
+                  bits, six at most in the examples; and cover, a sum of the units of a table
+ReLU units        odd (the xor), ands (sum_of_ands as two units a term), steps (the xor of many)
+
+A table, a cover and steps are what the examples are made of. A cover takes less noise on its
+weights than a table of the same function, and steps less than a table of the same bits, but
+each has far fewer units: their docstrings say why.
 """
 
 from functools import cache
@@ -88,20 +93,30 @@ def table(xs, value, name="table"):
     that is not as the cube has it, to -1/2 or less; its value rises as much, from the cube's.
     So of what its bits are off by, the unit passes on the square, and it stays off while they
     are off by less than a third of a bit, between them.
+    A table costs more with each bit that it reads. The xor of n bits has a unit for each of its
+    2**n cases, and each unit has a weight more on its gate and on its value, as much off as
+    the others, while the gate has no more room than it had. And a unit with all n of
+    its bits wrong has a gate of 1 - n FALL, and a value of 1 + n FALL times the cube's: of six
+    bits, the largest gates and values of a table (see transformer.py). The examples have
+    tables of up to six bits.
     A value can be 1/2, which is neither bit and is held as 0: the MLP then has a second output,
     the rest, to which the units of such cubes give their 1/2, so that the two are, between them,
     as large in every case. Nothing need read the rest"""
     cover = cubes(tuple(value(case) for case in product([0, 1], repeat=len(xs))))
-    g, gb, v, vb, wo = [], [], [], [], []  # of each hidden unit: a row of each, and a column of wo
-    for s, y in cover:
-        t, c = s.count(1), y - 1 / 2 or 1 / 2  # what the unit gives: to the rest, if y is 1/2
-        g.append([FALL * x for x in s]), gb.append(1 - FALL * t)  # 1 with its t bits on alone
-        v.append([-FALL * c * x for x in s]), vb.append(c * (1 + FALL * t))
-        wo.append([0, 1] if y == 1 / 2 else [1, 0])
+    units = [unit(s, y - 1 / 2 or 1 / 2) for s, y in cover]  # to the rest, if y is 1/2
     none = [0] * len(xs)  # the unit on no bits
-    g.append(none), gb.append(1), v.append(none), vb.append(1 / 2), wo.append([1, 1])
+    g, gb, v, vb = zip(*units, (none, 1, none, 1 / 2))
+    wo = [[0, 1] if y == 1 / 2 else [1, 0] for _, y in cover] + [[1, 1]]
     rest = any(y == 1 / 2 for _, y in cover)
     return mlp(xs, [*g, *v], [*gb, *vb], "reglu", np.array(wo).T[: 1 + rest], name)[0]
+
+
+def unit(s, c=1.0):
+    """The gate and value of a unit of a table, each as weights and a bias: the gate is 1 in the
+    cube s, with 1 for a bit that is on in it, -1 for off and 0 for either, and FALL less for
+    each of its bits that is not; the value is c where the gate is 1, and rises as much"""
+    t = list(s).count(1)
+    return [FALL * x for x in s], 1 - FALL * t, [-FALL * c * x for x in s], c * (1 + FALL * t)
 
 
 @cache
@@ -110,7 +125,7 @@ def cubes(values: tuple) -> list[tuple[tuple[int, ...], float]]:
     one value each: (s, value), where s has, for each bit, 1 if the cube has it on, -1 if off,
     and 0 if either. No two share a case. They are the leaves of a tree that asks for a bit at a
     time, in one order, until the value is known: of every order, the one with the fewest, if
-    the bits are 5 or fewer"""
+    the bits are 5 or fewer, and else the order they are given in"""
     k = len(values).bit_length() - 1
     cases = list(product([0, 1], repeat=k))
 
@@ -141,3 +156,49 @@ def odd(xs, name="odd"):
     them hold"""
     ways = [list(s) for s in product([-1, 1], repeat=len(xs)) if s.count(1) % 2]
     return ands(xs, [(s, 1) for s in ways], name)
+
+
+def cover(xs, terms, name="cover"):
+    """The sum of c [the literals s all hold] over terms (s, c), each a unit of `table`: 1 in the
+    cube that s is, with 1 for a bit that is on in it, -1 for off and 0 for either, and flat at
+    every case. A term of no literals is a constant. The cubes may share cases, as those of a
+    table do not: where two units are on, what each is off by adds up, times its c. So a cover
+    takes less noise on its weights than a table of the same function, and is for a function
+    whose table would have too many units: chi of examples/keccak.py, on six bits, is 18 units
+    as a cover and 41 as a table. The sum must be 0 or 1 in every case: fold and grid.layout
+    take what an MLP of one output gives to be a bit, and a 1/2 needs a rest (see table)"""
+    g, gb, v, vb = zip(*(unit(s) for s, _ in terms)) if terms else [()] * 4
+    return mlp(xs, [*g, *v], [*gb, *vb], "reglu", [[c for _, c in terms]], name)[0]
+
+
+def steps(xs, marks, name="steps", flip=0, room=1 / 4):
+    """The xor of xs, negated if flip, as steps of a count, of ReLU units: a table of as many bits
+    would have a unit for each of their cases. For a mark, a case of xs, the xor is whether the
+    count z of the xs that differ from it is odd, or even. From the middle count out, each count
+    k has two units, relu(z - k + 1/2 + d) and relu(z - k + 1/2 - d), for d = 1/2 - room: their
+    difference, over 2 d, is a step from 0 at k - 1 to 1 at k, flat on both sides for a count
+    that is up to `room` off, and so for bits that are off by as much between them. A unit is
+    on at the counts beyond its step, away from the middle, and gives as much as the count is
+    beyond: the two of a step differ by 1 wherever they are on, so what their weights are off by
+    counts for more the further the count is from the middle. So the xor is the mean of that of
+    several marks, which should be far from each other and from each other's negations: any
+    case is then near the middle for most of them, and what the units are off by averages.
+    Steps of n bits have 2 n units a mark, and one more: of ten bits and five marks, 101, where
+    a table has 1,025. They take less noise on their weights than that table, and a unit at a
+    count far from its step has the gate furthest from 0 of the examples, or, if it is on, the
+    largest hidden unit (see transformer.py). The xs are to be distinct, as keccak.parity
+    makes them: a bit that is there twice, alike in a mark, has a gate weight twice as large,
+    more than transformer.block takes"""
+    n, d, units, fixed = len(xs), 1 / 2 - room, [], 0.0
+    for mark in marks:
+        sign, base = [1 - 2 * bit for bit in mark], sum(mark)  # z is base + sign . xs
+        odd = lambda z, base=base: (z + base + flip) % 2  # the xor, at a count of z
+        fixed += odd(n // 2) / len(marks)  # what the mark gives at the middle count
+        for k in range(n // 2 + 1, n + 1):  # [z >= k], times what the xor changes by there
+            c = (odd(k) - odd(k - 1)) / (2 * d * len(marks))
+            units += [(sign, base - k + 1 / 2 + e, c * e / d) for e in (d, -d)]
+        for k in range(n // 2 - 1, -1, -1):  # [z <= k]
+            c = (odd(k) - odd(k + 1)) / (2 * d * len(marks))
+            units += [([-x for x in sign], k - base + 1 / 2 + e, c * e / d) for e in (d, -d)]
+    wi, b, wo = zip(*units)
+    return mlp(xs, [*wi, [0] * n], [*b, 1], "relu", [[*wo, fixed]], name)[0]
