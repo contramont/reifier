@@ -1,10 +1,10 @@
 """Keccak-p as a circuit, a sponge on it, and that sponge compiled into Gemma.
 
-Bits are in the order of FIPS 202, the least significant first. Every bit is one GLU
-that is flat at every point of its inputs, so that a GLU passes on only the squares of the errors
-it reads, and bf16 rounds them away: a parity is a function of the count of its bits, and chi a
-signed sum of ANDs of literals. The operations are arguments, so the same functions also run on
-plain bits, with no tracing: see the tests.
+Bits are in the order of FIPS 202, the least significant first. Every bit is a table of lib.py,
+a GLU with a hidden unit for each cube of the cases of the few bits that it reads, flat at every
+case, so that it passes on only the squares of the errors it reads: a parity of three bits is a
+table, one of five is two, and chi is one, of three. The operations are arguments, so the same
+functions also run on plain bits, with no tracing: see the tests.
 
 The model has 256 symbols, single characters: the token "c" of Gemma and the 255 after it, each
 coded by the 8 bits of its rank among them. The greedy next token is the symbol whose rank is
@@ -24,7 +24,7 @@ from pathlib import Path
 from reifier import gemma
 from reifier.check import check_transformer
 from reifier.fold import fold
-from reifier.lib import parity, sum_of_ands
+from reifier.lib import table
 from reifier.trace import const, trace
 from reifier.transformer import transformer
 
@@ -32,10 +32,17 @@ FIRST, DASH = 236755, 236772  # the tokens "c" and "-" of Gemma: of the symbols 
 CODES = {FIRST + n: [n >> i & 1 for i in range(8)] for n in range(256)}  # of each symbol
 
 
+def parity(xs, name="parity"):
+    """The xor of xs: a table of the first three, then of what it gives and the next two, and so
+    on: a table of few bits is off by less (see reifier/transformer.py)"""
+    while len(xs) > 3:
+        xs = [table(xs[:3], lambda case: sum(case) % 2, name + "'"), *xs[3:]]
+    return table(xs, lambda case: sum(case) % 2, name)
+
+
 def chi(a, b, c, flip, name="chi"):
-    """a xor (c and not b), negated if flip: [a] + [~b c] - 2 [a ~b c], with ~a for a if flip"""
-    s = -1 if flip else 1
-    return sum_of_ands([a, b, c], [([s, 0, 0], 1), ([0, -1, 1], 1), ([s, -1, 1], -2)], name)
+    """a xor (c and not b), negated if flip: a table of the three"""
+    return table([a, b, c], lambda v: v[0] ^ (v[2] & (1 - v[1])) ^ int(flip), name)
 
 
 def rc(t):
@@ -89,12 +96,12 @@ def sponge(msg, rounds=2, width=50, rate=40, const=const, **operations):
 
 def next_token(msg):
     """The code of the symbol after the three of msg: the first byte y that the sponge gives, if
-    y7 is 1, and else the code of DASH. Bit i is one GLU: [y7 yi], plus [~y7] where DASH has a 1"""
-    y, terms = sponge(msg)[:8], [([1, 1], 1), ([-1, 0], 1)]
-    return [
-        sum_of_ands([y[7], y[i]], terms[: 1 + bit], f"next[{i}]")
-        for i, bit in enumerate(CODES[DASH])
-    ]
+    y7 is 1, and else the code of DASH. Bit i is a table of y7 and yi: yi, or DASH's bit"""
+    y, bits = sponge(msg)[:8], []
+    for i, dash in enumerate(CODES[DASH]):
+        read, name = [y[7], y[i]][: 2 - (i == 7)], f"next[{i}]"  # y7 once
+        bits.append(table(read, lambda case, dash=dash: case[-1] if case[0] else dash, name))
+    return bits
 
 
 def program():

@@ -1,6 +1,7 @@
 """How each stage prints: show(x) is a trace, a grid, a network or a transformer as text."""
 
 from collections.abc import Iterator
+from dataclasses import replace
 from itertools import pairwise
 
 import numpy as np
@@ -69,9 +70,16 @@ def network(net: Network) -> Iterator[str]:
 
 
 def transformer(m: Transformer) -> Iterator[str]:
-    """Each head, by the features it writes, then the network"""
-    yield f"{len(m.q)} heads on {len(m.codes)} tokens"
+    """Each head, by the features it writes, then each block: its hidden units, as a network's,
+    on what the norm before it gives, READ for a bit that is 1, with the weights on the
+    features that hold ONE summed"""
+    yield f"{len(m.q)} heads on {len(m.codes)} tokens, {len(m.grid[0])} features"
     for h, o in enumerate(m.o):
-        names = " ".join(m.net.grid[0][f] for f in np.flatnonzero(o.any(1)))
-        yield f"head {h}: the code of the token {h} back -> {names}"
-    yield from network(m.net)
+        names = " ".join(m.grid[0][f] for f in np.flatnonzero(o.any(1)) if m.grid[0][f])
+        yield f"head {h}: the code of the token {h} back -> {names or 'nothing'}"
+    for d, b in enumerate(m.blocks, 1):
+        ones = np.array([s == "ONE" for s in b.layer.inputs])
+        wi = np.c_[b.layer.wi[:, ones].sum(1), b.layer.wi[:, ~ones]]
+        names = ["ONE", *(s for s in b.layer.inputs if s != "ONE")]
+        yield f"block {d}: {len(b.layer.hidden)} hidden units of {b.layer.activation}"
+        yield from ("  " + line for line in units(replace(b.layer, inputs=names, wi=wi)))

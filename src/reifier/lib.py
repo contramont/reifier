@@ -1,13 +1,18 @@
 """A small circuit library, by what each circuit is made of. The xor is here three ways:
 
 threshold gates   not_, and_, or_, xor (in two layers), add (of xor, or of parity for GLUs)
-one GLU           parity (the xor), sum_of_parities, sum_of_ands
-ReLU units        odd (the xor), ands (sum_of_ands as two units a term: see beside.py)
+one GLU           parity (the xor), sum_of_parities, sum_of_ands, table (any function of a few bits)
+ReLU units        odd (the xor), ands (sum_of_ands as two units a term)
 """
 
-from itertools import product
+from functools import cache
+from itertools import permutations, product
+
+import numpy as np
 
 from .trace import circuit, const, glu, mlp, threshold_gate
+
+FALL = 1.5  # a unit of a table is 1 in its cube, and this much less for each bit outside it
 
 
 def not_(x):
@@ -72,11 +77,60 @@ def sum_of_ands(xs, terms, name="sum_of_ands"):
     return glu(xs, hidden_units, name)
 
 
+def table(xs, value, name="table"):
+    """Any function of a few bits as one GLU: value(case) for each case of xs, a tuple of bits. The
+    cases are split into cubes, each of the cases that some of the bits have one way, whatever
+    the others are, and all of one value (see cubes). Each cube has a hidden unit that is 1 in
+    it and 0 outside, and flat at every case, and gives the cube's value less 1/2; a last unit,
+    on no bits, gives the 1/2. So one unit is on, whatever the bits: a network that holds bits as
+    -1 and 1 gets either from it, as large, and a unit that is a little off moves one cube alone
+    (see transformer.py). A unit's gate is 1 in its cube and falls by FALL for each of its bits
+    that is not as the cube has it, to -1/2 or less; its value rises as much, from the cube's.
+    So of what its bits are off by, the unit passes on the square, and it stays off while they
+    are off by less than a third of a bit, between them.
+    A value can be 1/2, which is neither bit and is held as 0: the MLP then has a second output,
+    the rest, to which the units of such cubes give their 1/2, so that the two are, between them,
+    as large in every case. Nothing need read the rest"""
+    cover = cubes(tuple(value(case) for case in product([0, 1], repeat=len(xs))))
+    g, gb, v, vb, wo = [], [], [], [], []  # of each hidden unit: a row of each, and a column of wo
+    for s, y in cover:
+        t, c = s.count(1), y - 1 / 2 or 1 / 2  # what the unit gives: to the rest, if y is 1/2
+        g.append([FALL * x for x in s]), gb.append(1 - FALL * t)  # 1 with its t bits on alone
+        v.append([-FALL * c * x for x in s]), vb.append(c * (1 + FALL * t))
+        wo.append([0, 1] if y == 1 / 2 else [1, 0])
+    none = [0] * len(xs)  # the unit on no bits
+    g.append(none), gb.append(1), v.append(none), vb.append(1 / 2), wo.append([1, 1])
+    rest = any(y == 1 / 2 for _, y in cover)
+    return mlp(xs, [*g, *v], [*gb, *vb], "reglu", np.array(wo).T[: 1 + rest], name)[0]
+
+
+@cache
+def cubes(values: tuple) -> list[tuple[tuple[int, ...], float]]:
+    """The cases of some bits, whose values are `values`, in the order of product, as cubes of
+    one value each: (s, value), where s has, for each bit, 1 if the cube has it on, -1 if off,
+    and 0 if either. No two share a case. They are the leaves of a tree that asks for a bit at a
+    time, in one order, until the value is known: of every order, the one with the fewest, if
+    the bits are 5 or fewer"""
+    k = len(values).bit_length() - 1
+    cases = list(product([0, 1], repeat=k))
+
+    def leaves(s, order):
+        cube = [all(x == 0 or (x > 0) == bit for x, bit in zip(s, case)) for case in cases]
+        inside = {y for y, held in zip(values, cube) if held}
+        if len(inside) == 1:
+            return [(s, inside.pop())]
+        i, later = order[0], order[1:]
+        return [leaf for x in (-1, 1) for leaf in leaves(s[:i] + (x,) + s[i + 1 :], later)]
+
+    orders = permutations(range(k)) if k < 6 else [tuple(range(k))]  # of many bits: as given
+    return min((leaves((0,) * k, order) for order in orders), key=len)
+
+
 def ands(xs, terms, name="ands"):
     """The sum of c [the literals s all hold] over terms (s, c), as sum_of_ands, but each of two
     ReLU units: 4 c (relu(z - t + 1/2) - relu(z - t + 1/4)) is c where s holds and 0 where a
     literal fails, and the same for a z that is up to 1/4 off. A ReLU unit has no value but 1:
-    what it gives grows as what it reads does, where a GLU gives the square (see beside.py)"""
+    what it gives grows as what it reads does, where a GLU gives the square"""
     signs = [s for s, _ in terms for _ in range(2)]
     b = [k - s.count(1) for s, _ in terms for k in (1 / 2, 1 / 4)]
     return mlp(xs, signs, b, "relu", [[k * c for _, c in terms for k in (4, -4)]], name)[0]

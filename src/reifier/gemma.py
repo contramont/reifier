@@ -2,40 +2,40 @@
 gemma-4-E2B.
 
 Gemma's weights are the transformer's, on the same features: a token's embedding, tied to the
-logits, the query, key, value and output of each head, and each layer, as a feed-forward block.
-What Gemma adds:
+logits, the query, key, value and output of each head, each block, and the weights of the norms
+around them, which Gemma has where the transformer does. What differs:
 
-- its stream holds ONE as 1, and it scales embeddings by sqrt(size), for its `size` features:
-  an embedding is 1 / sqrt(size) in ONE and ± as much in each bit of the code;
+- Gemma has `size` features, more than the transformer, and a norm takes the mean square over
+  all of them: so the weight of each norm is the transformer's times sqrt(width / size);
+- it scales embeddings by sqrt(size), so an embedding is stored that much smaller, and the last
+  norm's weights are as much larger, for the logits to be the transformer's;
 - attention has norms of its own on queries and keys, in Gemma 4 on values too, and heads that
   share keys and values, 4 a layer in 270M and 8 in E2B. The first heads of the transformer are
   layer 0's. If it has more, one head of layer 1 copies as many codes again from a token
   further back, where layer 0 put them, then one of layer 2, and so on, and the blocks start in
-  the last layer that attends, where all that they read is written;
-- a norm follows each feed-forward block too: the unit ONE also puts a large k into ONE, where
-  that norm drops it, so that what the block adds has a fixed norm whatever the bits are. That
-  norm also undoes what the norm before the block is off by, so ONE need not be large here;
-- its numbers are bf16, of 8 bits: a gate's sums must be small enough to be exact (see block),
-  a norm must give ±1 back as ±1 (see exact), and the right token's logit is 8, for a code of
-  any length, before the cap of Gemma 4, 30 tanh(logit / 30): logits near 30 are too close for
-  bf16 to tell apart.
+  the last layer that attends, where all that they read is written. Layer 0 puts there the bits
+  that the program reads of its own tokens: so of a token further back it must read no others;
+- its numbers are bf16, of 8 bits. Nothing here needs more: a weight or a sum that is rounded
+  is a little off, and what is a little off is read right (see transformer.py). The right
+  token's logit is LOGIT, or what the cap of Gemma 4, 30 tanh(logit / 30), leaves of it.
 
-Every tensor not set so is zero, so its module gives zero, and layer scalars are one. A norm of
-Gemma 3 multiplies by 1 + its weight, so one that is set is stored less 1: its entries not set
-are -1, and drop their features, as zeros do in Gemma 4, and one that is not set is beside
-projections that are zero. The <bos>, whose embedding is zero, stays zero at every depth, and
-no head whose token is in the stream attends to it.
+Every projection not set so is zero, so its module gives zero, and layer scalars are one. A norm
+of Gemma 3 multiplies by 1 + its weight, so each is stored less 1: its entries not set are -1,
+and drop their features, as zeros do in Gemma 4. That goes for the norms around a module that
+gives zero, too: were its weights a little off, a norm after it that multiplied by 1 would
+make what it gives as large as a feature, whatever it is. The <bos>, whose embedding is zero,
+stays zero at every depth, and no head whose token is in the stream attends to it. Any other
+token without a code is zeros where it is embedded, and what follows it means nothing: its
+heads, with no query, attend to all before it alike.
 """
 
 import json
 import math
-from itertools import pairwise
 from pathlib import Path
 
 import numpy as np
 
-from .emit import EPS
-from .transformer import Transformer
+from .transformer import READ, SIZE, VALUE, Transformer
 
 REVISIONS = {  # the checkpoints: a repo of huggingface.co, and the revision that weights ran on
     "unsloth/gemma-3-270m": "edcf1fe394ee1168e7c5538afd104cfb1f7947e6",
@@ -64,66 +64,61 @@ def round_to_bf16(x) -> np.ndarray:
 
 def build_weights(m: Transformer, shapes: dict, config: dict):
     """The weights of m as Gemma's: those that are set, by their names in the text model, the
-    others being zero. shapes are checkpoint_metadata's, and config its text config. And the
-    grid: m's with pads, more features, which each layer that attends sets to ±1 and nothing
-    reads, as few as make every norm exact (see exact)"""
+    others being zero. shapes are checkpoint_metadata's, and config its text config. And m's grid,
+    which names the first of Gemma's features at every depth"""
     w, plus = LazyZeros(shapes), config["model_type"] == "gemma3_text"
-    for k in shapes:
-        if k.endswith("layer_scalar"):
-            w[k.removeprefix(w.prefix)][:] = 1
-    size, grid, b = len(w["norm.weight"]), m.net.grid, len(m.v)  # b: the bits of a code
+    for k in shapes:  # every norm is set, so that one with nothing to do multiplies by 0
+        if k.startswith(w.prefix) and k.endswith(("layer_scalar", "norm.weight")):
+            w[k.removeprefix(w.prefix)][:] = k.endswith("layer_scalar")
+    size, width, name = len(w["norm.weight"]), len(m.grid[0]), m.trace.name
+    assert m.size is None and m.out.any(), f"{name} has no logits of its own: it is for beside.py"
     heads, kinds = config["num_attention_heads"], config["layer_types"]
-    outs = [m.o[h : h + heads] for h in range(0, len(m.o), heads)]  # of m's heads, by Gemma's layer
-    n, sees = len(outs), [(b * len(o), 1) for o in outs]  # the norm after each attention,
-    sees += [(sum(s is not None for s in row), n) for row in grid]  # and the norm that reads a row
-    few = (p for p in range(size) if all(exact(c + k * p, size, plus) for c, k in sees))
-    each = next(few, size)  # pads of each layer: a norm sees c of ±1, and the pads of k layers
-    pads = np.split(len(grid[0]) + np.arange(n * each), n)
-    grid = [row + [f"pad[{i}]" for i in range(n * each)] for row in grid]
-    name = m.net.trace.name
-    assert len(grid[0]) <= size, f"{name} needs {len(grid[0])} features, and Gemma has {size}"
+    n = -(-len(m.o) // heads)  # the layers that attend
+    assert width <= size, f"{name} needs {width} features, and Gemma has {size}"
     assert "full_attention" not in kinds[:n], f"{name} needs Gemma's first {n} layers to slide"
-    deep = n - 1 + len(m.net.layers)  # the first block is in the last layer that attends
+    deep = n - 1 + len(m.blocks)  # the first block is in the last layer that attends
     assert deep <= len(kinds), f"{name} needs {deep} layers, and Gemma has {len(kinds)}"
-    coded = np.flatnonzero(m.embed.any(1))  # ONE is 1 here, and Gemma scales by sqrt(size)
-    w["embed_tokens.weight"][coded, : 1 + b] = np.sign(m.embed[coded]) / np.sqrt(size)
-    attention(w, 0, m, m.q[:heads], m.v, outs[0], pads[0], config)
-    for i, far in enumerate(outs[1:], 1):  # from the token i * heads back, what layer 0 copied
-        value = np.hstack(m.o[: len(far)]).T  # of that token and those before it: their codes
-        attention(w, i, m, m.q[i * heads :][:1], value, [np.hstack(far)], pads[i], config)
-    for d, (layer, rows) in enumerate(zip(m.net.layers, pairwise(grid)), n - 1):
-        block(w, d, layer, *rows)
-    signals = sum(s is not None for s in grid[-1])  # each ±1: the square of the stream's norm
-    w["norm.weight"][1 : 1 + b] = 8 / b * np.sqrt(signals)  # a code's bits: a logit of 8
+    wide = math.sqrt(width / size)  # a norm of Gemma's, of one of m's: its mean is over size
+    coded = np.flatnonzero(m.embed.any(1))  # Gemma scales an embedding by sqrt(size)
+    w["embed_tokens.weight"][coded, : m.embed.shape[1]] = m.embed[coded] / math.sqrt(size)
+    held = np.zeros(width)  # the square of what each feature holds, before each layer
+    held[: m.embed.shape[1]] = SIZE**2
+    given = m.writes * math.sqrt(width / np.count_nonzero(m.writes))  # to each feature, by heads
+    for i in range(n):  # layer 0 has m's first heads; layer i, one that looks i * heads back
+        o = m.o[i * heads : (i + 1) * heads]
+        if i:  # at what layer 0 copied from that token and those before it: their codes
+            value, o = VALUE * np.hstack([x > 0 for x in m.o[: len(o)]]).T, [np.hstack(o)]
+            lost = o[0].any(0) & ~value.any(1)  # bits to copy that layer 0 did not put there
+            assert not lost.any(), f"{name} reads bits {i * heads} tokens back that layer 0 has not"
+        else:
+            value = m.v
+        wrote = np.flatnonzero(np.hstack(o).any(1))
+        rms = np.sqrt(held.sum() / size)  # of the stream, and each feature read is made READ
+        reads = np.where(value.any(0) | m.k.any(0), READ * rms / np.sqrt(held + (held == 0)), 0)
+        writes = np.zeros(width)
+        writes[wrote] = given[wrote] * math.sqrt(len(wrote) / size)
+        attention(w, i, m, m.q[i * heads :][: len(o)], value, o, reads, writes, config)
+        sign = np.sign(np.hstack(o).sum(1))  # a feature is given a bit, or its own, negated
+        held[wrote] = (np.sqrt(held[wrote]) + sign[wrote] * given[wrote]) ** 2
+    for d, b in enumerate(m.blocks, n - 1):
+        block(w, d, b, wide)
+    w["norm.weight"][:width] = m.out * math.sqrt(width)
     for k, v in w.items():
         if k.endswith("norm.weight"):
             v -= plus  # Gemma 3's norm multiplies by 1 + weight
-    return w, grid
+    return w, m.grid
 
 
-def exact(count: int, size: int, plus: int) -> bool:
-    """Whether a norm gives count features of ±1, of size, back as ±1 in bf16. Its weight is
-    sqrt(count / size), stored less plus and rounded to 8 bits. In Gemma 4, where plus is 0,
-    what comes out is ±0.996 for one count in nine. In Gemma 3, where it is 1, a weight under
-    1/2 is rounded to 1/256: of 640, half of the counts below 157 are off, and none above. A
-    gate's sums and products are then rounded, and the bit it makes can be far off"""
-    weight = round_to_bf16(np.sqrt(count / size) - plus) + plus
-    return bool(round_to_bf16(weight / np.sqrt(count / size + EPS)) == 1)
-
-
-def attention(w, i, m, queries, value, outputs, pads, config):
+def attention(w, i, m, queries, value, outputs, reads, writes, config):
     """The attention of layer i: a head for each of queries and outputs, which are m's heads' or
-    stand for them, on m's key and on value, and the first head's first dimension into each of
-    pads too. They go where RoPE turns Gemma's dimensions as m's, and all read ONE. q_norm and
-    k_norm make a query and a key a vector of mean square 1 times its norm's weight, and Gemma 3
-    multiplies their product by `scale`, 1/16: the weight of q_norm makes a head score its token
-    what it does in m, and so any other in a sliding layer's context MARGIN less. Gemma 4's
-    v_norm makes a value's entries ±sqrt(head_dim / len(value)), and the output scales them back
-    to ±1, or a number that bf16 has near it. Gemma 3 has no v_norm, and its output scales
-    nothing: a value is as large as the norm before the attention left its token, 1 or more,
-    which is the same for every token in layer 0, and a later layer has one head. So what a
-    layer writes is the same in size, and the norm after makes it ±1"""
-    a, n, width = f"layers.{i}.self_attn.", len(w["norm.weight"]), m.k.shape[1]
+    stand for them, on m's key and on value, between norms of weights reads and writes. They go
+    where RoPE turns Gemma's dimensions as m's, and all read ONE. q_norm and k_norm make a query
+    and a key a vector of mean square 1 times its norm's weight, and Gemma 3 multiplies their
+    product by `scale`, 1/16: the weight of q_norm makes a head score its token what it does in
+    m, and so any other in a sliding layer's context MARGIN less. A key and a value are stored
+    as large as m has them, a query as large as the key, and an output half as large: the norms
+    make of them what they will, q_norm, v_norm in Gemma 4, and the norm after the attention"""
+    a, width = f"layers.{i}.self_attn.", m.k.shape[1]
     head_dim, dims = len(w[a + "q_norm.weight"]), np.arange(len(value))
     assert len(value) <= head_dim, f"layer {i}: a head of {head_dim} cannot copy {len(value)} bits"
     theta = config.get("rope_local_base_freq")  # of RoPE in a sliding layer: Gemma 3's name,
@@ -132,43 +127,30 @@ def attention(w, i, m, queries, value, outputs, pads, config):
     assert np.allclose(theta ** -(pairs / (head_dim // 2)), m.turns), "RoPE has no such turns"
     used = np.r_[pairs, pairs + head_dim // 2]
     scale = config.get("query_pre_attn_scalar", 1) ** -0.5
-    out = 1 if config["model_type"] == "gemma3_text" else np.sqrt(len(value) / head_dim)
     for head, (q, o) in enumerate(zip(queries, outputs)):
+        q = q / np.abs(q).max() * np.abs(m.k).max()  # as large as a key: q_norm makes it what it is
         w[a + "q_proj.weight"][head * head_dim + used, :width] = q
-        w[a + "o_proj.weight"][:width, head * head_dim + dims] = out * o
-    w[a + "o_proj.weight"][pads, 0] = out
+        w[a + "o_proj.weight"][:width, head * head_dim + dims] = o / 2
     for head in range(0, len(w[a + "k_proj.weight"]), head_dim):  # heads share keys and values
         w[a + "k_proj.weight"][head + used, :width] = m.k
         w[a + "v_proj.weight"][head + dims, :width] = value
-    own = np.linalg.norm(queries[0]) * np.linalg.norm(m.k)  # what a head scores its token in m
+    own = READ**2 * np.linalg.norm(queries[0].sum(1)) * np.linalg.norm(m.k.sum(1))  # a token's
     w[a + "q_norm.weight"][used] = own / head_dim / scale
     w[a + "k_norm.weight"][used] = 1
-    w[f"layers.{i}.input_layernorm.weight"][np.flatnonzero(m.k.any(0) | value.any(0))] = 1
-    written = [*np.flatnonzero(np.hstack(outputs).any(1)), *pads]
-    w[f"layers.{i}.post_attention_layernorm.weight"][written] = np.sqrt(len(written) / n)
+    w[f"layers.{i}.input_layernorm.weight"][:width] = reads
+    w[f"layers.{i}.post_attention_layernorm.weight"][:width] = writes
 
 
-def block(w, i, layer, before, row, k=2.0**14):
-    """The feed-forward block of layer i: `layer` of the transformer, which makes row of the
-    grid from the row before. Every feature that holds a signal is 1 in size, so the norm before
-    the block has one weight. What the block adds depends on the bits, so the unit ONE, which
-    gives the -1s, also puts k into ONE, where the norm after the block drops it: the norm is
-    k's but for a part in k^2 over 4 for each feature written. A gate's units u+ and u- differ
-    by 32 in what they sum, and bf16 holds both sums only below 4096: a larger gate could be
-    wrong, silently"""
-    a, n, size = f"layers.{i}.", len(layer.hidden), len(w["norm.weight"])
-    most = (layer.wi[:n, 0] + abs(layer.wi[:n, 1:]).sum(1)).max()  # no gate can sum more than this
-    fits = most < 4096 and all((round_to_bf16(v) == v).all() for v in (layer.wi, layer.wo))
-    assert fits, f"layer {i}: a gate's weights or its sums are not exact in bf16"
-    read, signals = np.flatnonzero(layer.wi.any(0)), sum(s is not None for s in before)
-    w[a + "pre_feedforward_layernorm.weight"][read] = np.sqrt(signals / size)  # the stream's rms
+def block(w, i, b, wide):
+    """The feed-forward block of layer i: b, of the transformer, its layer between norms of its
+    weights, times wide"""
+    a, n, width = f"layers.{i}.", len(b.layer.hidden), len(b.reads)
     gate, up, down = (w[f"{a}mlp.{p}_proj.weight"] for p in ("gate", "up", "down"))
     assert n <= len(gate), f"layer {i} needs {n} hidden units, and Gemma has {len(gate)}"
-    gate[:n, : len(layer.inputs)], up[:n, : len(layer.inputs)] = layer.wi[:n], layer.wi[n:]
-    down[: len(layer.outputs), :n] = layer.wo
-    down[0, 0] = k  # the unit ONE, the first, into ONE
-    written = [f for f, (old, new) in enumerate(zip(before, row)) if old != new]
-    w[a + "post_feedforward_layernorm.weight"][written] = k / np.sqrt(size)
+    gate[:n, :width], up[:n, :width] = b.layer.wi[:n], b.layer.wi[n:]
+    down[:width, :n] = b.layer.wo
+    w[a + "pre_feedforward_layernorm.weight"][:width] = b.reads * wide
+    w[a + "post_feedforward_layernorm.weight"][:width] = b.writes * wide
 
 
 def cache_file(repo: str) -> Path:
@@ -196,15 +178,16 @@ def save(m: Transformer, out_dir: Path, repo: str):
     names and shapes of its tensors (see checkpoint_metadata), as bf16"""
     shapes, config = checkpoint_metadata(repo)
     w, grid = build_weights(m, shapes, config.get("text_config", config))  # all, if only of text
-    write(out_dir, config, shapes, w, grid, [layer.hidden for layer in m.net.layers])
+    write(out_dir, config, shapes, w, grid, [b.layer.hidden for b in m.blocks])
 
 
 def write(out_dir: Path, config: dict, shapes: dict, w, grid, hidden):
     """A checkpoint in out_dir, which transformers loads from there: config.json, and
     model.safetensors, with the tensors of shapes as bf16: those of w, the others zeros. Chunks
     of zeros are left as holes in the file, which read as zeros. The names go in
-    out_dir/names.json: grid, whose rows are the features before the first layer and after
-    each, and hidden, the names of the hidden units of each"""
+    out_dir/names.json: grid, whose rows are the features after the heads and after each layer
+    that follows, and hidden, the names of the hidden units of each: of `save`, the layers from
+    the last that attends on, as far as the transformer has blocks"""
     header, end = {"__metadata__": {"format": "pt"}}, 0
     for k, s in shapes.items():
         header[k] = {"dtype": "BF16", "shape": s, "data_offsets": [end, end + 2 * math.prod(s)]}

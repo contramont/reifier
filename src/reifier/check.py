@@ -70,7 +70,7 @@ def check_net(net: Network, tol: float = 1e-9):
     check_streams(net, net.run(np.atleast_2d(net.stream(values, 0))), values, tol)
 
 
-def check_streams(net: Network, streams, values: dict, tol: float):
+def check_streams(net: Network | Transformer, streams, values: dict, tol: float):
     """streams, one at each depth, against what net's grid says for the values {name: value on
     each case} of its signals, to within tol"""
     for d, x in enumerate(streams):
@@ -82,20 +82,22 @@ def check_streams(net: Network, streams, values: dict, tol: float):
         )
 
 
-def check_transformer(m: Transformer, tokens, tol: float = 1e-9):
+def check_transformer(m: Transformer, tokens, tol: float = 0.05):
     """m against its grid on tokens, each with a code, and as many as the program reads at least:
     at every position that is the last of as many tokens as the program reads, every feature at
-    every depth holds what the grid says for their bits, to within tol, and the largest logit is
-    that of the token whose code the trace gives, if it is the code of one. Position 0 is the
-    <bos>, so tokens[p - 1] is at position p"""
-    t, bits = m.net.trace, np.array([m.codes[token] for token in tokens], float)
-    b, window = bits.shape[1], len(m.q)
+    every depth holds what the grid says for their bits, to within tol of a bit's size, and the
+    largest logit is that of the token whose code the trace gives, if it is the code of one,
+    and if m has logits of its own (see beside.front). Position 0 is the <bos>, so tokens[p - 1]
+    is at position p"""
+    t, bits, window = m.trace, np.array([m.codes[token] for token in tokens], float), len(m.q)
     streams, logits = m.run(tokens)
     read = np.array([bits[p - window : p].ravel() for p in range(window, len(tokens) + 1)])
-    values = t.values(read) | {f"code[{i}]": read[:, i - b] for i in range(b)}
-    check_streams(m.net, [x[window:] for x in streams], values, tol)
+    values = t.values(read)
+    check_streams(m, [x[window:] for x in streams], values, tol * m.sizes.max())
+    if not m.out.any():
+        return
     token_of = {tuple(code): token for token, code in m.codes.items()}
-    outs = np.array([values[y] for y in t.outputs]).T.round(9)  # a bit, to within tol, or 1/2
+    outs = np.array([values[y] for y in t.outputs]).T.round(9)  # a bit, or 1/2
     for p, (out, row) in enumerate(zip(outs, logits[window:]), window):
         want = token_of.get(tuple(out), row.argmax())
         assert row.argmax() == want, f"position {p}: the next token is {row.argmax()}, not {want}"

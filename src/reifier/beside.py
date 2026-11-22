@@ -1,16 +1,19 @@
 """Beside Gemma: a transformer of transformer.py and Gemma 3's own weights, in one checkpoint,
 bf16 as Gemma's is. Its next token is Gemma's, but where the transformer's outputs are the code
-of a token: there it is that token. And Gemma is not moved: where the outputs are no code,
-each logit is, to the bit, what Gemma alone gives in a checkpoint as wide.
+of a token: there it is that token. No weight of the transformer's is larger than the largest
+of Gemma's own of its kind, and what its layers hold is as large as what Gemma's hold: it is in
+the stream as Gemma's features are, not under them. Two things can be larger. At a token where
+Gemma's stream is a sixth of its usual size, the gates of the last layer, and what that gives,
+are a third larger than Gemma's largest (see SPEAK). And where the transformer speaks, its
+token's logit is a few hundred, where Gemma's are a few dozen (see HEARD). Gemma is moved by it
+as it is by its own weights rounded again, and no more.
 
 The checkpoint is a Gemma twice as wide, in features and in hidden units, and deeper. Its
-stream is the transformer's features, then Gemma's. Its first OWN layers are the transformer's:
-its heads, and its first blocks. Gemma's layers follow, and each of the first of them has one
-of the transformer's other blocks, on hidden units of its own; between two of them there can be
-another layer of the transformer's own, that clears its features. Neither has weights on the
-other's features, but for a K that a layer that clears puts where its own norms drop it: they
-meet where a norm takes the mean square of the whole stream, or of all that a layer adds to it,
-and in the logits.
+stream is the transformer's features, then Gemma's. Neither has weights on the other's
+features, and neither's layers are the other's: in a layer of the transformer's own, the norms'
+weights on Gemma's features are 0, so it neither reads nor writes them, and in a layer of
+Gemma's, those on the transformer's are. They meet where a norm takes the mean square of the
+whole stream, and in the logits.
 
 - Gemma's features are c = sqrt(2) times what they were, as an embedding is scaled by the square
   root of the size. Their mean square over twice the features is what it was over Gemma's, so
@@ -19,97 +22,61 @@ and in the logits.
   square that it saw, and to add c times what it added. These weights are rounded to bf16
   again, which moves Gemma's top token at one position in 50 on text, as any change of a part
   in 512 does. That is Gemma alone, as wide: what save writes with no transformer;
-- the transformer does not move it, as its features are small. A norm sums squares as float32,
-  of 24 bits, and theirs are 2**-45 of the sum or less: it is very rarely another float, and
-  on 49,000 positions of text and of random tokens it never was;
-- so a norm gives a block of the transformer its bits times some s that the block cannot know,
-  the norm's weight over the rms of Gemma's features. In Gemma's layers the norm after the
-  block is as unknown: it divides by the rms of what Gemma's block gives. A block need not know
-  either: it reads only what the block before wrote (see relay.py), its signals and a ONE, on
-  which its gates' biases are. All of these are as large as each other, so a gate's sign is
-  what it was;
-- a GLU then gives s^2 times what it gave. In the transformer's own layers s is known, as
-  Gemma's features are a token's embedding there, whose rms is 1.03: the transformer is as in
-  gemma.py, but small, its ONE and code embedded as SMALL and its bits as their rows' sizes
-  (see FIRST), and the heads and each block's unit ONE put a large K where the norm after them
-  drops it, so that the norm's weight is not too small for bf16, which holds it less 1. Beside
-  Gemma's blocks, a bit's size would be known half as well, in powers of two, after each GLU.
-  So a block there is of ReLU units, as the ands of lib.py: a unit's value is 1, which it
-  reads from the ONE that is embedded, whose size is known. It gives its gate times what the
-  layer does to any feature, and a bit is off by what each layer was, once;
-- how large is known roughly. ROUGH has, of each of Gemma's layers, the usual rms of the stream
-  before its block and of what the block gives. With these, the norm before a block makes it
-  read a bit as GATE, where 1 is enough for gelu to be relu, and its `down` makes it write a
-  bit as large as its row's size, which ladder gives. Over eighteen blocks beside Gemma's, on
-  text, a bit was read as 2**4.3 to 2**39, where GATE is 2**27;
-- nor can a block erase what a feature held, as that is as unknown. It writes over it: a
-  feature takes a new signal WAIT layers after its last, as layout(t, WAIT) gives, so what it
-  held is GROW**WAIT = 2**10 times smaller, and bf16 rounds it away as the stream adds the new
-  bit. Less so where Gemma's layers shrink the blocks between: at a <bos> in the midst of
-  text, two of them did by 2**5.4. With no erasing, 640 features keep 640 signals apart, and
-  any more only by their sizes: so the bits of each row are GROW times those of the row before;
-- and bf16 runs out of sizes, as rows grow from FIRST, as small as bf16 lets a block read and
-  write, to LAST, under what Gemma's norms would see: 2**76, for 16 rows. So past LAST a layer
-  of the transformer's own clears the features that hold none of the last row's signals, to 0
-  and to the bit (see wipe), and the rows grow again from ANEW. A feature that holds one of
-  them is taken again after the next clear, as layout(t, WAIT, clear) gives. Gemma's layers do
-  not see the layer: it adds nothing to their features, and what it adds to the transformer's
-  is gone when it ends. The 3,580 signals of examples/alongside.py take 492 features, cleared
-  once, after row 15: 550 of the transformer's 640, with ONE, the code, the ONEs and the twins;
-- the numbers are bf16, of 8 bits. Beside Gemma, what a block reads is the same in size to the
-  last bit, as one weight of one norm made it of one product, by a `down` that is a power of
-  two, and so are the gates of an AND where it holds, 16 and 8 times a bit: its two units
-  give the same bit again, whatever its size. Where what it reads is a little off, as the
-  codes of two tokens are, each copied over the rms of its own token, or a bit written over
-  what a feature held, a GLU of lib.py squares that away and an AND gives the same for a count
-  1/4 off: on text, a bit was 0.1 off at most. A sum must be float32 before it is rounded:
-  torch's is, for bf16, on a GPU and on a CPU with AVX512-BF16;
-- the last block's outputs are ±u for some u: the code of a token, or all 0 for outputs of
-  1/2, which are no code. Every token's code is embedded there, as ±FAINT, and the last
-  norm's weight there is LOUD: a token's logit gains LOUD FAINT u over the rms of the last
-  stream for each bit of its code that the outputs have, and loses as much for each other.
-  What is embedded there would add to the logits too. So each output is written twice, the
-  second time negated, into a twin feature that holds the same code, and whose weight is
-  -LOUD: what is embedded cancels, and what is written doubles. On text the token of the
-  outputs' code gained 2**14 or more, where no two of Gemma's logits were 150 apart.
+- the transformer's blocks are all in front of Gemma's layers (see front), where Gemma's
+  features are a token's embedding, as large for every token: STREAM[0]. A block does not need
+  to know it (see transformer.py), but its gates are then as sharp as they are meant to be;
+- its last block makes the outputs where the logits read them, each CARRY, with their rests
+  and a ONE, and erases all else: with their rests the outputs are as large where they are 0,
+  at a token that the transformer has nothing to say after, as where they are a code, so what
+  they add to the mean square that a norm of Gemma's takes is the same at every token;
+- Gemma's stream grows, a thousandfold over its layers. What is carried beside it must grow
+  too, to stay more than what noise in the stream would be: before the layers of LIFTS, a layer
+  of the transformer's own makes each of them as large as LIFTS says, in place. It reads them
+  through a norm that divides by the size of Gemma's stream, which is 25 times larger at some
+  tokens than at most: so its units come in twos, gelu(z) v - gelu(-z) v, which is z v whatever
+  z is, and the norm after makes what they give as large as it should be. STREAM, the usual
+  size of Gemma's stream before each layer, is for the units to be neither large nor lost
+  under the norm's eps: a gate is LIFT there. Where Gemma's stream is much smaller than usual,
+  what these layers read and give is as much larger;
+- after Gemma's last layer, one more makes each output LOUD, as large as Gemma's stream is
+  there, and the last norm's weight on it is HEARD. Where the outputs are a code, a token's
+  logit gains for each bit of its code that they have, and loses for each other: so the
+  token of that code must gain more than any other by more than Gemma's logits differ, 80 or
+  so at most. That is why a code should differ from every other in many bits (see
+  examples/alongside.py: a quarter of them), and why the logit is large: two codes that differ
+  in a quarter of their bits are a half of it apart;
+- that layer's units are deaf to what is under DEAF of a bit, and to an output whose rest is
+  there: where the outputs are 0, or nearly, it gives nothing, and the logits are Gemma's.
+
+The <bos> has a code as any token has: after it alone, the transformer reads it twice.
 """
 
 import json
 import math
 import re
-from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 
 from . import gemma
-from .emit import emit
-from .grid import ONE, Grid, held, layout
+from .grid import ONE
 from .trace import MLP, Trace
-from .transformer import Transformer
+from .transformer import Block, Transformer, squares, transformer
 
-OWN = 2  # the layers that the checkpoint is deeper by: the transformer's own
-SMALL = 2.0**-24  # ONE and the code as embedded, and in those layers what K's norm makes of 1
-K = 2.0**26  # what the heads and the unit ONE of a block in those layers put into ONE
-GATE = 2.0**6, 2.0**27  # what a block reads a bit as: in those layers, and in Gemma's
-WAIT, GROW = 2, 32.0  # a feature is written again WAIT layers on, by bits GROW**WAIT as large
-# A bit as the heads write it, FIRST, is as small as bf16 lets a block read and write it: the
-# first block beside Gemma's reads row 2 through a norm weight of 2**125, under bf16's largest,
-# 2**128, and writes row 3 with a down of 2**-118, over its smallest, 2**-126
-FIRST = 2.0**-106
-ANEW = 2.0**-86  # a bit of the row after a clear: read through 2**124 at most, written by 2**-117
-LAST = 2.0**-30  # a bit of the outputs, and the largest that a row's can be
-# Of each layer of unsloth/gemma-3-270m, the medians on English text of the rms of the stream
-# before its block, and of the rms of what the block gives
+CARRY = 1.5  # a bit of the outputs, as the transformer's own layers leave it
+LIFTS = {1: 3.0, 2: 12.0, 9: 72.0, 14: 240.0}  # before Gemma's layer i, a layer makes it so large
+LOUD, HEARD = 2000.0, 16.0  # as the last layer makes it, and the last norm's weight on it
+LIFT, SPEAK = 3.0, 6.0  # what a layer that lifts reads a bit as, where Gemma's stream is as large
+DEAF = 0.5  # as usual, and the last layer; and what that is deaf to, of a bit
+SHARES = 32  # the pairs of units that lift a feature, each by its share, if as many fit
+# Of each layer of unsloth/gemma-3-270m, the median on English text of the rms of the stream
+# before it, and after the last
 # fmt: off
-ROUGH = [
-    (5.4, 0.79), (41, 0.31), (52, 0.28), (77, 0.22), (100, 0.11), (160, 0.13),
-    (160, 0.11), (200, 0.11), (240, 0.095), (270, 0.075), (370, 0.089), (460, 0.19),
-    (540, 0.13), (710, 0.078), (870, 0.061), (980, 0.055), (1200, 0.056), (1400, 0.056),
+STREAM = [
+    1.03, 4.7, 37, 45, 73, 86, 130, 130, 210, 210, 250, 380, 410, 510, 670, 740, 850, 1200,
+    1400,
 ]
 # fmt: on
-FAINT = 2.0**-56  # a token's code where the outputs are written, for the logits
-LOUD = 2.0**121  # the last norm's weight there
 READS = re.compile("input_layernorm|pre_feedforward_layernorm|^norm")  # norms: Gemma's weight / c
 WRITES = re.compile("o_proj|down_proj")  # what the norm after them adds: Gemma's weight * c
 
@@ -119,36 +86,93 @@ def moved(name: str, to) -> str:
     return re.sub(r"(?<=layers\.)\d+", lambda i: str(to[int(i[0])]), name)
 
 
-def ladder(n: int) -> tuple[list[float], list[int]]:
-    """For a grid of n layers: the size of a bit of each of its rows in the stream, and the rows
-    after which a layer clears the features (see wipe). Row 0 is as the heads write it, row d as
-    block d - 1 does, and the last, of the outputs, is LAST. A row's bits are GROW times those of
-    the row before, from FIRST: where they would be more than LAST, the features are cleared
-    after the row before, and the rows grow again from ANEW"""
-    sizes, clear = [FIRST], []
-    for d in range(1, n):
-        if sizes[-1] * GROW <= LAST:
-            sizes.append(sizes[-1] * GROW)
-        else:
-            sizes.append(ANEW)
-            clear.append(d - 1)
-    return sizes + [LAST], clear
+def lift(width, held: dict, gives: dict, one: int, read, shares, deaf=0.0, quiet=None) -> Block:
+    """A block that reads the features of `held`, each plus or minus its size or 0, and gives
+    each to the features of gives[f], if it has any, times the ONE that is among them, `one`:
+    for a feature, `shares` times two units, gelu(z - deaf u) v - gelu(-z - deaf u) v, for the z
+    and the u that the norm before makes of the feature and of ONE, and for v, u over `shares`: z
+    is `read` where the stream is as large as usual. With deaf 0 the two give z v, whatever the
+    stream is. With more, they give 0 for a z that is under deaf of ONE, and so for all that
+    should be 0 and is not quite, as long as that is far enough for gelu to be relu; and for a
+    feature that has another in `quiet`, they give 0 where that one is as large as ONE. What a
+    weight out of a unit is off by is a part of the unit's share alone. The norm after has yet
+    no weights: `plan` sets them"""
+    lifted = [f for f in held if gives.get(f)]
+    names = [f"lift f{f}{sign}" for f in lifted for sign in "+-"] * shares
+    shapes = [(len(names), width)] * 2 + [(width, len(names))]
+    gate, value, down = (np.zeros(shape) for shape in shapes)
+    for j, f in enumerate(lifted):
+        j = [range(len(names))[2 * j + i :: 2 * len(lifted)] for i in (0, 1)]  # its + and - units
+        gate[j[0], one] = gate[j[1], one] = -deaf
+        gate[j[0], f], gate[j[1], f] = min(gate[j[0], f][0] + 1, 1), max(gate[j[1], f][0] - 1, -1)
+        for i in (0, 1):
+            gate[j[i], (quiet or {}).get(f, one)] -= f in (quiet or {})
+            value[j[i], one] = 1 / 2 / shares
+            down[np.ix_(gives[f], j[i])] = 1 / 2 - i
+    reads = np.zeros(width)
+    reads[list(held)] = read / np.array(list(held.values()))
+    layer = MLP("layer", [f"f{f}" for f in range(width)], [f"f{f}" for f in range(width)], names,
+                np.vstack([gate, value]), np.zeros(2 * len(names)), "geglu", down)  # fmt: skip
+    return Block(layer, reads, np.zeros(width))
 
 
-def layer_of(d: int, clear: list[int]) -> int:
-    """The layer of the checkpoint that block d is in: after a layer for each clear before it"""
-    return d + sum(c <= d for c in clear)
+def front(t: Trace, codes: dict, size: int = 640, hidden: int = 4096) -> Transformer:
+    """The transformer on the program t that is to be in front of the layers of a Gemma of
+    `size` features, beside its embedding, with `hidden` hidden units a layer: what `save`
+    takes. It carries its outputs on, and has no logits of its own"""
+    return transformer(t, codes, hidden, 2 * size * STREAM[0] ** 2, 2 * size, CARRY)
+
+
+def plan(m: Transformer, config: dict):
+    """What m, of `front`, needs after its own layers beside a Gemma 3 of config config: the
+    blocks that lift what it leaves, by the layer of Gemma's that each is before, and the block
+    after Gemma's last, which makes the outputs LOUD where the logits read them, in place"""
+    wide, hidden, t = 2 * config["hidden_size"], 2 * config["intermediate_size"], m.trace
+    width, last, bits = len(m.grid[0]), m.grid[-1], len(t.outputs)
+    assert m.size == wide and not m.out.any(), f"{t.name} is not of front, for this Gemma"
+    assert len(config["layer_types"]) == len(STREAM) - 1, "STREAM is of unsloth/gemma-3-270m"
+    assert len(m.codes) == config["vocab_size"], f"{t.name} needs a code for each of Gemma's tokens"
+    assert len(m.q) <= config["num_attention_heads"], f"{t.name} needs its heads in one layer"
+    assert width <= wide // 2, f"{t.name} needs {width} features, and has {wide // 2}"
+    one, carried = last.index(ONE), [f for f, s in enumerate(last) if s]
+    each = squares(t, m.codes) | {ONE: 1.0}  # the mean square of each signal, over its size
+    square = sum(each[last[f]] for f in carried)
+    shares = max(1, min(SHARES, hidden // (2 * len(carried))))
+    size, lifts = CARRY, {}
+    for i, larger in LIFTS.items():  # in place: each feature is given to itself
+        held, gives = dict.fromkeys(carried, size), {f: [f] for f in carried}
+        b = lifts[i] = lift(width, held, gives, one, LIFT * STREAM[i], shares)
+        b.writes[carried] = (larger - size) * math.sqrt(square / wide)
+        size = larger
+    outs, rests = range(1, 1 + bits), {y: x.outputs for x in t.mlps for y in x.outputs}
+    quiet = {  # of an output that can be 1/2, its rest: no other output of an MLP is one
+        1 + i: last.index(r)
+        for i, y in enumerate(t.outputs)
+        for r in rests[y]
+        if r not in t.outputs and each[y] < 1
+    }
+    spare = [f for f in range(1 + bits, width) if f not in carried][:bits]  # which the norm drops
+    held, gives = dict.fromkeys(carried, size), {f: [f] for f in outs} | {one: spare}
+    speak = lift(width, held, gives, one, SPEAK * STREAM[-1], shares, DEAF, quiet)
+    speak.writes[outs] = (LOUD - size) * math.sqrt((bits + len(spare)) / wide)
+    return lifts, speak
 
 
 def build_weights(m: Transformer | None, real: dict, config: dict):
-    """The weights of m beside real, the tensors of a Gemma 3 by name, whose config is config:
-    or, with no m, of that Gemma alone, as wide. Gives the config of the wide Gemma, the shapes
-    of its tensors, the weights that are set, by their names in the text model, and m's grid and
-    the names of its hidden units, by layer, as they are here (see place)"""
+    """The weights of m, of `front`, beside real, the tensors of a Gemma 3 by name, whose config
+    is config: or, with no m, of that Gemma alone, as wide. Gives the config of the wide Gemma,
+    the shapes of its tensors, the weights that are set, by their names in the text model, the names
+    of m's features after the heads and after each layer of the checkpoint, and of the hidden
+    units that are m's in each: none, in a layer of Gemma's"""
     size, hidden, c = config["hidden_size"], config["intermediate_size"], math.sqrt(2)
-    clear = ladder(len(m.net.layers))[1] if m else []
-    gemmas = [layer_of(OWN + i, clear) for i in range(len(config["layer_types"]))]  # here
-    kinds = ["sliding_attention"] * (OWN + len(clear) + len(gemmas))  # m's own layers slide,
+    lifts, speak = plan(m, config) if m else ({}, None)
+    own = list(m.blocks) if m else []  # the layers that are m's, in order, and Gemma's
+    gemmas = []
+    for i in range(len(config["layer_types"])):
+        own += [lifts[i]] if i in lifts else []
+        gemmas.append(len(own) + i)
+    own += [speak] * bool(m)
+    kinds = ["sliding_attention"] * (len(own) + len(gemmas))  # m's own layers slide,
     for i, kind in zip(gemmas, config["layer_types"]):  # and Gemma's are as they were
         kinds[i] = kind
     ours = [i for i in range(len(kinds)) if i not in gemmas]
@@ -158,8 +182,22 @@ def build_weights(m: Transformer | None, real: dict, config: dict):
     shapes = {k: [2 * d if d in (size, hidden) else d for d in s] for k, s in shapes.items()}
     config = config | {"layer_types": kinds, "num_hidden_layers": len(kinds)}
     config |= {"hidden_size": 2 * size, "intermediate_size": 2 * hidden}
-    w = gemma.LazyZeros(shapes)  # a norm's weights are what it multiplies by, until the end
-    grid, names = place(m, w, config) if m else ([], [])
+    w = gemma.LazyZeros(shapes)  # a norm's weights are what it multiplies by, until the end:
+    for k in shapes:  # 0, in a layer of m's own, around a module that has nothing to do
+        if k.endswith("norm.weight"):
+            w[k.removeprefix(w.prefix)]
+    grid, names = [], []
+    if m:  # on the first half of the features, and of the hidden units of its own layers
+        w["embed_tokens.weight"][:, : m.embed.shape[1]] = m.embed / math.sqrt(2 * size)
+        gemma.attention(w, 0, m, m.q, m.v, m.o, m.reads, m.writes, config)
+        for i, b in zip(ours, own):
+            gemma.block(w, i, b, 1.0)
+        w["norm.weight"][np.flatnonzero(speak.writes)] = HEARD
+        rows = iter([*m.grid[1:], *[m.grid[-1]] * (len(lifts) + 1)])
+        grid = [m.grid[0]]
+        for i in range(len(kinds)):  # a layer of Gemma's leaves m's features as they were
+            grid.append(next(rows) if i in ours else grid[-1])
+        names = [own[ours.index(i)].layer.hidden if i in ours else [] for i in range(len(kinds))]
     for k, v in real.items():  # Gemma's own: the last of each axis, in the layers of `gemmas`
         k = moved(k.removeprefix(w.prefix), gemmas)
         if k.endswith("norm.weight"):
@@ -169,131 +207,6 @@ def build_weights(m: Transformer | None, real: dict, config: dict):
         if k.endswith("norm.weight"):
             v -= 1  # Gemma 3's norm multiplies by 1 + weight
     return config, shapes, w, grid, names
-
-
-def grid_beside(t: Trace, b: int, clear: list[int]) -> Grid:
-    """t's grid here, held: ONE, the code of b bits and the features of layout(t, WAIT, clear)
-    but for the outputs, then a feature for each output, where nothing else was, as the logits
-    read it"""
-    rows = [[ONE, *(f"code[{i}]" for i in range(b)), *row[1:]] for row in layout(t, WAIT, clear)]
-    outputs = [[y if y in row else None for y in t.outputs] for row in rows]
-    rows = [[None if s in t.outputs else s for s in row] for row in rows]
-    kept = [f for f, column in enumerate(zip(*rows)) if any(column)]  # those left with a signal
-    return held([[row[f] for f in kept] + out for row, out in zip(rows, outputs)], clear)
-
-
-def unerased(m: MLP) -> MLP:
-    """A layer of emit, less its units that erase what a feature held: a block here cannot know
-    how large that is. What is written over it is GROW**WAIT times as large, or was cleared"""
-    keep = [j for j, h in enumerate(m.hidden) if not h.startswith("erase ")]
-    rows = keep + [len(m.hidden) + j for j in keep]  # their gates, then their values
-    hidden = [m.hidden[j] for j in keep]
-    return replace(m, hidden=hidden, wi=m.wi[rows], b=m.b[rows], wo=m.wo[:, keep])
-
-
-def wipe(w: gemma.LazyZeros, i: int, features: list[int], rms: float):
-    """Layer i, of the transformer's own: it clears features, that Gemma's blocks wrote bits into
-    of sizes that it cannot know, but under 2**-9. Its head writes 1 into each: a value of ONE,
-    as embedded, from every token. bf16 rounds what a feature held into that 1, and the unit ONE
-    of its block then writes -1. Both put K too into half of Gemma's features, a quarter of the
-    stream, where the norm after them drops it: what they add then has an rms of K / 2 times what
-    they read ONE as, which the norm takes out, so that 1 and -1 are exact however roughly rms,
-    the stream's there as ROUGH has it, is known"""
-    a, wide = f"layers.{i}.", len(w["norm.weight"])
-    assert wide % 4 == 0, (
-        f"layer {i} clears a stream of {wide} features, and a quarter is not whole"
-    )
-    for x in ("input_layernorm", "pre_feedforward_layernorm"):
-        w[f"{a}{x}.weight"][0] = rms / SMALL  # ONE, read as 1, more or less
-    for x in ("self_attn.v", "mlp.gate", "mlp.up"):
-        w[f"{a}{x}_proj.weight"][0, 0] = 1
-    for x, one in (("self_attn.o", 1), ("mlp.down", -1)):
-        w[f"{a}{x}_proj.weight"][wide // 2 : 3 * wide // 4, 0] = K
-        w[f"{a}{x}_proj.weight"][features, 0] = one
-    for x in ("post_attention_layernorm", "post_feedforward_layernorm"):
-        w[f"{a}{x}.weight"][features] = K / 2
-
-
-def place(m: Transformer, w: gemma.LazyZeros, config: dict):
-    """m's weights into w, the tensors of the wide Gemma whose config is config, on the first
-    half of its features and hidden units, but for the K that wipe puts into Gemma's. Gives m's
-    grid and the names of its hidden units, by layer, as they are here: those of grid_beside and
-    its layers, with a layer that clears where ladder says, and then the ONE that the heads
-    write, the one that each block writes, and the outputs' twins. A feature is written over,
-    and erased only where it is cleared"""
-    wide, hidden = config["hidden_size"], config["intermediate_size"] // 2
-    b, t = len(m.v), m.net.trace
-    sizes, clear = ladder(len(m.net.layers))
-    grid = grid_beside(t, b, clear)
-    layers = [unerased(x) for x in emit(t, grid, "geglu", skip=True, norm=True).layers]
-    n, ones = len(layers), len(grid[0]) + np.arange(len(layers) + 1)  # each ONE's feature
-    outs = [grid[-1].index(y) for y in t.outputs]  # the last of grid_beside's features
-    twins = ones[-1] + 1 + np.arange(b)  # of the outputs: features that hold them negated
-    cleared = {}  # by each row of clear, the features cleared after it
-    assert len(m.codes) == config["vocab_size"], f"{t.name} needs a code for each of Gemma's tokens"
-    assert len(m.q) <= config["num_attention_heads"], f"{t.name} needs its heads in one layer"
-    assert twins[-1] < wide // 2, f"{t.name} needs {twins[-1] + 1} features, and has {wide // 2}"
-    assert n <= OWN + len(ROUGH), (
-        f"{t.name} needs {n - OWN} of Gemma's layers, and ROUGH has {len(ROUGH)}"
-    )
-    assert {x.activation for x in t.mlps} <= {"relu", "reglu"}, (  # folded: no constants
-        f"{t.name} needs GLUs or ReLUs, as lib.py's: bf16 rounds what a gate's units sum"
-    )
-    # The heads copy ONE, then the code: m.o is on m's grid, whose first features are this one's,
-    # ONE, the code, the inputs. They read ONE as 1, as in gemma.py, and put K into ONE, so that
-    # the norm after them makes 1 SMALL; o then scales what they write to row 0's size
-    value = np.vstack([np.eye(1, m.k.shape[1]), m.v])
-    gemma.attention(w, 0, m, m.q, value, np.pad(m.o, ((0, 0), (0, 0), (1, 0))), ones[:1], config)
-    wrote = [*np.flatnonzero(m.o.any((0, 2))), ones[0]]  # by the heads: m's inputs, and a ONE
-    w["layers.0.input_layernorm.weight"] /= SMALL
-    w["layers.0.self_attn.o_proj.weight"][0, 0] = K
-    w["layers.0.post_attention_layernorm.weight"][wrote] = SMALL * K / math.sqrt(wide)
-    w["layers.0.self_attn.o_proj.weight"][wrote] *= sizes[0] / SMALL
-    embed = w["embed_tokens.weight"]
-    embed[:, : 1 + b] = np.sign(m.embed) * SMALL / math.sqrt(wide)
-    for d, block in enumerate(layers):  # block d reads ones[d], and writes ones[d + 1]
-        a, units, mine = f"layers.{layer_of(d, clear)}.", len(block.hidden), d < OWN
-        if mine:  # in a layer of its own, where K's norm makes what a unit gives SMALL
-            free, rms, read_as, after = 2 * hidden, 1, GATE[0], SMALL * K / math.sqrt(wide)
-            share = sizes[d + 1] / SMALL
-        else:  # beside Gemma's: a unit gives GATE, which the norm after divides by what
-            free, (rms, gives), read_as, after = hidden, ROUGH[d - OWN], GATE[1], 1  # it gives
-            share = 2.0 ** round(math.log2(sizes[d + 1] * gives / GATE[1]))  # a power of two
-        gate, up, down = (w[f"{a}mlp.{p}_proj.weight"] for p in ("gate", "up", "down"))
-        assert units <= free, f"{t.name}: layer {d} needs {units} hidden units, and has {free}"
-        read = [*(1 + np.flatnonzero(block.wi[:, 1:].any(0))), ones[d]]
-        assert set(read) <= set(wrote), f"{t.name}: block {d} reads what an older block wrote"
-        if d in clear:  # in the layer before, all that the blocks before wrote, but what d reads
-            cleared[d] = [f for f in range(1 + b, outs[0]) if f not in read]
-            wipe(w, layer_of(d, clear) - 1, cleared[d], ROUGH[d - OWN][0])
-        wrote = [f for f, (old, new) in enumerate(zip(grid[d], grid[d + 1])) if old != new]
-        wrote.append(ones[d + 1])
-        relus = not mine and not block.wi[units:, 1:].any()  # units whose value is ONE alone
-        assert mine or relus, f"{t.name}: block {d} is beside Gemma's, and needs ReLUs, as ands"
-        gate[:units, : block.wi.shape[1]], up[:units, : block.wi.shape[1]] = np.split(block.wi, 2)
-        gate[:units, ones[d]], gate[:units, 0] = gate[:units, 0].copy(), 0  # the gates' biases
-        if not relus:  # and the values': but a ReLU's stays on the ONE that is embedded
-            up[:units, ones[d]], up[:units, 0] = up[:units, 0].copy(), 0
-        w[a + "pre_feedforward_layernorm.weight"][read] = read_as * rms / sizes[d]
-        if relus:
-            w[a + "pre_feedforward_layernorm.weight"][0] = rms / SMALL  # ONE, read as 1
-        down[: len(block.outputs), :units] = share * block.wo
-        down[ones[d + 1], 0] = share  # the unit ONE, the first: a ONE as large as the signals
-        if mine:
-            down[0, 0] = K
-        w[a + "post_feedforward_layernorm.weight"][wrote] = after
-    assert set(outs) <= set(wrote), f"{t.name}: its last block must make every output"
-    post = w[a + "post_feedforward_layernorm.weight"]  # a and down are the last block's
-    down[twins], post[twins] = -down[outs], post[outs]
-    embed[:, outs] = embed[:, twins] = FAINT * np.sign(m.embed[:, 1:])  # a token's code, twice,
-    w["norm.weight"][outs], w["norm.weight"][twins] = LOUD, -LOUD  # where its logit reads it
-    grid = [row + [ONE] * (d + 1) + [None] * (n - d + b) for d, row in enumerate(grid)]
-    grid[-1][-b:] = ["-" + y for y in t.outputs]  # the twins
-    names = [x.hidden for x in layers]
-    for c in reversed(clear):  # a layer that clears, of the unit ONE alone, and the row after it
-        names.insert(c, [ONE])
-        grid.insert(c + 1, [None if f in cleared[c] else s for f, s in enumerate(grid[c])])
-    return grid, names
 
 
 def checkpoint_weights(repo: str) -> dict[str, np.ndarray]:
@@ -315,10 +228,10 @@ def checkpoint_weights(repo: str) -> dict[str, np.ndarray]:
 
 
 def save(m: Transformer | None, out_dir: Path):
-    """m beside unsloth/gemma-3-270m, in out_dir: a checkpoint that transformers loads from
-    there, with the names of m's features and hidden units as they are in it (see gemma.write).
-    With no m, that Gemma alone, as wide. The first run fetches Gemma's weights"""
-    repo = "unsloth/gemma-3-270m"  # the Gemma 3 that ROUGH was measured on
+    """m, of `front`, beside unsloth/gemma-3-270m, in out_dir: a checkpoint that transformers
+    loads from there, with the names of m's features and hidden units as they are in it (see
+    gemma.write). With no m, that Gemma alone, as wide. The first run fetches Gemma's weights"""
+    repo = "unsloth/gemma-3-270m"  # the Gemma 3 that STREAM was measured on
     config = gemma.checkpoint_metadata(repo)[1]
     config, shapes, w, grid, names = build_weights(m, checkpoint_weights(repo), config)
     gemma.write(out_dir, config, shapes, w, grid, names)
