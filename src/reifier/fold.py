@@ -1,48 +1,62 @@
-"""Constant folding: a trace with its constants moved into the biases of what reads them, and
-its wires taken out.
+"""Step 5, constant folding: constants become biases, and MLPs that copy or negate are removed.
+Folding keeps the outputs of the circuit and saves MLPs, and sometimes layers.
 
-A constant is what an MLP with no inputs gives, as the gates of const do. The constants that an
-MLP reads go into its bias, and an MLP left with no inputs gives constants in turn.
-
-A wire is an MLP left with one input and one output, which gives that bit or its negation.
-What read the wire reads the bit, negated in its weights and its bias, and a wire that nothing
-reads any more is dropped: what read it may then come a layer sooner. examples/keccak.py
-makes such wires: the xor of one bit and of constants whose xor is 1 is a table of that bit
-alone, its negation, as in the first round of the sponge of examples/alongside.py, where all
-but a few bits are constants. Three kinds of wire stay: one that is an output of the trace;
-one of a signal that may be 1/2, as what a table with a rest gives, since an MLP that passes
-a bit on need not pass on a half; and one whose reader reads its bit too, and would read it
-twice. A wire that was put in to hold a bit back a layer goes as any other: relay.py holds
-bits back.
-
-What stays keeps its name: check_trace(fold(t), t) compares the outputs, and every signal that
-is left.
+A constant is a signal with the same value for every input: an output of an MLP that has no
+inputs. An MLP that reads a constant gets the value in its biases instead, and it makes
+constants in turn if it is left with no inputs. A wire is an MLP with one input and one
+output that returns its input or its negation. An MLP that reads a wire reads the wire's
+input instead, and the wire is removed once nothing reads it. Three kinds of wire stay: one
+that makes an output of the circuit; one whose input need not be a bit (see circuit.py); and
+one whose reader also reads the wire's input: a bit read twice may need too large a weight
+(see lib.threshold_gate).
 """
 
 from dataclasses import replace
 
 import numpy as np
 
-from .trace import Trace, needed
+from .circuit import MLP, Circuit, used_mlps
 
 
-def fold(t: Trace) -> Trace:
-    const, wire, mlps = {}, {}, []  # the value of a constant; of a wire, its bit, and if negated
-    halves = {y for m in t.mlps if len(m.outputs) > 1 for y in m.outputs}  # what may be 1/2
-    for m in t.mlps:
-        wi, b, inputs = m.wi.copy(), m.b.copy(), list(m.inputs)
-        for i, x in enumerate(inputs):
-            if x in wire and wire[x][0] not in inputs:  # w (1 - x) is w - w x
-                inputs[i], negated = wire[x]
-                b, wi[:, i] = b + negated * wi[:, i], (1 - 2 * negated) * wi[:, i]
-        live = [i for i, x in enumerate(inputs) if x not in const]
-        b = b + wi @ np.array([const.get(x, 0.0) for x in inputs])
-        m = replace(m, inputs=[inputs[i] for i in live], wi=wi[:, live], b=b)
-        if not live:
-            const.update(zip(m.outputs, m([]).tolist()))
-        if len(live) == 1 and len(m.outputs) == 1 and m.outputs[0] not in t.outputs:
-            low, high = m([[0], [1]]).ravel().tolist()
-            if {low, high} == {0, 1} and m.inputs[0] not in halves:
-                wire[m.outputs[0]] = m.inputs[0], low == 1
-        mlps.append(m)  # a wire too: `needed` drops it, unless something still reads it
-    return replace(t, mlps=needed(mlps, t.outputs))
+def fold(circuit: Circuit) -> Circuit:
+    """`circuit` with constants and wires folded away. A signal that stays keeps its name."""
+    constants = {}  # the value of each constant
+    wires = {}  # each wire that may be removed, by the name of its output
+    non_bits = circuit.non_bits()
+    folded = []
+    for m in circuit.mlps:
+        m = replace_inputs(m, constants, wires)
+        if not m.inputs:
+            constants.update(zip(m.outputs, m([]).tolist()))
+        # A wire returns 0 and 1 for the inputs 0 and 1, or 1 and 0 if it negates.
+        is_wire = len(m.inputs) == 1 and m([[0], [1]]).tolist() in ([[0], [1]], [[1], [0]])
+        if is_wire and m.outputs[0] not in circuit.outputs and m.inputs[0] not in non_bits:
+            wires[m.outputs[0]] = m
+        folded.append(m)
+    return replace(circuit, mlps=used_mlps(folded, circuit.outputs))
+
+
+def replace_inputs(m: MLP, constants: dict[str, float], wires: dict[str, MLP]) -> MLP:
+    """`m` without the constants and the wires that it reads, and with the same outputs.
+    Input i of `m` is written as scale[i] * inputs[i] + offset[i]: a constant is its value,
+    a wire is its own input, or 1 minus that if it negates, and any other input is itself."""
+    inputs = list(m.inputs)
+    scale = np.ones(len(inputs))
+    offset = np.zeros(len(inputs))
+    for i, name in enumerate(m.inputs):
+        if name in constants:
+            offset[i] = constants[name]
+        elif name in wires and wires[name].inputs[0] not in inputs:
+            wire = wires[name]
+            inputs[i] = wire.inputs[0]
+            offset[i] = wire([0])[0]
+            scale[i] = wire([1])[0] - offset[i]
+    kept = [i for i, name in enumerate(m.inputs) if name not in constants]
+    return replace(
+        m,
+        inputs=[inputs[i] for i in kept],
+        w_gate=(m.w_gate * scale)[:, kept],
+        b_gate=m.b_gate + m.w_gate @ offset,
+        w_value=(m.w_value * scale)[:, kept],
+        b_value=m.b_value + m.w_value @ offset,
+    )

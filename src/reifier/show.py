@@ -1,86 +1,44 @@
-"""How each stage prints: show(x) is a trace, a grid, a network or a transformer as text."""
+"""Step 7, printing: print(show(circuit)) or print(show(model.layout)) shows one as text."""
 
-from collections.abc import Iterator
-from dataclasses import replace
-from itertools import pairwise
-
-import numpy as np
-
-from .emit import Network
-from .trace import GATED, MLP, Trace
-from .transformer import Transformer
+from .circuit import Circuit
+from .layout import Layout
 
 
-def show(x) -> str:
-    kinds = {Trace: trace, list: grid, Network: network, Transformer: transformer}
-    return "\n".join(kinds[type(x)](x))
+def show(circuit_or_layout: Circuit | Layout) -> str:
+    """A circuit as one line for each hidden unit, or a layout as a table."""
+    to_lines = circuit_lines if isinstance(circuit_or_layout, Circuit) else layout_lines
+    return "\n".join(to_lines(circuit_or_layout))
 
 
-def linear(weights, names, bias=0.0) -> str:
-    """A weighted sum as text: 4 a0 - a1 + 0.5"""
-    text = ""
-    for w, n in [(w, n) for w, n in zip(weights, names) if w] + [(bias, "")] * bool(bias):
-        size = "" if abs(w) == 1 and n else f"{abs(w):g}"
-        text += (" - " if w < 0 else " + ") + " ".join(filter(None, [size, n]))
-    return ("-" + text[3:] if text.startswith(" - ") else text[3:]) or "0"
+def weighted_sum(weights, names, bias=0.0) -> str:
+    """A weighted sum as text, such as `+4 a -1 b +0.5`."""
+    terms = [f"{weight:+g} {name}" for weight, name in zip(weights, names) if weight]
+    if bias or not terms:
+        terms.append(f"{bias:+g}")
+    return " ".join(terms)
 
 
-def units(m: MLP) -> Iterator[str]:
-    """A line for each hidden unit: what it reads, and what it writes"""
-    n, act = len(m.hidden), GATED.get(m.activation, m.activation)
-    for j, h in enumerate(m.hidden):
-        unit = f"{act}({linear(m.wi[j], m.inputs, m.b[j])})"
-        if m.activation in GATED:
-            unit += f" * ({linear(m.wi[n + j], m.inputs, m.b[n + j])})"
-        yield f"{h} = {unit} -> {linear(m.wo[:, j], m.outputs)}"
+def circuit_lines(circuit: Circuit) -> list[str]:
+    """The inputs and outputs of `circuit`, then one line for each hidden unit: its name, its
+    gate, its value, and the outputs of its MLP that it adds to."""
+    lines = [f"{circuit.name}: {' '.join(circuit.inputs)} -> {' '.join(circuit.outputs)}"]
+    for m in circuit.mlps:
+        for j, unit in enumerate(m.units):
+            gate = weighted_sum(m.w_gate[j], m.inputs, m.b_gate[j])
+            value = weighted_sum(m.w_value[j], m.inputs, m.b_value[j])
+            adds_to = weighted_sum(m.w_out[:, j], m.outputs)
+            lines.append(f"  {unit} = relu({gate}) * ({value}), added to: {adds_to}")
+    return lines
 
 
-def trace(t: Trace) -> Iterator[str]:
-    """A line for each threshold gate, [what it sums >= its threshold], and for each hidden unit
-    of any other MLP"""
-    yield f"{t.name}({' '.join(t.inputs)}): {len(t.mlps)} MLPs"
-    for m in t.mlps:
-        if m.activation == "step" and m.wo.tolist() == [[1]]:
-            yield f"  {m.name} = [{linear(m.wi[0], m.inputs)} >= {0 - m.b[0]:g}]"
-        else:
-            yield f"  {m.name}: {m.activation}, {len(m.hidden)} hidden"
-            yield from ("    " + line for line in units(m))
-    yield f"  return {' '.join(t.outputs)}"
-
-
-def grid(rows) -> list[str]:
-    """A line for each feature, a column for each depth: " for a signal that stays, . for no
-    signal"""
-    lines = [["feature", *(f"depth {d}" for d in range(len(rows)))]]
-    for f, names in enumerate(zip(*rows)):
-        stays = [False, *(new == old for old, new in pairwise(names))]
-        lines.append([str(f), *('"' if s and same else s or "." for s, same in zip(names, stays))])
-    widths = [max(map(len, column)) for column in zip(*lines)]
-    return ["  ".join(map(str.ljust, line, widths)).rstrip() for line in lines]
-
-
-def network(net: Network) -> Iterator[str]:
-    """Each hidden unit of each layer: what it reads, by the names of the row before, and the
-    features it writes"""
-    kind = ("skip" if net.skip else "stack") + " + norm" * net.norm
-    yield f"{net.trace.name}: {kind}, {len(net.grid[0])} features, ONE = {net.one:g}"
-    for d, layer in enumerate(net.layers, 1):
-        yield f"layer {d}: {len(layer.hidden)} hidden units of {layer.activation}"
-        yield from ("  " + line for line in units(layer))
-
-
-def transformer(m: Transformer) -> Iterator[str]:
-    """Each head, by the features it writes, then each block: its hidden units, as a network's,
-    on what the norm before it gives, READ for a bit that is 1, with the weights on the
-    features that hold ONE summed. A unit that is there more than once has a line each time,
-    and `f3, dropped` is the row that the norm after drops, of a bit written over feature 3's"""
-    yield f"{len(m.q)} heads on {len(m.codes)} tokens, {len(m.grid[0])} features"
-    for h, o in enumerate(m.o):
-        names = " ".join(m.grid[0][f] for f in np.flatnonzero(o.any(1)) if m.grid[0][f])
-        yield f"head {h}: the code of the token {h} back -> {names or 'nothing'}"
-    for d, b in enumerate(m.blocks, 1):
-        ones = np.array([s == "ONE" for s in b.layer.inputs])
-        wi = np.c_[b.layer.wi[:, ones].sum(1), b.layer.wi[:, ~ones]]
-        names = ["ONE", *(s for s in b.layer.inputs if s != "ONE")]
-        yield f"block {d}: {len(b.layer.hidden)} hidden units of {b.layer.activation}"
-        yield from ("  " + line for line in units(replace(b.layer, inputs=names, wi=wi)))
+def layout_lines(layout: Layout) -> list[str]:
+    """A table with one line for each feature and one column for each depth: the signal that
+    the feature holds then, or a dot if it is empty."""
+    columns = [["feature"] + [str(feature) for feature in range(len(layout[0]))]]
+    for depth, row in enumerate(layout):
+        columns.append([f"depth {depth}"] + [name or "." for name in row])
+    padded = []
+    for column in columns:
+        width = max(len(cell) for cell in column)
+        padded.append([cell.ljust(width) for cell in column])
+    return ["  ".join(cells).rstrip() for cells in zip(*padded)]

@@ -1,7 +1,7 @@
 __pycache__/
 .pytest_cache/
-*.egg-info
+.ruff_cache/
+.venv/
 dist/
-build/
-*.whl
+out/
 .DS_Store

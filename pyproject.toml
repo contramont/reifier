@@ -1,7 +1,7 @@
 [project]
 name = "reifier"
 version = "0.0.2"
-description = "Neural network compilation"
+description = "Compile algorithms into transformer circuits"
 authors = [{name = "Andis Draguns"}]
 readme = "README.md"
 license = {text = "MIT"}
@@ -24,5 +24,6 @@ dev = [
 line-length = 100
 
 [tool.pytest.ini_options]
-pythonpath = ["examples"]  # the tests run the programs of the examples
+pythonpath = ["examples"]  # the tests import the examples
+addopts = "--continue-on-collection-errors"  # a file that fails to import does not stop the others
 tmp_path_retention_policy = "failed"  # the checkpoints of a test that passed are not kept

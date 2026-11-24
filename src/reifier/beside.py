@@ -1,396 +1,417 @@
-"""Beside Gemma: a transformer of transformer.py and Gemma 3's own weights, in one checkpoint,
-bf16 as Gemma's is. Its next token is Gemma's, but where the transformer's outputs are the code
-of a token: there it is that token. With no noise on the weights, Gemma is moved by it about
-as much as it is by its own weights rounded again. It is made to add few layers and few
-features to Gemma, and it pays for that: in the noise that it takes, in a weight and some
-activations that are larger than Gemma's, and in what it carries past Gemma's layers, which
-is small beside Gemma's stream. The end of this says how much.
+"""Step 12, beside Gemma: a circuit and Gemma 3 270M's own weights in one checkpoint.
 
-The checkpoint is a Gemma that is wider and deeper. Its stream is the transformer's features,
-then as many that hold nothing as front needs, none for examples/alongside.py, then Gemma's
-own. A layer has Gemma's hidden units, or as many as the transformer's largest block, if that
-has more (see units): Gemma's are the last. Neither's layers are the other's: in a layer of
-the transformer's own, the norms' weights on Gemma's features are 0, so it neither reads nor
-writes them, and in a layer of Gemma's, those on the transformer's are. They meet where a
-norm takes the mean square of the whole stream, and in the logits. And they meet in the rows
-that a block of the transformer's gives for its norm to drop (see transformer.block): those
-are the rows of the features after its own, so of Gemma's first, unless as many hold
-nothing. The norm multiplies them by 0, so nothing of them is written, as long as its
-weights have no noise (see the end).
+The model of this file answers as Gemma does, except where the circuit has an answer: there
+its next token is the circuit's. A circuit has no answer where its outputs are 1/2 (see
+lib.table): it is then silent. The model is a Gemma 3 that is wider and deeper than Gemma 3
+270M, because the circuit needs features and layers of its own. The functions follow this order:
 
-- Gemma's features are c times what they were, c the square root of all the features over
-  Gemma's own, as an embedding is scaled by the square root of the size. Their mean square
-  over all the features is what it was over Gemma's, so a norm gives c times what it gave: the
-  norms that Gemma reads the stream through have their weights over c. And o and down are c
-  times Gemma's, for the norm after them to see the mean square that it saw, and to add c
-  times what it added. That is Gemma alone, as wide: what save writes with no transformer,
-  and as many features more. Its weights are rounded to bf16 again, and run in bf16 on text
-  it gives Gemma's own top token at 97 or 98 positions in 100, as any change of a part in 512
-  does;
-- the transformer's blocks are all in front of Gemma's layers (see front), where Gemma's
-  features are a token's embedding, as large for every token: STREAM[0]. A block does not need
-  to know it (see transformer.py), but its gates are then as sharp as they are meant to be;
-- its last block makes the outputs where the logits read them, each CARRY, with their rests
-  and a ONE, and erases all else: with their rests the outputs are as large where they are 0,
-  at a token that the transformer has nothing to say after, as where they are a code, so what
-  they add to the mean square that a norm of Gemma's takes is the same at every token;
-- Gemma's stream grows, a thousandfold over its layers, and what is carried beside it does
-  not: no layer of Gemma's writes to it, so after the last it is as it was before the first,
-  to the bit, and a 500th of the stream. That is enough to read it by, and too little if
-  there is noise in the stream that is as large for every feature. A lift is for that: before
-  Gemma's layer i, for each i of LIFTS, a layer of the transformer's own makes each carried
-  feature as large as LIFTS says, in place. It reads them through a norm that divides by the
-  size of Gemma's stream, which is 25 times larger at some tokens than at most: so its units
-  come in twos, gelu(z) v - gelu(-z) v, which is z v whatever z is, and the norm after makes
-  what they give as large as it should be. STREAM, the usual size of Gemma's stream before
-  each layer, is for the units to be neither large nor lost under the norm's eps: a gate is
-  LIFT there. LIFTS is empty: a lift is a layer more, and all that it buys is that the
-  transformer takes more noise in the stream (see the end). With no lift, CARRY is all that
-  stands against that noise: it is 3, three times a feature of Gemma's where it is made;
-- after Gemma's last layer, one more of the transformer's own makes each output LOUD, where
-  the logits read it, and the last norm's weight on it is HEARD. Its block could read a 500th
-  of the stream only through a norm's weights of 1400, 20 times Gemma's largest. So the
-  attention of that layer, which has nothing else to do, reads it first: a head attends to
-  its own token and reads each carried feature as FAINT, through weights half as large as
-  Gemma's largest. It gives each rest and the ONE to itself, and each output to a feature
-  that holds nothing and that the last norm drops: what is a little off where an output
-  should be 0 is then not made large where the logits read it. A norm of what a head gives
-  divides by the size of that alone, so the norm after the attention makes each HEAD, in a
-  stream of up to some 5 times its usual size: in one 10 times as large, what the head gives
-  is so small that the norm's eps is felt, and the outputs are a third off. The block reads
-  what the head made as a lift would;
-- LOUD is large for a reason. The last norm divides by the root mean square of the whole
-  stream, outputs and all: were they small in it, the logit of the transformer's token would
-  be as much larger as Gemma's stream is smaller, and that differs by a few times from token
-  to token. As it is, 72 outputs in a stream of 896 are 2300 of its root mean square, where
-  Gemma's features are 1400 as a rule, and the logit is nearly the same at every token: SIZE
-  HEARD times the square root of the bits of a code at most, 85 for 72 bits. The price is
-  the norm after that block, whose weights are 0.4 LOUD. In a stream of n features LOUD is
-  sqrt(n / 896) times as much: Gemma's own features are as much larger there, and a code's
-  embedding, which the logits read, as much smaller;
-- where the outputs are a code, a token's logit gains for each bit of its code that they
-  have, and loses for each other: the token of that code must gain more than any other by
-  more than Gemma's own logits differ. Two codes that differ in 16 bits of 72, as those of
-  examples/alongside.py do at least, are four ninths of that logit apart: so a code must
-  differ from every other in many bits, and the logit must be larger than Gemma's own top
-  logits, which are under 50 on text;
-- that layer's units give nothing where the transformer has nothing to say. An output that
-  can be 1/2 has a rest, which is as large as ONE where the output is 1/2, and 0 where it is
-  a bit. Such outputs are 1/2 together or not at all, so QUIET times the mean of all their
-  rests is taken off the gate of each unit: the mean of 72 is off by an eighth of what one
-  is. Where the outputs are 0, or nearly, the layer gives nothing, and the logits are Gemma's.
-
-The <bos> has a code as any token has: after it alone, the transformer reads it twice.
-
-What it costs to be small, as examples/measure.py says of the sponge of examples/alongside.py
-on the text of src/reifier. That is 34 layers, its own 15 in front of Gemma's 18 and one
-after, and a stream of 896, of which 256 are its features: a file of 1.37 GB. The design of
-commit 7e2804a had 53 layers for the same sponge, four of them lifts, and a stream of 1280,
-with no bit written over another: a file of 2.69 GB. Against that:
-
-- one weight is larger than the largest of Gemma's own of its kind, where before none was:
-  that of the norm after the block of the last layer, 3200, 1.9 times (see LOUD). The others
-  are at most 0.93 of Gemma's largest of their kind. Of what its layers hold, the gates reach
-  nearly three times the largest in Gemma's layers, and a value and a hidden unit 1.2 and 1.1
-  times (see transformer.py), where before a gate of the last layer was 1.1 times, and what
-  that layer gave 1.3 times. The logit of the transformer's token is about 68, where before
-  it was 157;
-- noise on the weights. With every weight times 1 + 1% noise, the transformer's token is
-  right at all but 1 position in 10,000, with 1.5% at half of them, with 2% at none; before,
-  with 5%, at all but 6 in 10,000. Noise added to every projection and the embedding, of 2%
-  of the root mean square of Gemma's own of its kind, leaves it right at three positions in
-  four, where before 10% left nine in ten. With one weight in 10,000 set to 0 it is right at
-  3 in 10, where before one in 1,000 left 96 in 100. Rounded to 6 bits it is right
-  everywhere, and to 5 nowhere, as before. Most of this is the rounds of two layers of
-  examples/alongside.py: with rounds of three, in 40 layers, it is right at all but 4
-  positions in 1,000 with every weight 4% off (see examples/keccak.py). And where it is
-  wrong it moves Gemma too: with 2%, the model's token is Gemma's at a quarter of the
-  positions where the transformer is silent, where Gemma alone keeps its own at 88 in 100;
-- noise in the stream. With normal noise added to every feature after every layer, of 0.1% of
-  the root mean square of the stream there, the transformer's token is right at 85 positions
-  in 100, and with 0.3% at 5, where Gemma alone keeps its own at 94 and at 83. One lift,
-  LIFTS = {4: 64.0}, a layer more, keeps them all at 0.3%, and 95 in 100 at 1%, where Gemma
-  keeps half; it leaves what noise on the weights does as it was;
-- noise on the weights of the norms, of 0.01% of the root mean square of Gemma's own, leaves
-  the transformer's token right, and of 0.03%, right at 43 positions in 100, where before at
-  all. It moves Gemma more than it moves Gemma alone: with 0.03%, where the transformer is
-  silent, the model's token is Gemma's at 66 positions in 100, where Gemma alone keeps its
-  own at 94. The weights of the norms after the transformer's blocks are 2 at most, the last
-  aside, where Gemma's are 21 as a rule and up to 1,660, and the noise is a part of Gemma's.
-  And the norm's weight on a dropped row is then not 0, so the row, which is as large as a
-  bit, is written onto a feature of Gemma's, times that weight, by every block that drops
-  rows.
+- Features. The stream holds the circuit's features, then empty ones if any are needed (see
+  `stream_features`), then Gemma's own. A layer has Gemma's hidden units, or more if a block
+  of the circuit needs more: Gemma's own are the last.
+- Layers. The circuit's layers come first, then Gemma's 18 layers, then one last layer of
+  the circuit. In a layer of the circuit the norm weights on Gemma's features are 0, so the
+  layer neither reads nor writes them. In a layer of Gemma those on the circuit's are 0.
+- Width. Gemma multiplies an embedding by the square root of the number of features, so its
+  features are larger here than in Gemma: `widen` changes Gemma's weights to make up for it.
+- Norms. An RMSNorm divides by the RMS of the whole stream, the circuit's features and
+  Gemma's alike. Before Gemma's layers, Gemma's features hold only an embedding, which is as
+  large for every token: the circuit's norm weights allow for it (see `shared_stream_scale`).
+  After Gemma's layers their RMS differs from token to token, so the circuit's layers come
+  first.
+- Carry. The logits come after the last layer, so the outputs of the circuit must get past
+  Gemma's layers. To carry a signal is to keep it in its feature through layers that do not
+  use it. The last block of the circuit leaves only what is carried: the outputs, their
+  silence flags and one ONE, each of size CARRY_SIZE (see `carried_layout`). A silent output
+  is 0 and its flag is then 1, so the carried features add the same to the mean square of
+  the stream whether the circuit is silent or not: Gemma's norms do not see the difference.
+- The last layer. Gemma's stream grows a thousandfold over its layers, and a carried bit is
+  then about a 500th of a feature of Gemma. The head of the last layer writes each carried
+  bit again, at HEAD_SIZE (see `last_head`). Its block is an amplifier: a block that
+  multiplies features by a constant, whatever the RMS of the stream. It makes each output
+  OUTPUT_SIZE in the feature where the logits read it (see `amplifier`, `last_block`).
+- Logits. The final norm has the weight OUTPUT_NORM on each output. The token whose code
+  equals the outputs then gets a logit of about 70, where Gemma's own are under 50 on text.
+  The outputs are larger than Gemma's features, so the RMS that the final norm divides by
+  depends little on Gemma's stream, and so does that logit. A token whose code differs in d
+  of n bits gets 2 * d / n of that logit less: codes must differ in many bits.
+- Silence. Where the circuit is silent, the silence flags close the gates of the amplifier
+  that read the outputs. The last layer then adds nothing to the outputs, which are 0, and
+  the logits are close to those of Gemma alone. They are not equal: Gemma's norms divide by
+  an RMS that counts what is carried too.
 """
 
-import json
 import math
 import re
-from dataclasses import replace
-from itertools import pairwise
-from pathlib import Path
+from dataclasses import dataclass, replace
 
 import numpy as np
 
-from . import gemma
-from .grid import ONE
-from .trace import MLP, Trace
-from .transformer import (
-    CONTEXT,
-    MARGIN,
-    PAIRS,
-    READ,
-    VALUE,
-    Block,
-    Transformer,
-    lookback_query,
-    runner_up,
-    squares,
-    token_grid,
-    transformer,
-)
+from . import checkpoint, gemma, lower_stream
+from .layout import ONE, Layout
+from .lower import OUT_WEIGHT, Lowered, NormedBlock, lower
+from .lower_stream import BIT_SIZE, KEY_VALUE_WEIGHT, READ_SIZE, ROPE_PAIRS, Attention
+from .transformer import Transformer
 
-CARRY = 3.0  # a bit of the outputs, as the transformer's own layers leave it
-LIFTS = {}  # {i: size}: before Gemma's layer i, a layer more makes it so large. None, by default
-LOUD, HEARD = 8000.0, 5.0  # as the last layer makes it, and the last norm's weight on it: in
-# a stream of 896 features, and sqrt(n / 896) times as loud in one of n, where Gemma's own
-# features are as much larger, and a code's embedding, which the logits read, as much smaller
-LIFT, SPEAK = 1.5, 3.0  # a bit as a layer that lifts reads it, and as the block of the last layer
-# does, where Gemma's stream is as large as usual
-DEAF, QUIET = 0.0, 3.0  # of that block: what it is deaf to, of a bit, and how many times the mean
-# of the rests it takes off its gates
-HEAD, FAINT = 240.0, 0.25  # a bit as the head of the last layer makes it, and as that reads it
-SHARES = 32  # the pairs of units that lift a feature, each by its share, if as many fit
-# Of each layer of unsloth/gemma-3-270m, the median on English text of the rms of the stream
-# before it, and after the last
-# fmt: off
-STREAM = [
-    1.03, 4.7, 37, 45, 73, 86, 130, 130, 210, 210, 250, 380, 410, 510, 670, 740, 850, 1200,
-    1400,
-]
-# fmt: on
-READS = re.compile("input_layernorm|pre_feedforward_layernorm|^norm")  # norms: Gemma's weight / c
-WRITES = re.compile("o_proj|down_proj")  # what the norm after them adds: Gemma's weight * c
+GEMMA = "unsloth/gemma-3-270m"  # the model beside the circuit: the next two numbers are its own
+GEMMA_RMS_BEFORE = 1.03  # the RMS of Gemma's stream before its first layer, at every token
+GEMMA_RMS_AFTER = 1400.0  # the median RMS of Gemma's stream after its last layer, on English text
+CARRY_SIZE = 3.0  # a carried bit is -3 or +3: larger than a feature of Gemma where it is made
+HEAD_SIZE = 240.0  # a bit as the head of the last layer writes it: 80 times CARRY_SIZE
+# The next two are what a pre-norm of the last layer makes of a bit, where the RMS of the stream
+# is GEMMA_RMS_AFTER. The norm weights are then 117 and 17.5: Gemma's own reach 234 and 70.
+HEAD_READ_SIZE = 0.25  # a carried bit, as the head reads it
+BLOCK_READ_SIZE = 3.0  # a bit of HEAD_SIZE, as the block reads it: an amplifier gate is -3 or +3
+SILENCE_WEIGHT = 3.0  # silence takes 3 bits off each gate of the amplifier: GELU is 0 at -6 or less
+AMPLIFIER_COPIES = 32  # the most pairs of hidden units for one feature: weight noise averages out
+OUTPUT_SIZE = 8000.0  # a bit of an output after the last layer: 5 times a feature of Gemma there
+# OUTPUT_SIZE is for a stream of this many features: it grows with the square root of their number.
+REFERENCE_FEATURES = 896
+OUTPUT_NORM = 5.0  # the final norm's weight on an output: a logit is at most 2 * 5 * sqrt(bits)
+
+LAYER_NUMBER = re.compile(r"(?<=layers\.)\d+")  # in the name of a tensor: the number of its layer
+# The norms that Gemma reads the stream through: before its attention, its block and the logits.
+READS_STREAM = re.compile("input_layernorm|pre_feedforward_layernorm|^norm")
+WRITES_STREAM = re.compile("o_proj|down_proj")  # the projections whose output a post-norm adds
 
 
-def moved(name: str, to) -> str:
-    """name, of a tensor, as it is in layer to[i], if it is in layer i"""
-    return re.sub(r"(?<=layers\.)\d+", lambda i: str(to[int(i[0])]), name)
+@dataclass
+class WideGemma:
+    """A Gemma that is wider and deeper than GEMMA: what a checkpoint of it holds."""
+
+    config: dict  # the contents of config.json
+    shapes: dict[str, list[int]]  # the shape of each tensor, by its name in the checkpoint
+    weights: gemma.Tensors  # the tensors that are not all zeros, by name in the text model
+    names: dict  # for names.json: the rows of the layout, and the hidden units of each layer
+
+    def write(self, out_dir):
+        """Write the checkpoint to the directory `out_dir` (see checkpoint.write)."""
+        tensors = self.weights.by_checkpoint_name()
+        checkpoint.write(out_dir, self.config, self.shapes, tensors, self.names)
 
 
-def lift(width, held: dict, gives: dict, one: int, read, shares, deaf=0.0, quiet=None) -> Block:
-    """A block that reads the features of `held`, each plus or minus its size or 0, and gives
-    each to the features of gives[f], if it has any, times the ONE that is among them, `one`:
-    for a feature, `shares` times two units, gelu(z - deaf u) v - gelu(-z - deaf u) v, for the z
-    and the u that the norm before makes of the feature and of ONE, and for v, u over `shares`: z
-    is `read` where the stream is as large as usual. With deaf 0 the two give z v, whatever the
-    stream is. With more, they give 0 for a z that is under deaf of ONE, and so for all that
-    should be 0 and is not quite, as long as that is far enough for gelu to be relu; and for a
-    feature that has others in `quiet`, they give 0 where those are as large as ONE, all of
-    them: QUIET times their mean is taken off its gates. What a weight out of a unit is off by
-    is a part of the unit's share alone. The norm after has yet no weights: `plan` sets them"""
-    lifted = [f for f in held if gives.get(f)]
-    names = [f"lift f{f}{sign}" for f in lifted for sign in "+-"] * shares
-    shapes = [(len(names), width)] * 2 + [(width, len(names))]
-    gate, value, down = (np.zeros(shape) for shape in shapes)
-    for j, f in enumerate(lifted):
-        j = [range(len(names))[2 * j + i :: 2 * len(lifted)] for i in (0, 1)]  # its + and - units
-        gate[j[0], one] = gate[j[1], one] = -deaf
-        gate[j[0], f], gate[j[1], f] = min(gate[j[0], f][0] + 1, 1), max(gate[j[1], f][0] - 1, -1)
-        for i in (0, 1):
-            others = (quiet or {}).get(f, [])
-            gate[np.ix_(list(j[i]), others)] -= QUIET / max(len(others), 1)
-            value[j[i], one] = 1 / 2 / shares
-            down[np.ix_(gives[f], j[i])] = 1 / 2 - i
-    reads = np.zeros(width)
-    reads[list(held)] = read / np.array(list(held.values()))
-    layer = MLP("layer", [f"f{f}" for f in range(width)], [f"f{f}" for f in range(width)], names,
-                np.vstack([gate, value]), np.zeros(2 * len(names)), "geglu", down)  # fmt: skip
-    return Block(layer, reads, np.zeros(width))
+def stream_features(lowered: Lowered, config: dict) -> int:
+    """The number of features of the stream that `lowered` shares with the Gemma of `config`.
+    The features after the circuit's are at least as many as the dropped rows of a block,
+    which become their rows (see gemma.write_block). And the total is a multiple of the heads
+    of a layer, which `transformers` requires of a model."""
+    width = len(lowered.layout[0])
+    dropped_rows = max(len(block.w_out) for block in lowered.blocks) - width
+    features = width + max(config["hidden_size"], dropped_rows)
+    heads = config["num_attention_heads"]
+    return math.ceil(features / heads) * heads
 
 
-def front(t: Trace, codes: dict, size=640, hidden=2048, heads=4) -> Transformer:
-    """The transformer on the program t that is to be in front of the layers of a Gemma of
-    `size` features and `heads` heads, beside its embedding: what `save` takes. It carries its
-    outputs on, and has no logits of its own. A block of it may have `hidden` hidden units,
-    and has its own more than once if they fit (see transformer.repeats): the more often, the
-    more noise on the weights it takes. A layer of the checkpoint has as many as the largest
-    block, or as Gemma (see units). The stream of the two is the grid's features, then as few
-    that hold nothing as make a whole number of features a head, as a Gemma must have, then
-    Gemma's. The grid is token_grid's, and wider if its last row has fewer features with
-    nothing in them than outputs: the head of the last layer gives an output to each (see
-    plan). And a block that writes bits over others gives as many rows more, which the norm
-    after it drops (see transformer.block): they are the rows of the features after the
-    grid's, so those are as many as the most bits that one block writes over, if Gemma's are
-    fewer"""
-    grid, bits = token_grid(t, True), len(t.outputs)
-    spare = sum(s is None for s in grid[-1][1 + bits :])
-    grid = [row + [None] * max(0, bits - spare) for row in grid]
-    over = max(sum(bool(a and b and a != b) for a, b in zip(*rows)) for rows in pairwise(grid))
-    more = max(size, over)
-    more += -(more + len(grid[0])) % heads
-    return transformer(t, codes, hidden, (more, STREAM[0] ** 2), CARRY, grid)
+def renumbered(name: str, shift: int) -> str:
+    """The name of a tensor with the number of its layer `shift` larger, if it is of a layer."""
+    return LAYER_NUMBER.sub(lambda number: str(int(number[0]) + shift), name)
 
 
-def units(m: Transformer, config: dict) -> int:
-    """The hidden units of a layer of the checkpoint of m beside a Gemma of config config:
-    Gemma's, or as many as the largest of m's blocks has"""
-    return max(config["intermediate_size"], *[len(b.layer.hidden) for b in m.blocks])
-
-
-def plan(m: Transformer, config: dict):
-    """What m, of `front`, needs after its own layers beside a Gemma 3 of config config: the
-    blocks that lift what it leaves, by the layer of Gemma's that each is before, if LIFTS has
-    any; what the head of the layer after Gemma's last reads and gives, and the weights of the
-    norms around it (see `head`); and that layer's block, which reads what the head gave and
-    makes the outputs LOUD where the logits read them"""
-    width, last, t = len(m.grid[0]), m.grid[-1], m.trace
-    wide, hidden, bits = m.size, units(m, config), len(t.outputs)
-    empty = (wide or 0) - width - config["hidden_size"]  # the features that hold nothing
-    whole = wide and wide % config["num_attention_heads"] == 0
-    assert whole and empty >= 0 and not m.out.any(), f"{t.name} is not of front, for this Gemma"
-    assert len(config["layer_types"]) == len(STREAM) - 1, "STREAM is of unsloth/gemma-3-270m"
-    assert len(m.codes) == config["vocab_size"], f"{t.name} needs a code for each of Gemma's tokens"
-    assert len(m.q) <= config["num_attention_heads"], f"{t.name} needs its heads in one layer"
-    one, carried = last.index(ONE), [f for f, s in enumerate(last) if s]
-    each = squares(t, m.codes) | {ONE: 1.0}  # the mean square of each signal, over its size
-    square = sum(each[last[f]] for f in carried)
-    shares = max(1, min(SHARES, hidden // (2 * len(carried))))
-    size, lifts = CARRY, {}
-    for i, larger in LIFTS.items():  # in place: each feature is given to itself
-        held, gives = dict.fromkeys(carried, size), {f: [f] for f in carried}
-        b = lifts[i] = lift(width, held, gives, one, LIFT * STREAM[i], shares)
-        b.writes[carried] = (larger - size) * math.sqrt(square / wide)
-        size = larger
-    outs, rests = range(1, 1 + bits), {y: x.outputs for x in t.mlps for y in x.outputs}
-    quiet = {  # of an output that can be 1/2, its rest: no other output of an MLP is one
-        1 + i: last.index(r)
-        for i, y in enumerate(t.outputs)
-        for r in rests[y]
-        if r not in t.outputs and each[y] < 1
+def wide_shapes(gemma_weights: dict, config: dict, wide_config: dict, first_layer: int) -> dict:
+    """The shape of every tensor of the model of the config `wide_config`, by its name in a
+    checkpoint: first the new layers, each with the tensors of a layer of Gemma, then Gemma's
+    tensors, whose layers start at `first_layer`. An axis as long as Gemma has features, or
+    hidden units, becomes as long as `wide_config` has them. In GEMMA no other kind of axis
+    has either length."""
+    longer = {
+        config["hidden_size"]: wide_config["hidden_size"],
+        config["intermediate_size"]: wide_config["intermediate_size"],
     }
-    window, tokens = len(t.inputs) // bits, list(m.codes)  # on the codes of tokens at random,
-    drawn = np.random.default_rng(0).integers(0, len(tokens), (64, window))  # as squares does
-    read = np.array([[m.codes[tokens[i]] for i in row] for row in drawn], float).reshape(64, -1)
-    values = t.values(read)
-    half = np.array([values[t.outputs[f - 1]] == 0.5 for f in quiet]).reshape(len(quiet), -1)
-    together = (half.all(0) | ~half.any(0)).all()
-    assert together, f"{t.name}: its outputs that can be 1/2 must be 1/2 together"
-    spare = [f for f in range(1 + bits, width) if f not in carried][:bits]  # which the norm drops
-    assert len(spare) == bits, f"{t.name} needs {bits} features more, for its head to give to"
-    # the head gives an output to one of `spare`, which the last norm drops, and all else that
-    # is carried to itself: each is then HEAD, but an output's own feature, which is as it was
-    at = {f: f for f in carried} | dict(zip(outs, spare))
-    reads, writes = np.zeros(width), np.zeros(width)
-    reads[carried] = FAINT * STREAM[-1] / size
-    writes[[at[f] for f in carried]] = HEAD * math.sqrt(square / wide)
-    writes[[f for f in carried if at[f] == f]] -= size * math.sqrt(square / wide)
-    held, gives = {at[f]: HEAD for f in carried}, {at[f]: [f] for f in outs} | {one: spare}
-    quiet = {at[f]: sorted(quiet.values()) for f in quiet}  # an output's units: every rest
-    speak = lift(width, held, gives, one, SPEAK * STREAM[-1], shares, DEAF, quiet)
-    loud = LOUD * math.sqrt(wide / 896)
-    speak.writes[outs] = (loud - size) * math.sqrt((bits + len(spare)) / wide)
-    return lifts, (carried, [at[f] for f in carried], one, reads, writes), speak
+    gemma_layers = range(first_layer, first_layer + len(config["layer_types"]))
+    all_layers = range(len(wide_config["layer_types"]))
+    new_layers = [layer for layer in all_layers if layer not in gemma_layers]
+    of_layer_0 = [name for name in gemma_weights if LAYER_NUMBER.findall(name) == ["0"]]
+    shapes = {}
+    for layer in new_layers:
+        for name in of_layer_0:
+            shapes[renumbered(name, layer)] = gemma_weights[name].shape
+    for name, tensor in gemma_weights.items():
+        shapes[renumbered(name, first_layer)] = tensor.shape
+    return {name: [longer.get(axis, axis) for axis in shape] for name, shape in shapes.items()}
 
 
-def head(w, i, m: Transformer, carried, to, one, reads, writes, config):
-    """The attention of layer i, of those after m's blocks: a head that attends to its own
-    token, as one of transformer.heads that looks no token back, but on `one`, the ONE that is
-    carried; it gives each feature of `carried` to the feature of `to` for it, between norms
-    of weights reads and writes. The norm after makes of what is given what `writes` says, if
-    the stream that it was read from is not many times its usual size (see the module's notes)"""
-    width, n = len(reads), len(carried)
-    scale = MARGIN / (PAIRS * (1 - runner_up(m.turns, CONTEXT)))  # its own token scores
-    key, query = np.zeros((2, 2 * PAIRS, width))  # scale * PAIRS, as in heads
-    key[:PAIRS, one] = VALUE
-    query[:, one] = scale / (READ**2 * VALUE) * lookback_query(0, m.turns)
-    value, out = np.zeros((n, width)), np.zeros((width, n))
-    value[range(n), carried], out[to, range(n)] = VALUE, 1
-    gemma.attention(w, i, replace(m, k=key), [query], value, [out], reads, writes, config)
+def widen(gemma_weights, config, features, hidden_units, new_before=0, new_after=0) -> WideGemma:
+    """A Gemma in a wider, deeper model. `gemma_weights` is Gemma's tensors by their names in
+    its checkpoint (see checkpoint.read_weights), and `config` its config. The model has
+    `features` features, `hidden_units` hidden units a layer, `new_before` new layers before
+    Gemma's own and `new_after` after them. Gemma's weights take the last entries of each
+    axis. All else is zeros, for the caller to write, and gemma.finish is still to be called.
+
+    Gemma's features are `scale` times what they were, with `scale` the square root of all
+    features over Gemma's own. Their mean square over all features is what it was over
+    Gemma's, so an RMSNorm gives `scale` times what it gave. A norm that Gemma reads the
+    stream through therefore has its weights divided by `scale`. And a projection that
+    writes to the stream is multiplied by `scale`: the post-norm after it sees the mean
+    square that it saw, and adds `scale` times what it added."""
+    new = ["sliding_attention"]  # the RoPE of the circuit's heads is that of a sliding layer
+    layer_types = new * new_before + config["layer_types"] + new * new_after
+    wide_config = config | {
+        "hidden_size": features,
+        "intermediate_size": hidden_units,
+        "layer_types": layer_types,
+        "num_hidden_layers": len(layer_types),
+    }
+    shapes = wide_shapes(gemma_weights, config, wide_config, new_before)
+    weights = gemma.Tensors(shapes)
+    scale = math.sqrt(features / config["hidden_size"])
+    for name, tensor in gemma_weights.items():
+        name = renumbered(name.removeprefix(weights.prefix), new_before)
+        if name.endswith("norm.weight"):
+            tensor = gemma.norm_offset(config) + tensor  # what the norm multiplies by
+            if READS_STREAM.search(name):
+                tensor = tensor / scale
+        elif WRITES_STREAM.search(name):
+            tensor = tensor * scale
+        last_entries = tuple(slice(-length, None) for length in tensor.shape)
+        weights[name][last_entries] = tensor
+    return WideGemma(wide_config, shapes, weights, {"features": [], "hidden": []})
 
 
-def build_weights(m: Transformer | None, real: dict, config: dict, features: int = 0):
-    """The weights of m, of `front`, beside real, the tensors of a Gemma 3 by name, whose config
-    is config: or, with no m, of that Gemma alone, with `features` features more, which hold
-    nothing: as wide as it is beside a transformer that adds as many. Gives the config of the
-    wide Gemma, the shapes of its tensors, the weights that are set, by their names in the text
-    model, the names of m's features after the heads and after each layer of the checkpoint,
-    and of the hidden units that are m's in each: none, in a layer of Gemma's"""
-    size, hidden = config["hidden_size"], config["intermediate_size"]
-    width = m.size - size if m and m.size else features  # of the features that are not Gemma's
-    c = math.sqrt((size + width) / size)
-    lifts, heard, speak = plan(m, config) if m else ({}, None, None)
-    own = list(m.blocks) if m else []  # the layers that are m's, in order, and Gemma's
-    gemmas = []
-    for i in range(len(config["layer_types"])):
-        own += [lifts[i]] if i in lifts else []
-        gemmas.append(len(own) + i)
-    own += [speak] * bool(m)
-    kinds = ["sliding_attention"] * (len(own) + len(gemmas))  # m's own layers slide,
-    for i, kind in zip(gemmas, config["layer_types"]):  # and Gemma's are as they were
-        kinds[i] = kind
-    ours = [i for i in range(len(kinds)) if i not in gemmas]
-    layer = [k for k in real if ".layers.0." in k]  # the tensors of a layer, by those of the first
-    shapes = {moved(k, {0: i}): real[k].shape for i in ours for k in layer}  # m's own layers,
-    shapes |= {moved(k, gemmas): v.shape for k, v in real.items()}  # and Gemma's
-    wider = {size: size + width, hidden: units(m, config) if m else hidden}
-    kept = {v.shape[0] for k, v in real.items() if re.search("[qkv]_(proj|norm)|embed", k)}
-    assert size != hidden and not kept & {size, hidden}, "shapes do not tell features from the rest"
-    assert wider[size] % config["num_attention_heads"] == 0, "a Gemma has whole features a head"
-    shapes = {k: [wider.get(d, d) for d in s] for k, s in shapes.items()}
-    config = config | {"layer_types": kinds, "num_hidden_layers": len(kinds)}
-    config |= {"hidden_size": wider[size], "intermediate_size": wider[hidden]}
-    w = gemma.LazyZeros(shapes)  # a norm's weights are what it multiplies by, until the end:
-    for k in shapes:  # 0, in a layer of m's own, around a module that has nothing to do
-        if k.endswith("norm.weight"):
-            w[k.removeprefix(w.prefix)]
-    grid, names = [], []
-    if m:  # on the first of the features, and the first of the hidden units of its own layers
-        w["embed_tokens.weight"][:, : m.embed.shape[1]] = m.embed / math.sqrt(size + width)
-        gemma.attention(w, 0, m, m.q, m.v, m.o, m.reads, m.writes, config)
-        for i, b in zip(ours, own):
-            gemma.block(w, i, b, 1.0)
-        head(w, ours[-1], m, *heard, config)
-        w["norm.weight"][np.flatnonzero(speak.writes)] = HEARD
-        rows = iter([*m.grid[1:], *[m.grid[-1]] * (len(lifts) + 1)])
-        grid = [m.grid[0]]
-        for i in range(len(kinds)):  # a layer of Gemma's leaves m's features as they were
-            grid.append(next(rows) if i in ours else grid[-1])
-        names = [own[ours.index(i)].layer.hidden if i in ours else [] for i in range(len(kinds))]
-    for k, v in real.items():  # Gemma's own: the last of each axis, in the layers of `gemmas`
-        k = moved(k.removeprefix(w.prefix), gemmas)
-        if k.endswith("norm.weight"):
-            v = (1 + v) / c if READS.search(k) else 1 + v
-        w[k][tuple(slice(-d, None) for d in v.shape)] = v * c if WRITES.search(k) else v
-    for k, v in w.items():
-        if k.endswith("norm.weight"):
-            v -= 1  # Gemma 3's norm multiplies by 1 + weight
-    return config, shapes, w, grid, names
+def shared_stream_scale(circuit_square: float, features: int) -> float:
+    """The factor on a pre-norm weight of the circuit, in a stream of `features` features
+    that it shares with Gemma. The lowering took the squares of the stream to add up to
+    `circuit_square`, those of the circuit's features. Before Gemma's layers, Gemma's features
+    add features * GEMMA_RMS_BEFORE**2 (see `widen`), so an RMSNorm divides by a larger RMS."""
+    gemma_square = features * GEMMA_RMS_BEFORE**2
+    return math.sqrt((circuit_square + gemma_square) / circuit_square)
 
 
-def checkpoint_weights(repo: str) -> dict[str, np.ndarray]:
-    """The tensors of repo's checkpoint, at its revision of gemma.REVISIONS, by name: bf16, as
-    float32. From huggingface.co the first time, with huggingface_hub, and then from its cache"""
-    from huggingface_hub import hf_hub_download
+def write_circuit(weights: gemma.Tensors, lowered: Lowered, config: dict):
+    """Write the embedding, the attention and the blocks of `lowered` into the first features
+    and the first layers of `weights`, the tensors of the model of `config`. `norm_scale`
+    corrects every norm weight for the number of features (see lower.Lowered), and
+    `shared_stream_scale` corrects each pre-norm for what Gemma's features hold. A post-norm
+    needs only the first: it divides by the RMS of what its own sublayer outputs."""
+    width = len(lowered.layout[0])
+    features = config["hidden_size"]
+    norm_scale = math.sqrt(width / features)
+    embedded = lowered.embedding.shape[1]
+    weights["embed_tokens.weight"][:, :embedded] = lowered.embedding / math.sqrt(features)
+    embedded_square = float((lowered.embedding[0] ** 2).sum())  # the same for every token
+    pre_norm = lowered.attention.pre_norm * shared_stream_scale(embedded_square, features)
+    attention = replace(lowered.attention, pre_norm=pre_norm)
+    gemma.write_attention(weights, 0, attention, config, norm_scale)
+    for layer, block in enumerate(lowered.blocks):
+        row = lowered.layout[layer]  # what the stream holds before the block
+        square = lower_stream.stream_square(row, lowered.sizes[layer], lowered.mean_square)
+        pre_norm = block.pre_norm * shared_stream_scale(square, features)
+        gemma.write_block(weights, layer, replace(block, pre_norm=pre_norm), norm_scale)
 
-    file = hf_hub_download(repo, "model.safetensors", revision=gemma.REVISIONS[repo])
-    with open(file, "rb") as f:
-        n = int.from_bytes(f.read(8), "little")
-        header = json.loads(f.read(n))
-    header.pop("__metadata__", None)
-    data, weights = np.memmap(file, "<u2", "r", 8 + n), {}
-    for k, t in header.items():
-        assert t["dtype"] == "BF16", f"{k} is {t['dtype']}, not BF16"
-        start, end = (i // 2 for i in t["data_offsets"])  # a bf16 is the top half of a float32
-        weights[k] = (data[start:end].astype(np.uint32) << 16).view(np.float32).reshape(t["shape"])
-    return weights
+
+def carried_layout(model: Transformer) -> Layout:
+    """The lowered layout of `model`, with a last row that holds what is carried: the outputs,
+    their silence flags and one ONE. The ONE features of the rows before have other sizes
+    (see lower_stream.one_sizes), so the last block erases them and makes a new ONE: in the
+    last feature that is empty before and after that block, or else in one more. The row
+    also gets as many empty features after the code as there are outputs, for `last_head`."""
+    circuit = model.circuit
+    bits = len(circuit.outputs)
+    rows = lower_stream.lowered_layout(model)
+    made_earlier = set(circuit.outputs).intersection(rows[-2])
+    # Only the last block writes at CARRY_SIZE, and a signal keeps the size that it is made at.
+    rule = f"its last block must make every output, and {sorted(made_earlier)} are made earlier"
+    assert not made_earlier, f"{circuit.name}: {rule}"
+    width = len(rows[0])
+    empty_twice = [f for f in range(width) if rows[-2][f] is None and rows[-1][f] is None]
+    if not empty_twice:
+        empty_twice = [width]
+        rows = [row + [None] for row in rows]
+    rows[-1] = [None if name == ONE else name for name in rows[-1]]
+    rows[-1][empty_twice[-1]] = ONE
+    empty = sum(name is None for name in rows[-1][1 + bits :])
+    return [row + [None] * max(0, bits - empty) for row in rows]
 
 
-def save(m: Transformer | None, out_dir: Path, features: int = 0):
-    """m, of `front`, beside unsloth/gemma-3-270m, in out_dir: a checkpoint that transformers
-    loads from there, with the names of m's features and hidden units as they are in it (see
-    gemma.write). With no m, that Gemma alone, with `features` features more: as wide as the
-    checkpoint of a transformer that adds as many. The first run fetches Gemma's weights"""
-    repo = "unsloth/gemma-3-270m"  # the Gemma 3 that STREAM was measured on
-    config = gemma.checkpoint_metadata(repo)[1]
-    config, shapes, w, grid, names = build_weights(m, checkpoint_weights(repo), config, features)
-    gemma.write(out_dir, config, shapes, w, grid, names)
+def lower_beside(model: Transformer, hidden_units: int | None = None) -> Lowered:
+    """Lower `model` as lower.lower does with `hidden_units`, but with the rows of
+    `carried_layout` and the last row at CARRY_SIZE. This file does not use its final norm."""
+    rows = carried_layout(model)
+    sizes = lower_stream.feature_sizes(rows)
+    sizes[-1] *= CARRY_SIZE / BIT_SIZE
+    return lower(model, hidden_units, rows, sizes)
+
+
+class Carried:
+    """What the last row of a layout of `lower_beside` holds, and where `last_head` writes it."""
+
+    def __init__(self, lowered: Lowered):
+        row = lowered.layout[-1]
+        bits = len(lowered.model.circuit.outputs)
+        self.width = len(row)
+        self.outputs = list(range(1, 1 + bits))  # the logits read the outputs in these features
+        self.flags_and_one = [f for f in range(1 + bits, len(row)) if row[f]]
+        self.one = row.index(ONE)
+        empty = [f for f in range(1 + bits, len(row)) if row[f] is None]
+        self.spare = empty[:bits]  # spare features: the head writes output i again in spare[i]
+        # The mean over inputs of the sum of the squares of all that is carried, for bits of size 1.
+        self.square = sum(lowered.mean_square[row[f]] for f in self.outputs + self.flags_and_one)
+        self.closed_by = silence_flags(lowered, self.spare)
+
+
+def silence_flags(lowered: Lowered, spare: list[int]) -> dict[int, list[int]]:
+    """For the spare feature spare[i] of each output i that can be 1/2: the features that
+    close the gates of its pairs of hidden units in the last block (see `amplifier`). They
+    are the features of the silence flags of all such outputs, because the mean of many flags
+    has a smaller error than one flag. So where one output is 1/2, every output must be. The
+    flag of an output is the other output of the MLP that makes it (see lib.table)."""
+    circuit = lowered.model.circuit
+    flags = {}  # by the number of an output that can be 1/2: the feature of its flag
+    for number, name in enumerate(circuit.outputs):
+        maker = next(m for m in circuit.mlps if name in m.outputs)
+        siblings = [other for other in maker.outputs if other not in circuit.outputs]
+        if siblings and not np.isclose(lowered.mean_square[name], 1):
+            flags[number] = lowered.layout[-1].index(siblings[-1])
+    values = lower_stream.sample_values(circuit, lowered.model.codes)
+    is_half = np.array([np.isclose(values[name], 1 / 2) for name in circuit.outputs])
+    together = is_half.all(axis=0) | ~is_half.any(axis=0)
+    assert together.all(), f"{circuit.name}: where one output is 1/2, every output must be 1/2"
+    return {spare[number]: sorted(flags.values()) for number in flags}
+
+
+def last_head(carried: Carried, features: int) -> Attention:
+    """The attention of the last layer, in a stream of `features` features: one head that
+    attends to its own token. A block could read a carried bit only through a pre-norm weight
+    of 1400, where Gemma's reach 70. The head reads it as HEAD_READ_SIZE, and its post-norm, which
+    divides by the RMS of what the head alone writes, makes it HEAD_SIZE. A silence flag and ONE
+    grow where they are. An output is written to a spare feature instead. A head has no gate
+    to close: in the output's own feature, where the logits read it, the head would also
+    multiply the small error of a silent output, which should be 0."""
+    read = carried.outputs + carried.flags_and_one
+    written = carried.spare + carried.flags_and_one
+    count = len(read)
+    # Keys and queries read ONE, as in lower_stream.lower_attention, for no positions back.
+    # Gemma normalizes both, so it does not matter that ONE is not READ_SIZE after this pre-norm.
+    w_key = np.zeros((2 * ROPE_PAIRS, carried.width))
+    w_key[:ROPE_PAIRS, carried.one] = KEY_VALUE_WEIGHT
+    query_weight = lower_stream.top_score() / ROPE_PAIRS / (KEY_VALUE_WEIGHT * READ_SIZE**2)
+    w_query = np.zeros((1, 2 * ROPE_PAIRS, carried.width))
+    w_query[0, :, carried.one] = query_weight * lower_stream.lookback_query(0)
+    w_value = np.zeros((count, carried.width))
+    w_value[range(count), read] = KEY_VALUE_WEIGHT
+    w_out = np.zeros((1, carried.width, count))
+    w_out[0, written, range(count)] = 1
+    pre_norm = np.zeros(carried.width)
+    pre_norm[read] = HEAD_READ_SIZE * GEMMA_RMS_AFTER / CARRY_SIZE
+    output_rms = math.sqrt(carried.square / features)  # of what it writes, for bits of size 1
+    post_norm = np.zeros(carried.width)
+    post_norm[carried.spare] = HEAD_SIZE * output_rms
+    # The flags and ONE already hold CARRY_SIZE.
+    post_norm[carried.flags_and_one] = (HEAD_SIZE - CARRY_SIZE) * output_rms
+    return Attention(w_query, w_key, w_value, w_out, pre_norm, post_norm)
+
+
+def amplifier(width: int, adds_to: dict, one: int, closed_by: dict, copies: int) -> NormedBlock:
+    """An amplifier of `width` features (see the top of this file). Let z be a feature and u
+    the feature `one`, which holds ONE, both after the pre-norm. A pair of hidden units
+    computes
+
+        gelu(z) * u - gelu(-z) * u  =  z * u
+
+    for every z: one unit alone would need z to be far from 0. The RMS of the stream divides
+    z and u alike, and the post-norm cancels it. Each feature f of `adds_to` gets `copies`
+    such pairs, with f as z: between them they add z * u / 4 to each feature of adds_to[f].
+    `closed_by[f]`, if f has one, lists the features that close the gates of those pairs.
+    SILENCE_WEIGHT times their mean is taken off both gates, so the pairs add nothing where
+    those features are as large as ONE. The caller sets the norm weights."""
+    names = []
+    w_gate = np.zeros((2 * len(adds_to), width))
+    w_value = np.zeros((2 * len(adds_to), width))
+    w_out = np.zeros((width, 2 * len(adds_to)))
+    for feature, written in adds_to.items():
+        closing = closed_by.get(feature, [])
+        for sign, symbol in ((1, "+"), (-1, "-")):
+            unit = len(names)
+            names.append(f"amplify f{feature}{symbol}")
+            w_gate[unit, feature] = sign
+            if closing:
+                w_gate[unit, closing] = -SILENCE_WEIGHT / len(closing)
+            w_value[unit, one] = 1 / 2 / copies  # half of u, shared by the copies
+            w_out[written, unit] = sign * OUT_WEIGHT
+    w_gate = np.tile(w_gate, (copies, 1))  # every pair, `copies` times
+    w_value = np.tile(w_value, (copies, 1))
+    w_out = np.tile(w_out, (1, copies))
+    return NormedBlock(names * copies, w_gate, w_value, w_out, np.zeros(width), np.zeros(width))
+
+
+def last_block(carried: Carried, features: int, hidden_units: int) -> NormedBlock:
+    """The MLP block of the last layer, in a stream of `features` features and a layer of
+    `hidden_units` hidden units: an amplifier of what `last_head` wrote. From the spare
+    feature of each output, it makes the output large where the logits read it. From ONE, it
+    adds a constant to every spare feature. The post-norm multiplies those by 0, as it does a
+    dropped row: the constant only keeps the RMS that the post-norm divides by away from 0
+    where the circuit is silent."""
+    bits = len(carried.outputs)
+    adds_to = {spare: [output] for spare, output in zip(carried.spare, carried.outputs)}
+    adds_to[carried.one] = carried.spare
+    # The room is counted as if the silence flags had pairs too, so up to half of it stays unused.
+    room = hidden_units // (2 * (bits + len(carried.flags_and_one)))
+    copies = max(1, min(AMPLIFIER_COPIES, room))
+    block = amplifier(carried.width, adds_to, carried.one, carried.closed_by, copies)
+    read = carried.spare + carried.flags_and_one  # each is HEAD_SIZE
+    block.pre_norm[read] = BLOCK_READ_SIZE * GEMMA_RMS_AFTER / HEAD_SIZE
+    output_size = OUTPUT_SIZE * math.sqrt(features / REFERENCE_FEATURES)
+    # Where the circuit answers, an output gets -1 or +1 and a spare feature 1, times one factor.
+    output_rms = math.sqrt((bits + len(carried.spare)) / features)
+    block.post_norm[carried.outputs] = (output_size - CARRY_SIZE) * output_rms
+    return block
+
+
+def wide_gemma(lowered: Lowered, gemma_weights: dict, config: dict) -> WideGemma:
+    """The wider, deeper Gemma that runs `lowered`, a model of `lower_beside`, beside a Gemma.
+    `gemma_weights` and `config` are that Gemma's tensors and its config, as `widen` takes
+    them."""
+    model = lowered.model
+    name = model.circuit.name
+    carries = lowered.layout == carried_layout(model) and lowered.sizes[-1].max() == CARRY_SIZE
+    assert carries, f"{name} must be lowered by lower_beside"
+    assert len(model.codes) == config["vocab_size"], f"{name} needs a code for each token of Gemma"
+    heads = config["num_attention_heads"]
+    assert len(model.heads) <= heads, f"{name} reads more tokens than a layer of Gemma has heads"
+    carried = Carried(lowered)
+    circuit_layers = len(lowered.blocks)
+    gemma_layers = len(config["layer_types"])
+    features = stream_features(lowered, config)
+    hidden_units = max(config["intermediate_size"], *[len(block.units) for block in lowered.blocks])
+    wide = widen(
+        gemma_weights, config, features, hidden_units, new_before=circuit_layers, new_after=1
+    )
+    write_circuit(wide.weights, lowered, wide.config)
+    last_layer = circuit_layers + gemma_layers
+    # The norms of the last layer are made for the whole stream, so their factor is 1.
+    head = last_head(carried, features)
+    gemma.write_attention(wide.weights, last_layer, head, wide.config, norm_scale=1.0)
+    last = last_block(carried, features, hidden_units)
+    gemma.write_block(wide.weights, last_layer, last, norm_scale=1.0)
+    wide.weights["norm.weight"][carried.outputs] = OUTPUT_NORM
+    gemma.finish(wide.weights, wide.config)
+    # After the circuit's blocks, no layer changes which signal a feature holds.
+    rows = lowered.layout + [lowered.layout[-1]] * (gemma_layers + 1)
+    hidden = [block.units for block in lowered.blocks] + [[]] * gemma_layers + [last.units]
+    wide.names = {"features": rows, "hidden": hidden}
+    return wide
+
+
+def save(model: Transformer, out_dir, hidden_units: int | None = None, check_on=None):
+    """Save the ideal transformer `model` beside GEMMA, as one checkpoint in the directory
+    `out_dir`. The first call downloads Gemma's weights. The circuit must obey five rules:
+
+    - Every token of Gemma has a code.
+    - Any two codes differ in many bits (see Logits, at the top), as in examples/alongside.py.
+    - The circuit reads at most as many tokens as a layer of Gemma has heads.
+    - The last block of the circuit makes every output.
+    - Where one output is 1/2, every output is 1/2. This rule is checked only on the inputs
+      of lower_stream.sample_values.
+
+    A block of the circuit gets copies of its hidden units, up to `hidden_units` in all: by
+    default the number that a layer of Gemma has.
+
+    `check_on` is a list of tokens to check the weights on first (see gemma.check_weights).
+    The next token is checked only where the circuit answers, so `check_on` should hold such
+    tokens. If only the next token is wrong, the codes probably differ in too few bits."""
+    config = checkpoint.metadata(GEMMA).config
+    if hidden_units is None:
+        hidden_units = config["intermediate_size"]
+    lowered = lower_beside(model, hidden_units)
+    wide = wide_gemma(lowered, checkpoint.read_weights(GEMMA), config)
+    if check_on is not None:
+        gemma.check_weights(wide.weights, wide.config, lowered, check_on)
+    wide.write(out_dir)

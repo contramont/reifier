@@ -1,104 +1,75 @@
-"""Each stage checked against the one before. A check that fails names what is wrong."""
+"""Step 6, checks: a circuit against a Python function, and a transformer against its circuit.
+A check that fails raises an AssertionError that names the wrong signal, feature or position."""
 
-from itertools import pairwise
+from itertools import product
 
 import numpy as np
 
-from .emit import Network
-from .grid import ONE, Grid
-from .trace import Trace
+from .circuit import Circuit
+from .layout import ONE
 from .transformer import Transformer
 
-
-def cases(n: int) -> np.ndarray:
-    """Inputs of n bits to check on: all of them if n <= 8, else 256 random ones"""
-    if n <= 8:
-        return np.array([[i >> j & 1 for j in range(n)] for i in range(2**n)], float)
-    return np.random.default_rng(0).integers(0, 2, (256, n)).astype(float)
+MAX_CASES = 256  # a circuit is checked on every case of its inputs if there are at most this many
 
 
-def check_trace(t: Trace, reference, xs=None) -> int:
-    """t against what it should compute, on each input of xs (default: cases). reference is a Python
-    function from a list of bits to the outputs, a bit or a list of them, or another trace, such as
-    t before a pass: then every signal they share must agree too. Gives how many inputs it tried"""
-    names = sorted([*t.inputs, *(y for m in t.mlps for y in m.outputs)])
-    twice = [s for s, other in pairwise(names) if s == other]
-    assert not twice, f"{t.name}: two signals are named {twice[0]}"
-    xs = cases(len(t.inputs)) if xs is None else np.asarray(xs, float)
-    got = t.values(xs)
-    if isinstance(reference, Trace):
-        want = reference.values(xs)
-        pairs = [(s, got[s], want[s]) for s in got if s in want]  # the earliest to differ fails
-        outs = [want[y] for y in reference.outputs]
+def check_circuit(circuit: Circuit, reference) -> int:
+    """Check `circuit` against the Python function `reference`, which takes the bits of a case
+    in one list and returns the outputs: a bit, or a list with one value for each output. Every
+    case is tried, or MAX_CASES random ones if there are more: random bits, not the codes of
+    tokens. Returns how many were tried."""
+    count = len(circuit.inputs)
+    if 2**count <= MAX_CASES:
+        inputs = list(product([0, 1], repeat=count))
     else:
-        pairs, outs = [], np.atleast_2d(np.array([reference([*map(int, x)]) for x in xs], float).T)
-    assert len(outs) == len(t.outputs), f"{t.name} gives {len(t.outputs)} outputs, not {len(outs)}"
-    pairs += [(y, got[y], out) for y, out in zip(t.outputs, outs)]
-    for s, value, should in pairs:  # a name, its values in t, the values it should have
-        i = (np.abs(value - should) > 1e-9).argmax()  # the first input on which they differ,
-        assert abs(value[i] - should[i]) <= 1e-9, (  # if any: sums of fifths are not exact
-            f"{s} is {value[i]:g} on {''.join(str(int(v)) for v in xs[i])}, not {should[i]:g}"
-        )
-    return len(xs)
+        inputs = np.random.default_rng(0).integers(0, 2, (MAX_CASES, count))
+    values = circuit.values(inputs)
+    for case, bits in enumerate(np.asarray(inputs).tolist()):
+        expected = np.atleast_1d(reference(bits))
+        assert len(expected) == len(circuit.outputs), "reference must return one value per output"
+        for name, want in zip(circuit.outputs, expected):
+            got = values[name][case]
+            assert np.isclose(got, want), f"{name} is {got:g} on input {bits}, not {want:g}"
+    return len(inputs)
 
 
-def check_grid(t: Trace, grid: Grid):
-    """grid against t. ONE is feature 0 of every row. Row 0 holds t's inputs, and the last row
-    its outputs. A signal keeps its feature. Where one first appears, an MLP makes it: that row
-    holds all that the MLP makes, and the row before all that it reads"""
-    made = {y: m for m in t.mlps for y in m.outputs}
-    assert all(ONE in row[:1] for row in grid), "ONE is not feature 0 of every row"
-    assert len({len(row) for row in grid}) == 1, "the rows differ in width"
-    assert set(t.inputs) <= set(grid[0]), "depth 0 lacks an input"
-    assert set(t.outputs) <= set(grid[-1]), "the last depth lacks an output"
-    assert not made.keys() & set(grid[0]), "depth 0 holds a signal that an MLP makes"
-    seen = set(grid[0])  # every signal that a cell so far has held
-    for d, (before, row) in enumerate(pairwise(grid), 1):
-        had, has = set(before), set(row)
-        for s in [s for s, old in zip(row, before) if s and s != old]:
-            assert s in made and s not in seen, f"{s} is new at depth {d}: no MLP makes it there"
-            seen.add(s)
-            missing = set(made[s].inputs) - had
-            assert not missing, f"{s} is made at depth {d}, but depth {d - 1} lacks {missing}"
-            assert has.issuperset(made[s].outputs), f"depth {d} lacks an output of {made[s].name}"
+def signal_values(model: Transformer, tokens) -> dict[str, np.ndarray]:
+    """The value of every signal of the circuit of `model`, and of ONE, at each position where
+    the circuit has all the tokens that it reads: position window - 1 and later."""
+    window = len(model.heads)
+    assert len(tokens) >= window, f"the circuit reads {window} tokens, and it got {len(tokens)}"
+    without_code = sorted({token for token in tokens if token not in model.codes})
+    assert not without_code, f"the tokens {without_code} have no code"
+    codes = np.array([model.codes[token] for token in tokens])
+    cases = [codes[end - window : end].ravel() for end in range(window, len(tokens) + 1)]
+    return model.circuit.values(cases) | {ONE: np.ones(len(cases))}
 
 
-def check_net(net: Network, tol: float = 1e-9):
-    """net against its grid, on cases of inputs: every feature at every depth holds the value, in
-    the trace, of the signal that the grid names there, and 0 where it names none, to within tol"""
-    values = net.trace.values(cases(len(net.trace.inputs)))
-    check_streams(net, net.run(np.atleast_2d(net.stream(values, 0))), values, tol)
+def expected_stream(row: list[str | None], values: dict[str, np.ndarray]) -> np.ndarray:
+    """The stream [position, feature] that holds `row`, a row of a layout, for the `values` of
+    `signal_values`: 2 * value - 1 for a signal and for ONE, and 0 for an empty feature."""
+    empty = np.zeros_like(values[ONE])
+    columns = [empty if name is None else 2 * values[name] - 1 for name in row]
+    return np.column_stack(columns)
 
 
-def check_streams(net: Network | Transformer, streams, values: dict, tol: float):
-    """streams, one at each depth, against what net's grid says for the values {name: value on
-    each case} of its signals, to within tol"""
-    for d, x in enumerate(streams):
-        off = np.abs(x - net.stream(values, d))
-        i, f = np.unravel_index(off.argmax(), off.shape)
-        assert off[i, f] <= tol, (
-            f"depth {d}, feature {f} ({net.grid[d][f] or 'no signal'}) is {x[i, f]:g} on "
-            f"case {i}, {off[i, f]:g} from what the grid says"
-        )
-
-
-def check_transformer(m: Transformer, tokens, tol: float = 0.05):
-    """m against its grid on tokens, each with a code, and as many as the program reads at least:
-    at every position that is the last of as many tokens as the program reads, every feature at
-    every depth holds what the grid says for their bits, to within tol of the largest size that
-    a feature holds, which is that of a ONE, 1.5 bits (see transformer.uneven), and the largest
-    logit is that of the token whose code the trace gives, if it is the code of one, and if m
-    has logits of its own (see beside.front). Position 0 is the <bos>, so tokens[p - 1] is at
-    position p"""
-    t, bits, window = m.trace, np.array([m.codes[token] for token in tokens], float), len(m.q)
-    streams, logits = m.run(tokens)
-    read = np.array([bits[p - window : p].ravel() for p in range(window, len(tokens) + 1)])
-    values = t.values(read)
-    check_streams(m, [x[window:] for x in streams], values, tol * m.sizes.max())
-    if not m.out.any():
-        return
-    token_of = {tuple(code): token for token, code in m.codes.items()}
-    outs = np.array([values[y] for y in t.outputs]).T.round(9)  # a bit, or 1/2
-    for p, (out, row) in enumerate(zip(outs, logits[window:]), window):
-        want = token_of.get(tuple(out), row.argmax())
-        assert row.argmax() == want, f"position {p}: the next token is {row.argmax()}, not {want}"
+def check_transformer(model: Transformer, tokens, tolerance: float = 0.0):
+    """Check `model` on `tokens`, at the positions of `signal_values`. After the attention and
+    after each block, every feature must hold what the layout says, to within `tolerance`. And
+    the largest logit must be that of the token whose code the circuit computes, if a token
+    has that code."""
+    first_checked = len(model.heads) - 1
+    values = signal_values(model, tokens)
+    for depth, (row, stream) in enumerate(zip(model.layout, model.run(tokens))):
+        error = np.abs(stream[first_checked:] - expected_stream(row, values))
+        case, feature = np.unravel_index(error.argmax(), error.shape)
+        held = row[feature] or "empty"
+        where = f"depth {depth}, position {first_checked + case}, feature {feature} ({held})"
+        assert error[case, feature] <= tolerance, f"{where} is off by {error[case, feature]:g}"
+    # Tokens with the same code have equal logits, and the lowest is chosen: token_of keeps it.
+    token_of = {tuple(model.codes[token]): token for token in sorted(model.codes, reverse=True)}
+    outputs = np.array([values[name] for name in model.circuit.outputs]).T
+    outputs = np.rint(2 * outputs) / 2  # each output is 0, 1 or 1/2, up to rounding
+    found = model.logits(tokens)[first_checked:].argmax(axis=1).tolist()
+    for position, (code, got) in enumerate(zip(outputs.tolist(), found), first_checked):
+        want = token_of.get(tuple(code), got)  # if no token has the code, any token passes
+        assert got == want, f"position {position}: the next token is {got}, not {want}"
