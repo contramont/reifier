@@ -10,10 +10,14 @@ The circuit has 21 layers: three for each round (two for the first, whose column
 need no tables) and one that makes the code. beside.py puts them before Gemma's 18 layers
 and adds one after them: 40 layers on a stream of 896 features, of which the circuit uses 256.
 
-Run: uv run --with huggingface_hub examples/alongside.py [out]
-This prints how often the sponge answers on some tokens, and saves a Gemma checkpoint of 1.5 GB.
-`out` is the directory to save in (by default "out"). The first run downloads Gemma's weights,
-0.5 GB.
+With "next-to", the sponge has NEXT_TO_ROUNDS rounds instead, so that its 9 blocks fit beside
+Gemma's own MLPs, in Gemma's last 9 layers (see next_to.py): 20 layers on a stream of 2168
+features. Its token is then right at most positions where it answers, not at every one.
+
+Run: uv run --with huggingface_hub examples/alongside.py [out [next-to]]
+This prints how often the sponge answers on some tokens, and saves a Gemma checkpoint of 1.5 GB,
+or 2.8 GB next to Gemma. `out` is the directory to save in (by default "out"). The first run
+downloads Gemma's weights, 0.5 GB.
 """
 
 import sys
@@ -31,6 +35,7 @@ from reifier.transformer import transformer
 ID_BITS = 18  # the bits of the id of a token: Gemma has 2**18 tokens
 CODE_BITS = 72  # the bits of a code: those of the id, then the check bits
 ROUNDS = 7  # of Keccak-p on a state of 200 bits
+NEXT_TO_ROUNDS = 3  # next to Gemma, the circuit can have at most as many blocks as Gemma layers
 
 
 def check_sets() -> list[list[int]]:
@@ -59,7 +64,7 @@ def code(ids) -> np.ndarray:
 CODES = dict(enumerate(code(np.arange(2**ID_BITS))))
 
 
-def next_token(bits):
+def next_token(bits, rounds=ROUNDS):
     """The code of the next token, from the codes of the last two tokens, older first. Each
     bit of the code is one table of the top bit of the sponge's id and of the bits that
     it is the xor of. Where the top bit is 1, every table gives 1/2: no output."""
@@ -69,7 +74,7 @@ def next_token(bits):
 
     message = bits[:ID_BITS] + bits[CODE_BITS : CODE_BITS + ID_BITS]  # the two ids
     # The rate is 4/5 of the width, as in keccak.py.
-    sponge_id = keccak.sponge(message, ROUNDS, width=200, rate=160)[:ID_BITS]
+    sponge_id = keccak.sponge(message, rounds, width=200, rate=160)[:ID_BITS]
     low_bits = sponge_id[:-1]
     top = sponge_id[-1]
     own_bits = [[i] for i in range(ID_BITS)]  # a bit of the id is the xor of itself
@@ -81,16 +86,23 @@ def next_token(bits):
     return outputs
 
 
-def circuit():
-    return fold(trace(next_token, 2 * CODE_BITS))  # folding removes 16 negations
+def circuit(rounds=ROUNDS):
+    def sponge(bits):  # next_token, with `rounds` rounds
+        return next_token(bits, rounds)
+
+    return fold(trace(sponge, 2 * CODE_BITS))  # folding removes 16 negations
 
 
 if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv) > 1 else "out"
-    model = transformer(circuit(), CODES)
+    next_to = sys.argv[2:] == ["next-to"]
+    model = transformer(circuit(NEXT_TO_ROUNDS if next_to else ROUNDS), CODES)
     tokens = list(range(1000, 1032))  # any tokens of Gemma will do
-    # 4096 hidden units a layer, twice Gemma's: a unit gets 2 to 4 copies (see lower.copy_counts).
-    beside.save(model, out, hidden_units=4096, check_on=tokens)
+    if next_to:
+        beside.save(model, out, check_on=tokens, next_to=True)
+    else:
+        # 4096 hidden units a layer, twice Gemma's: a unit gets 2 to 4 copies (lower.copy_counts).
+        beside.save(model, out, hidden_units=4096, check_on=tokens)
     answers = signal_values(model, tokens)[model.circuit.outputs[0]] != 1 / 2  # 1/2: no output
     count = f"{answers.sum()} of the {len(answers)} positions that were checked"
     print(f"The sponge answers at {count}: there the next token is the sponge's.")

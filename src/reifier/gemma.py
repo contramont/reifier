@@ -302,17 +302,22 @@ def run_attention(weights, config: dict, layer: int, x: np.ndarray) -> np.ndarra
     return rms_norm(written, offset + weights[layer_name + "post_attention_layernorm.weight"])
 
 
-def run_block(weights, config: dict, layer: int, x: np.ndarray) -> np.ndarray:
-    """What the MLP block of layer `layer` adds to the stream x [position, feature]."""
+def mlp_output(weights, config: dict, layer: int, x: np.ndarray) -> np.ndarray:
+    """What the MLP of layer `layer` outputs for the stream x [position, feature], before the
+    post-norm."""
     layer_name = f"layers.{layer}."
-    offset = norm_offset(config)
-    z = rms_norm(x, offset + weights[layer_name + "pre_feedforward_layernorm.weight"])
+    z = rms_norm(x, norm_offset(config) + weights[layer_name + "pre_feedforward_layernorm.weight"])
     gate = z @ weights[layer_name + "mlp.gate_proj.weight"].T
     # Gemma computes GELU with this tanh, which is within 0.001 of it.
     gelu = gate / 2 * (1 + np.tanh(math.sqrt(2 / math.pi) * (gate + 0.044715 * gate**3)))
     hidden = gelu * (z @ weights[layer_name + "mlp.up_proj.weight"].T)
-    written = hidden @ weights[layer_name + "mlp.down_proj.weight"].T
-    return rms_norm(written, offset + weights[layer_name + "post_feedforward_layernorm.weight"])
+    return hidden @ weights[layer_name + "mlp.down_proj.weight"].T
+
+
+def run_block(weights, config: dict, layer: int, x: np.ndarray) -> np.ndarray:
+    """What the MLP block of layer `layer` adds to the stream x [position, feature]."""
+    post_norm = weights[f"layers.{layer}.post_feedforward_layernorm.weight"]
+    return rms_norm(mlp_output(weights, config, layer, x), norm_offset(config) + post_norm)
 
 
 def run(weights, config: dict, tokens) -> list[np.ndarray]:
@@ -368,8 +373,16 @@ def check_weights(weights, config: dict, lowered: Lowered, tokens, tolerance=CHE
         where = f"depth {depth}, position {first_checked + case}, feature {feature} ({held})"
         worst = error[case, feature]
         assert worst <= tolerance, f"{where} is off by {worst:.3g} of the size of a bit"
+    check_next_tokens(weights, config, model, tokens, streams[-1])
+
+
+def check_next_tokens(weights, config: dict, model: Transformer, tokens, last_stream: np.ndarray):
+    """Check that where the ideal transformer `model` gives one token the largest logit on
+    `tokens`, and that logit is above 0, so does the Gemma of `weights`, whose last stream
+    `run` gave as `last_stream`."""
+    first_checked = len(model.heads) - 1
     ideal = model.logits(tokens)[first_checked:]
-    found = logits(weights, config, streams[-1])[first_checked:].argmax(axis=1)
+    found = logits(weights, config, last_stream[first_checked:]).argmax(axis=1)
     for position, (scores, got) in enumerate(zip(ideal, found.tolist()), first_checked):
         want = int(scores.argmax())
         # The token whose code the circuit gives has a logit above 0. At 0 or below, the circuit

@@ -3,7 +3,9 @@
 The model of this file answers as Gemma does, except where the circuit has an answer: there
 its next token is the circuit's. A circuit has no answer where its outputs are 1/2 (see
 lib.table): it is then silent. The model is a Gemma 3 that is wider and deeper than Gemma 3
-270M, because the circuit needs features and layers of its own. The functions follow this order:
+270M, because the circuit needs features and layers of its own. With `next_to`, `save` puts
+the circuit's blocks in Gemma's own layers instead (see next_to.py). The functions follow this
+order:
 
 - Features. The stream holds the circuit's features, then empty ones if any are needed (see
   `stream_features`), then Gemma's own. A layer has Gemma's hidden units, or more if a block
@@ -101,39 +103,38 @@ def stream_features(lowered: Lowered, config: dict) -> int:
     return math.ceil(features / heads) * heads
 
 
-def renumbered(name: str, shift: int) -> str:
-    """The name of a tensor with the number of its layer `shift` larger, if it is of a layer."""
-    return LAYER_NUMBER.sub(lambda number: str(int(number[0]) + shift), name)
+def renumbered(name: str, layer_of: list[int]) -> str:
+    """The name of a tensor of Gemma, with layer i renumbered layer_of[i], if it is of a layer."""
+    return LAYER_NUMBER.sub(lambda number: str(layer_of[int(number[0])]), name)
 
 
-def wide_shapes(gemma_weights: dict, config: dict, wide_config: dict, first_layer: int) -> dict:
+def wide_shapes(gemma_weights: dict, config: dict, wide_config: dict, layer_of: list[int]) -> dict:
     """The shape of every tensor of the model of the config `wide_config`, by its name in a
     checkpoint: first the new layers, each with the tensors of a layer of Gemma, then Gemma's
-    tensors, whose layers start at `first_layer`. An axis as long as Gemma has features, or
-    hidden units, becomes as long as `wide_config` has them. In GEMMA no other kind of axis
-    has either length."""
+    tensors, whose layer i is layer_of[i]. An axis as long as Gemma has features, or hidden
+    units, becomes as long as `wide_config` has them. In GEMMA no other kind of axis has either
+    length."""
     longer = {
         config["hidden_size"]: wide_config["hidden_size"],
         config["intermediate_size"]: wide_config["intermediate_size"],
     }
-    gemma_layers = range(first_layer, first_layer + len(config["layer_types"]))
     all_layers = range(len(wide_config["layer_types"]))
-    new_layers = [layer for layer in all_layers if layer not in gemma_layers]
+    new_layers = [layer for layer in all_layers if layer not in layer_of]
     of_layer_0 = [name for name in gemma_weights if LAYER_NUMBER.findall(name) == ["0"]]
     shapes = {}
     for layer in new_layers:
         for name in of_layer_0:
-            shapes[renumbered(name, layer)] = gemma_weights[name].shape
+            shapes[renumbered(name, [layer])] = gemma_weights[name].shape
     for name, tensor in gemma_weights.items():
-        shapes[renumbered(name, first_layer)] = tensor.shape
+        shapes[renumbered(name, layer_of)] = tensor.shape
     return {name: [longer.get(axis, axis) for axis in shape] for name, shape in shapes.items()}
 
 
-def widen(gemma_weights, config, features, hidden_units, new_before=0, new_after=0) -> WideGemma:
+def widen(gemma_weights, config, features, hidden_units, new_layers=()) -> WideGemma:
     """A Gemma in a wider, deeper model. `gemma_weights` is Gemma's tensors by their names in
     its checkpoint (see checkpoint.read_weights), and `config` its config. The model has
-    `features` features, `hidden_units` hidden units a layer, `new_before` new layers before
-    Gemma's own and `new_after` after them. Gemma's weights take the last entries of each
+    `features` features, `hidden_units` hidden units a layer, and new layers, numbered
+    `new_layers` in it, among Gemma's own. Gemma's weights take the last entries of each
     axis. All else is zeros, for the caller to write, and gemma.finish is still to be called.
 
     Gemma's features are `scale` times what they were, with `scale` the square root of all
@@ -143,18 +144,21 @@ def widen(gemma_weights, config, features, hidden_units, new_before=0, new_after
     writes to the stream is multiplied by `scale`: the post-norm after it sees the mean
     square that it saw, and adds `scale` times what it added."""
     new = ["sliding_attention"]  # the RoPE of the circuit's heads is that of a sliding layer
-    layer_types = new * new_before + config["layer_types"] + new * new_after
+    layer_types = list(config["layer_types"])
+    for layer in sorted(new_layers):
+        layer_types.insert(layer, new[0])
+    layer_of = [layer for layer in range(len(layer_types)) if layer not in new_layers]
     wide_config = config | {
         "hidden_size": features,
         "intermediate_size": hidden_units,
         "layer_types": layer_types,
         "num_hidden_layers": len(layer_types),
     }
-    shapes = wide_shapes(gemma_weights, config, wide_config, new_before)
+    shapes = wide_shapes(gemma_weights, config, wide_config, layer_of)
     weights = gemma.Tensors(shapes)
     scale = math.sqrt(features / config["hidden_size"])
     for name, tensor in gemma_weights.items():
-        name = renumbered(name.removeprefix(weights.prefix), new_before)
+        name = renumbered(name.removeprefix(weights.prefix), layer_of)
         if name.endswith("norm.weight"):
             tensor = gemma.norm_offset(config) + tensor  # what the norm multiplies by
             if READS_STREAM.search(name):
@@ -166,12 +170,13 @@ def widen(gemma_weights, config, features, hidden_units, new_before=0, new_after
     return WideGemma(wide_config, shapes, weights, {"features": [], "hidden": []})
 
 
-def shared_stream_scale(circuit_square: float, features: int) -> float:
+def shared_stream_scale(circuit_square: float, features: int, gemma_rms=GEMMA_RMS_BEFORE) -> float:
     """The factor on a pre-norm weight of the circuit, in a stream of `features` features
     that it shares with Gemma. The lowering took the squares of the stream to add up to
-    `circuit_square`, those of the circuit's features. Before Gemma's layers, Gemma's features
-    add features * GEMMA_RMS_BEFORE**2 (see `widen`), so an RMSNorm divides by a larger RMS."""
-    gemma_square = features * GEMMA_RMS_BEFORE**2
+    `circuit_square`, those of the circuit's features. Gemma's features add features *
+    gemma_rms**2 (see `widen`), so an RMSNorm divides by a larger RMS. Before Gemma's layers,
+    gemma_rms is GEMMA_RMS_BEFORE at every token."""
+    gemma_square = features * gemma_rms**2
     return math.sqrt((circuit_square + gemma_square) / circuit_square)
 
 
@@ -371,11 +376,10 @@ def wide_gemma(lowered: Lowered, gemma_weights: dict, config: dict) -> WideGemma
     gemma_layers = len(config["layer_types"])
     features = stream_features(lowered, config)
     hidden_units = max(config["intermediate_size"], *[len(block.units) for block in lowered.blocks])
-    wide = widen(
-        gemma_weights, config, features, hidden_units, new_before=circuit_layers, new_after=1
-    )
-    write_circuit(wide.weights, lowered, wide.config)
     last_layer = circuit_layers + gemma_layers
+    new_layers = [*range(circuit_layers), last_layer]
+    wide = widen(gemma_weights, config, features, hidden_units, new_layers)
+    write_circuit(wide.weights, lowered, wide.config)
     # The norms of the last layer are made for the whole stream, so their factor is 1.
     head = last_head(carried, features)
     gemma.write_attention(wide.weights, last_layer, head, wide.config, norm_scale=1.0)
@@ -390,7 +394,7 @@ def wide_gemma(lowered: Lowered, gemma_weights: dict, config: dict) -> WideGemma
     return wide
 
 
-def save(model: Transformer, out_dir, hidden_units: int | None = None, check_on=None):
+def save(model: Transformer, out_dir, hidden_units=None, check_on=None, next_to=False):
     """Save the ideal transformer `model` beside GEMMA, as one checkpoint in the directory
     `out_dir`. The first call downloads Gemma's weights. The circuit must obey five rules:
 
@@ -404,14 +408,28 @@ def save(model: Transformer, out_dir, hidden_units: int | None = None, check_on=
     A block of the circuit gets copies of its hidden units, up to `hidden_units` in all: by
     default the number that a layer of Gemma has.
 
+    With `next_to`, each block of the circuit is in one of Gemma's last layers instead, beside
+    Gemma's own MLP (see next_to.py), and `hidden_units` is not used. The circuit must then also
+    have at most as many blocks as Gemma has layers, and no MLP may read more than
+    next_to.MAX_STEP_INPUTS signals. Its top token is right at most tokens, not at all of them.
+
     `check_on` is a list of tokens to check the weights on first (see gemma.check_weights).
     The next token is checked only where the circuit answers, so `check_on` should hold such
     tokens. If only the next token is wrong, the codes probably differ in too few bits."""
     config = checkpoint.metadata(GEMMA).config
-    if hidden_units is None:
-        hidden_units = config["intermediate_size"]
-    lowered = lower_beside(model, hidden_units)
-    wide = wide_gemma(lowered, checkpoint.read_weights(GEMMA), config)
-    if check_on is not None:
-        gemma.check_weights(wide.weights, wide.config, lowered, check_on)
+    gemma_weights = checkpoint.read_weights(GEMMA)
+    if next_to:
+        from . import next_to as next_to_gemma  # next_to.py builds on this file
+
+        sample = next_to_gemma.words(gemma.vocabulary(GEMMA), next_to_gemma.__doc__)
+        wide = next_to_gemma.wide_gemma(model, gemma_weights, config, sample)
+        if check_on is not None:
+            next_to_gemma.check(wide, model, check_on)
+    else:
+        if hidden_units is None:
+            hidden_units = config["intermediate_size"]
+        lowered = lower_beside(model, hidden_units)
+        wide = wide_gemma(lowered, gemma_weights, config)
+        if check_on is not None:
+            gemma.check_weights(wide.weights, wide.config, lowered, check_on)
     wide.write(out_dir)

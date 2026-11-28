@@ -75,10 +75,19 @@ Steps 8 and 9 lower it: they turn it into layers of a real model that compute th
 | 10 | `checkpoint.py` | the files of a checkpoint, as Hugging Face `transformers` reads them |
 | 11 | `gemma.py` | the lowered transformer as Gemma's tensors; `save` writes them as a checkpoint |
 | 12 | `beside.py` | a circuit and Gemma 3 270M's own weights in one wider, deeper model |
+| 13 | `next_to.py` | the option `next_to`: the circuit's blocks in Gemma's own layers |
 
 `examples/adder.py` adds decimal numbers: after "123+246=" come "3", "6", "9".
 `examples/keccak.py` chooses each token by a hash of the last three. `examples/alongside.py` puts
 a larger hash and Gemma 3 270M in one model, which answers as Gemma where the hash gives no output.
+
+`beside.save(model, out)` puts the circuit's layers in front of Gemma's. With `next_to=True`, it
+puts each block of the circuit in one of Gemma's last layers instead, beside Gemma's own MLP: the
+model is then two layers deeper than Gemma, whatever the depth of the circuit. As Gemma's norms
+divide by an RMS that the circuit cannot know, the top token is right at most tokens rather than at
+all: on English text, in bf16, `examples/alongside.py out next-to` gives the hash's token at 99% of
+the positions where the hash answers, and Gemma's own where the hash is silent and Gemma's leads
+by a logit.
 
 `uv run --with torch --with transformers --with huggingface_hub python -m pytest` also runs the
 tests on a real Gemma. They need a GPU.

@@ -1,5 +1,6 @@
-"""Tests of beside.py. Most of them run a small Gemma 3 with random weights in numpy, alone and
-with a circuit beside it. The last two run the real Gemma 3 270M on a GPU (see conftest.torch)."""
+"""Tests of beside.py and next_to.py. Most of them run a small Gemma 3 with random weights in
+numpy, alone and with a circuit beside it. The last three run the real Gemma 3 270M on a GPU (see
+conftest.torch)."""
 
 import math
 from itertools import pairwise
@@ -9,7 +10,7 @@ import numpy as np
 import pytest
 from conftest import checksum, small_metadata
 
-from reifier import beside, checkpoint, gemma, lib
+from reifier import beside, checkpoint, gemma, lib, next_to
 from reifier.check import expected_stream, signal_values
 from reifier.circuit import trace
 from reifier.lower import lower
@@ -247,6 +248,86 @@ def test_save_checks_the_weights_on_the_tokens_of_check_on_before_it_writes(tmp_
     assert not (tmp_path / "model.safetensors").exists()
 
 
+# The circuit next to the small Gemma: the copy, Gemma's layers 0 to 2, the lift, and Gemma's layers
+# 3 to 5, each with a block of the circuit. Gemma's stream is measured on TOKENS.
+NEXT_TO = next_to.wide_gemma(MODEL, SMALL_GEMMA, CONFIG, TOKENS)
+NEXT_TO_ROWS = next_to.Rows(MODEL, next_to.steps_of(MODEL.circuit))
+NEXT_TO_LOGITS = logits(NEXT_TO.weights, NEXT_TO.config)
+
+
+def test_the_tensors_next_to_the_small_gemma_have_not_changed():
+    # Another number means that a weight changed: run the tests of the real Gemma, then put it here.
+    assert checksum(NEXT_TO.weights) == 2057729295
+
+
+def test_next_to_gemma_the_blocks_are_in_gemmas_last_layers_and_two_layers_are_the_circuits():
+    hidden = NEXT_TO.names["hidden"]
+    assert [bool(units) for units in hidden] == [False] * 5 + [True] * 3
+    for layer in range(len(hidden)):  # of the wide model: Gemma's are 1 to 3 and 5 to 7
+        gemma_weights = NEXT_TO.weights[f"layers.{layer}.mlp.gate_proj.weight"][-HIDDEN_UNITS:]
+        assert gemma_weights.any() == (layer not in (0, 4))
+
+
+def test_next_to_gemma_where_the_circuit_answers_the_next_token_is_its_answer():
+    assert np.array_equal(NEXT_TO_LOGITS.argmax(axis=1)[~SILENT], ANSWERS[~SILENT])
+
+
+def test_next_to_gemma_where_the_circuit_is_silent_the_logits_are_nearly_those_of_gemma_alone():
+    alone = gemma_alone(SMALL_GEMMA, CONFIG, NEXT_TO.config["hidden_size"] - FEATURES)
+    own = logits(alone.weights, alone.config)
+    assert np.array_equal(NEXT_TO_LOGITS.argmax(axis=1)[SILENT], own.argmax(axis=1)[SILENT])
+    # The circuit adds to the RMS that Gemma's norms divide by: a little, so a logit moves a little.
+    assert np.abs(NEXT_TO_LOGITS - own)[SILENT].max() < 0.1
+
+
+@pytest.mark.parametrize("factor", [0.5, 3])
+def test_next_to_gemma_a_block_writes_the_same_whatever_the_factor_on_the_row_that_it_reads(factor):
+    layer = 6  # of the wide model: block 2, which reads row 1 and writes row 2
+    read = [*NEXT_TO_ROWS.feature_of[1].values(), *NEXT_TO_ROWS.ones[1]]
+    written = [*NEXT_TO_ROWS.feature_of[2].values(), *NEXT_TO_ROWS.ones[2]]
+    before = gemma.run(NEXT_TO.weights, NEXT_TO.config, TOKENS)[layer - 1]
+    before = before + gemma.run_attention(NEXT_TO.weights, NEXT_TO.config, layer, before)
+    other = before.copy()
+    other[:, read] *= factor
+    block = gemma.run_block(NEXT_TO.weights, NEXT_TO.config, layer, before)[:, written]
+    with_factor = gemma.run_block(NEXT_TO.weights, NEXT_TO.config, layer, other)[:, written]
+    # Not quite the same: the norms divide by an RMS that has the circuit's features in it too.
+    assert np.allclose(with_factor, block, atol=0.01 * np.abs(block).max())
+
+
+def test_next_to_gemma_refuses_a_circuit_that_it_cannot_put_next_to_gemma():
+    def deep(bits):  # seven negations in a row: seven blocks, and the small Gemma has six layers
+        for _ in range(7):
+            bits = [lib.not_(bit) for bit in bits]
+        return bits
+
+    with pytest.raises(AssertionError, match="deep needs 7 layers, and Gemma has 6"):
+        next_to.wide_gemma(transformer(trace(deep, 4), CODES), SMALL_GEMMA, CONFIG, TOKENS)
+
+    def wide(bits):  # an AND of 13 bits, of the codes of four tokens
+        return [lib.and_(bits[:13]), *[lib.or_(bits[13 + i : 15 + i]) for i in range(3)]]
+
+    message = "and reads 13 signals: next to Gemma, an MLP may read at most 12 signals"
+    with pytest.raises(AssertionError, match=message):
+        next_to.wide_gemma(transformer(trace(wide, 16), CODES), SMALL_GEMMA, CONFIG, TOKENS)
+
+
+def test_save_next_to_gemma_writes_the_tensors_of_wide_gemma_in_bf16(tmp_path, monkeypatch):
+    read_weights = checkpoint.read_weights  # the real one: it reads the file that `fetch` gives
+    words = "the a of and to in is it that as its be by on or this not are with each"
+    vocabulary = {"▁" + word: token for token, word in enumerate(words.split()) if token < 16}
+    monkeypatch.setattr(checkpoint, "metadata", lambda repo: checkpoint.Metadata({}, CONFIG))
+    monkeypatch.setattr(checkpoint, "read_weights", lambda repo: SMALL_GEMMA)
+    monkeypatch.setattr(checkpoint, "fetch", lambda repo, name: tmp_path / name)
+    monkeypatch.setattr(gemma, "vocabulary", lambda repo: vocabulary)
+    beside.save(MODEL, tmp_path, check_on=TOKENS, next_to=True)
+    sample = next_to.words(vocabulary, next_to.__doc__)  # what `save` measures Gemma's stream on
+    wide = next_to.wide_gemma(MODEL, SMALL_GEMMA, CONFIG, sample)
+    saved = read_weights(beside.GEMMA)
+    for name, tensor in wide.weights.items():
+        assert np.array_equal(saved["model." + name], checkpoint.round_to_bf16(tensor))
+
+
 @pytest.fixture
 def tokens(torch) -> list[int]:
     """A <bos> and an English text, the docstring of beside.py, as tokens of the real Gemma."""
@@ -295,3 +376,20 @@ def test_the_real_gemma_gives_the_token_of_the_sponge_beside_it_or_its_own(torch
     clear = silent & (top_two[:, 1] - top_two[:, 0] > 1)
     assert clear.sum() > 100
     assert np.array_equal(found[clear], own.argmax(axis=1)[clear])
+
+
+def test_the_real_gemma_gives_the_sponges_token_next_to_it_or_its_own(torch, tokens, tmp_path):
+    sponge = transformer(alongside.circuit(alongside.NEXT_TO_ROUNDS), alongside.CODES)
+    beside.save(sponge, tmp_path, check_on=range(1000, 1032), next_to=True)  # as alongside.py
+    values = signal_values(sponge, tokens)  # from position 1 on: the sponge reads two tokens
+    id_bits = np.array([values[name] for name in sponge.circuit.outputs[: alongside.ID_BITS]])
+    silent = id_bits[0] == 1 / 2
+    answers = id_bits.T.astype(int) @ (1 << np.arange(alongside.ID_BITS))
+    found = real_logits(torch, tokens, tmp_path)[1:].argmax(axis=1)
+    # Next to Gemma, the circuit misses a few tokens where Gemma's stream is far from its median.
+    assert np.mean(found[~silent] == answers[~silent]) > 0.98
+    own = real_logits(torch, tokens, beside.GEMMA, REVISION)[1:]
+    top_two = np.partition(own, -2, axis=1)[:, -2:]
+    clear = silent & (top_two[:, 1] - top_two[:, 0] > 1)  # as beside Gemma, above
+    assert clear.sum() > 100
+    assert np.mean(found[clear] == own.argmax(axis=1)[clear]) > 0.98
